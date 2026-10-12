@@ -50,9 +50,9 @@ python3 bench.py e2e --config run.local.yml --smoke
 
 Hardware is required. The runner queries the selected UUID, verifies its GPU name
 against the profile, and records UUID, driver and memory before running workers.
-It also detects the host CPU model, sockets, total physical cores, logical CPUs and
-process CPU affinity using `lscpu`. CPU identity is observed per machine rather than
-hardcoded into a reusable GPU SKU profile.
+It also records the host CPU model, sockets, physical cores and logical CPUs from
+`lscpu`, together with the process CPU affinity. CPU identity is observed per machine
+rather than hardcoded into a reusable GPU SKU profile.
 Docker workers inherit the controller's CPU affinity through `--cpuset-cpus`;
 local workers inherit it directly.
 Both local CUDA and Docker use that UUID, independent of inherited device-index
@@ -191,6 +191,9 @@ validate the harness and comparison workflow, not reproduction of those latencie
 The image recipe pins the public base and installs the beam branch's dependencies,
 including matching PyTorch/SGLang-kernel/FlashInfer versions. Both candidates use
 that same runtime, with the GR kernel's CUTLASS DSL and Quack dependencies added.
+See the [completed validation run](validation/readme_comparison.md) for all eight
+cases, raw latency samples and provenance. It also records a stable top-1 mismatch
+at context 5000 / batch 4; the engines do not have exact output parity.
 
 ## GPU kernel profiling
 
