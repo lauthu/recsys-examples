@@ -16,7 +16,7 @@ from harness.runner import e2e, select_cases
 
 class InputIdentityTests(unittest.TestCase):
     def test_jsonl_revisions_stay_separate_across_partial_runs(self):
-        cfg = load(ROOT / "run.template.yml")
+        cfg = load(ROOT / "config/runs/default.yml")
         name = cfg["scenarios"][0]
         spec = cfg["scenario_configs"][name]
         cfg["scenario_configs"] = {name: spec}

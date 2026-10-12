@@ -18,9 +18,25 @@ flowchart LR
 | [runner.py](runner.py) | Select cases, create runs, freeze inputs and launch candidates serially. |
 | [runtime.py](runtime.py) | Select GPU/CPU resources, build local/Docker commands and stop timed-out workers. |
 | [worker.py](worker.py) | Load one adapter, warm up, time completed outputs and validate every repeat. |
+| [workload.py](workload.py), [validation.py](validation.py) | Build scenario inputs and check beam outputs against the shared contract. |
 | [artifacts.py](artifacts.py) | Read/write JSON and hash model, source, suite and input identities. |
-| [../reporting](../reporting) | Derive measurements and render saved results. No GPU work. |
-| [../profiling](../profiling) | Capture and summarize measured NVTX ranges with Nsight. |
+| [reporting](reporting) | Derive measurements and render saved results. No GPU work. |
+| [profiling](profiling) | Capture and summarize measured NVTX ranges with Nsight. |
+
+## Configuration
+
+| Directory | Defines |
+| --- | --- |
+| [../config/runs](../config/runs) | Selected scenarios, candidates, baseline, hardware and execution policy. |
+| [../config/scenarios](../config/scenarios) | Model, inputs, case grid, generation rules and measurement protocol. |
+| [../config/solutions](../config/solutions) | Adapter, source, runtime, environment and engine options. |
+| [../config/hardware](../config/hardware) | Required GPU SKU and optional compute ceiling. |
+
+`plan` and `e2e` default to `config/runs/default.yml`, with SGLang as the baseline.
+`--config config/runs/readme.yml` selects the pinned SGLang beam-search branch.
+Model, input, source and mount paths are relative to the suite root; `output_dir`
+is relative to the run YAML. Both supplied runs write to the suite's `results/`.
+Resolved `${VARIABLE:-default}` values are saved with the run configuration.
 
 ## Commands through the harness
 
@@ -66,7 +82,8 @@ and its container. Archived examples pack these files into one tarball.
 
 ## Add a candidate
 
-Keep workload semantics in `scenarios/` and framework APIs in `entrypoints/`.
+Keep workload definitions in `config/scenarios/`, shared input/output handling in
+`harness/workload.py` and `harness/validation.py`, and framework APIs in `entrypoints/`.
 Implement `check_support(case, solution)` and an `Adapter(request)` with:
 
 | Method | Contract |
@@ -77,5 +94,5 @@ Implement `check_support(case, solution)` and an `Adapter(request)` with:
 | `provenance()` | Record engine options and source/dependency identities. |
 | `profile_start()`, `profile_stop()` | Optional profiler control for GPU subprocesses. |
 
-Add `solutions/<name>.yml`, select it in a run template, then run the CPU tests
+Add `config/solutions/<name>.yml`, select it in a run configuration, then run the CPU tests
 and a GPU smoke case. Unsupported semantics must fail explicitly.

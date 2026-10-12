@@ -85,7 +85,7 @@ def source_info(path):
 def suite_hash(root):
     root = Path(root)
     paths = list(root.glob("*.py"))
-    for directory in ["harness", "scenarios", "reporting", "entrypoints", "profiling"]:
+    for directory in ["harness", "entrypoints"]:
         paths.extend((root / directory).rglob("*.py"))
     return digest({str(p.relative_to(root)): file_hash(p) for p in sorted(paths)})
 

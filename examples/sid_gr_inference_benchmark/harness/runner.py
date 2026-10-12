@@ -19,8 +19,8 @@ from harness.artifacts import (
     write,
 )
 from harness.config import ROOT, cases
-from reporting.report import render
-from scenarios.workload import build
+from harness.reporting.report import render
+from harness.workload import build
 
 
 def select_cases(cfg, pattern=None, smoke=False):

@@ -1,6 +1,7 @@
 """Readable reports from recorded results; no execution or GPU dependencies."""
 
 import copy
+import os
 import shlex
 import statistics
 from pathlib import Path
@@ -8,8 +9,8 @@ from string import Template
 
 from harness.artifacts import digest, read, write
 from harness.config import ROOT
-from reporting.sol import estimate
-from scenarios.validation import compare
+from harness.reporting.sol import estimate
+from harness.validation import compare
 
 
 def number(value):
@@ -102,22 +103,37 @@ def parity_table(data):
     rows = []
     for record in data:
         agreement = record.get("agreement") or {}
-        top1 = agreement.get("top1_exact")
         score = agreement.get("max_score_difference")
         rows.append(
             [
                 record["case"].split("/", 1)[-1],
                 record["solution"],
                 record["parity"],
-                "Match" if top1 is True else "**Mismatch**" if top1 is False else "—",
-                number(100 * agreement["min_overlap"]) if agreement else "—",
+                *[
+                    number(100 * agreement[key]) if key in agreement else "—"
+                    for key in (
+                        "top1_match_rate",
+                        "mean_overlap",
+                        "min_overlap",
+                        "mean_ordered_match",
+                    )
+                ],
                 f"{score:.3g}" if score is not None else "—",
             ]
         )
     return table(
-        ["Case", "Candidate", "Parity", "Top-1", "Overlap %", "Max score Δ"],
+        [
+            "Case",
+            "Candidate",
+            "Parity",
+            "Top-1 %",
+            "Mean overlap %",
+            "Min overlap %",
+            "Rank match %",
+            "Max score Δ",
+        ],
         rows,
-        right_align=(4, 5),
+        right_align=range(3, 8),
     )
 
 
@@ -184,6 +200,11 @@ def render(directory):
                 "top1_exact": all(c["top1_exact"] for c in checks),
                 "ordered_exact": all(c["ordered_exact"] for c in checks),
                 "min_overlap": min(c["beam_overlap"] for c in checks),
+                "top1_match_rate": statistics.mean(c["top1_exact"] for c in checks),
+                "mean_overlap": statistics.mean(c["beam_overlap"] for c in checks),
+                "mean_ordered_match": statistics.mean(
+                    c["ordered_match_fraction"] for c in checks
+                ),
                 "max_score_difference": max(errors, default=None),
             }
         bound = estimate(
@@ -225,11 +246,21 @@ def render(directory):
     write(directory / "summary.json", data)
     succeeded = sum(r["status"] == "success" for r in data)
     message = table(
-        ["Status", "Jobs finished", "Successful", "Other outcomes", "Mode"],
+        [
+            "Run status",
+            "Cases",
+            "Candidates",
+            "Completed evaluations",
+            "Passed",
+            "Failed / unsupported",
+            "Mode",
+        ],
         [
             [
                 manifest["status"],
-                f"{len(data)}/{sum(manifest['scenario_jobs'].values())}",
+                len(cases),
+                len(cfg["solutions"]),
+                f"{len(data)} of {sum(manifest['scenario_jobs'].values())}",
                 succeeded,
                 len(data) - succeeded,
                 manifest["mode"],
@@ -261,7 +292,7 @@ def render(directory):
     if unavailable:
         sol_table += "\n\n" + table(
             ["Estimate", "Reason"],
-            [["Unavailable", reason] for reason in sorted(unavailable)],
+            [["Compute floor unavailable", reason] for reason in sorted(unavailable)],
         )
     if "dense_bf16_tflops" in cfg["hardware_config"]:
         sol_table += "\n\n" + table(
@@ -332,10 +363,13 @@ def render(directory):
         [f"[{path.parent.name}]({path.relative_to(directory).as_posix()})"]
         for path in sorted((directory / "diagnostics").glob("*/diagnosis.md"))
     ]
-    rendered = Template((ROOT / "reporting/templates/e2e.md").read_text()).substitute(
+    rendered = Template(
+        (ROOT / "harness/reporting/templates/e2e.md").read_text()
+    ).substitute(
         run_id=manifest["run_id"],
         summary=message,
-        hardware=hardware_table(manifest["hardware"]),
+        hardware=hardware_table(manifest["hardware"], cfg["hardware_config"])
+        + f"\n\nHardware profile: [{cfg['hardware']}]({os.path.relpath(ROOT / 'config/hardware' / (cfg['hardware'] + '.yml'), directory)}).",
         baseline=cfg["baseline"],
         attention=(
             "> **Smoke run:** small-sample validation only; excluded from scenario rankings.\n\n"
@@ -378,6 +412,15 @@ def render(directory):
             ["Solution", "Source commit/tree", "Dirty", "Key packages"],
             versions.values(),
         ),
+        environment=table(
+            ["Configuration variable", "Value used (including defaults)"],
+            [
+                [f"`{key}`", f"`{value}`" if value else "(unset)"]
+                for key, value in sorted(cfg.get("environment", {}).items())
+            ],
+        )
+        if cfg.get("environment")
+        else "Configuration environment was not recorded for this run.",
         artifacts=(
             "[Run archive](raw_artifacts.tar.gz)"
             if archive.is_file()
@@ -389,17 +432,22 @@ def render(directory):
         directory=shlex.quote(str(directory)),
         diagnostics=table(["Saved GPU diagnosis"], diagnostic_links)
         if diagnostic_links
-        else "",
+        else "No GPU capture saved yet. Run `bench.py diagnose` for a successful case.",
     )
     (directory / "report.md").write_text(rendered)
     leaderboards(directory.parent)
     return data
 
 
-def hardware_table(hardware):
+def hardware_table(hardware, profile=None):
     cpu = hardware.get("cpu")
     rows = [
-        ["GPU", hardware["name"]],
+        [
+            "GPU",
+            f"[{hardware['name']}]({profile['source']})"
+            if profile
+            else hardware["name"],
+        ],
         [
             "GPU memory / driver",
             f"{hardware.get('memory_mib', 'unrecorded')} MiB / {hardware.get('driver', 'unrecorded')}",
@@ -514,6 +562,6 @@ def leaderboards(root):
         boards.setdefault(scenario, []).append(section)
     for scenario, sections in boards.items():
         text = Template(
-            (ROOT / "reporting/templates/leaderboard.md").read_text()
+            (ROOT / "harness/reporting/templates/leaderboard.md").read_text()
         ).substitute(scenario=scenario, sections="\n\n".join(sections))
         (target / f"{scenario}.md").write_text(text)

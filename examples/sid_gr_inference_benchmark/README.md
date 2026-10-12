@@ -9,8 +9,8 @@ Run from this directory. Use `python3 bench.py COMMAND --help` for options.
 
 | Command | Inputs | Work and output |
 | --- | --- | --- |
-| `plan` | `--config run.local.yml` | List cases, candidates and measurement counts. No GPU work. |
-| `e2e` | `--config run.local.yml` | Run candidates serially. Save inputs, results and reports in a new run directory. |
+| `plan` | `--config config/runs/default.yml` | List cases, candidates and measurement counts. No GPU work. |
+| `e2e` | `--config config/runs/default.yml` | Run candidates serially. Save inputs, results and reports in a new run directory. |
 | `report` | `--run results/RUN_ID` | Rebuild the run report, saved diagnosis reports and scenario leaderboards. No GPU work. |
 | `diagnose` | `--run results/RUN_ID --case CASE_ID` | Profile successful candidates for one saved case. Save kernel tables and Nsight traces. |
 
@@ -25,17 +25,22 @@ runtimes first; the suite does not download models or install frameworks.
 
 ```bash
 python3 -m pip install -r requirements.txt
-cp run.template.yml run.local.yml
 export QWEN3_0_6B_MODEL=/absolute/path/to/Qwen3-0.6B
 export GR_DECODE_ATTEN_ROOT=/absolute/path/to/gr_decode_atten
 export SID_GR_PYTHON=/absolute/path/to/sid-gr-env/bin/python
 export SGLANG_PYTHON=/absolute/path/to/sglang-env/bin/python
 nvidia-smi -L
 export BENCHMARK_GPU=GPU-...  # Use the full UUID from nvidia-smi.
-# Select your GPU's hardware profile in run.local.yml.
-python3 bench.py plan --config run.local.yml --smoke
-python3 bench.py e2e --config run.local.yml --smoke
+# The default hardware profile is RTX PRO 6000 Blackwell Server Edition.
+python3 bench.py plan --config config/runs/default.yml --smoke
+python3 bench.py e2e --config config/runs/default.yml --smoke
 ```
+
+Use the checked-in config directly, or copy `config/runs/default.yml` to
+`config/runs/local.yml` to change scenarios, candidates, hardware or execution
+policy. This optional, Git-ignored copy is your local run configuration;
+pass its path with `--config`. Select a matching `config/hardware/` profile
+before running on a different GPU.
 
 ### Runtime settings
 
@@ -50,9 +55,21 @@ python3 bench.py e2e --config run.local.yml --smoke
 | `source.expected_commit` | Require a clean checkout at this commit. |
 
 `${NAME:-default}` reads the controller's environment when loading YAML.
-For example, exported `GR_DECODE_ATTEN_ROOT` fills the SID-GR candidate's `env`
-and `runtime.mounts`. Local workers receive it in their process environment;
-Docker workers receive `--env GR_DECODE_ATTEN_ROOT=...` and the directory mount.
+These are all environment overrides in the supplied configurations; paths
+resolve from this directory. Defaults apply when the variable is unset.
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `BENCHMARK_GPU` | Empty | Required full GPU UUID for execution. |
+| `QWEN3_0_6B_MODEL` | `../sid-gr-inference/models/Qwen3-0.6B` | Local 0.6B checkpoint. |
+| `QWEN3_1_7B_MODEL` | `../sid-gr-inference/models/Qwen3-1.7B` | Local 1.7B checkpoint. |
+| `SID_GR_SOURCE` | `../sid-gr-inference` | SID-GR checkout. |
+| `SGLANG_SOURCE` | Empty | Upstream SGLang checkout; empty uses the installed package. |
+| `SGLANG_BEAM_SOURCE` | `../sglang_beam_search` | Pinned README baseline checkout. |
+| `SID_GR_RUNTIME`, `SGLANG_RUNTIME` | `local` | Select `local` or `docker`. |
+| `SID_GR_PYTHON`, `SGLANG_PYTHON` | `python3` | Python executable inside the chosen runtime. |
+| `SID_GR_IMAGE`, `SGLANG_IMAGE` | Empty | Image name or ID; required for Docker. |
+| `GR_DECODE_ATTEN_ROOT` | Empty | External GR kernel checkout. Forwarded to workers and mounted in Docker. |
 
 For Docker, set:
 
@@ -71,23 +88,24 @@ for the external GR kernel's CUTLASS DSL and Quack dependencies.
 
 | File | Defines |
 | --- | --- |
-| `scenarios/*.yml` | Model, inputs, context/batch/beam grid, generation rules and repeat counts. |
-| `solutions/*.yml` | Adapter, source checkout, runtime and engine settings. |
-| `hardware/*.yml` | Required GPU SKU; optional sourced dense BF16 compute ceiling. |
-| `run.template.yml` | Selected scenarios, candidates, reference, GPU UUID and execution policy. |
+| `config/scenarios/*.yml` | Model, inputs, context/batch/beam grid, generation rules and repeat counts. |
+| `config/solutions/*.yml` | Adapter, source checkout, runtime and engine settings. |
+| `config/hardware/*.yml` | Required GPU SKU; optional sourced dense BF16 compute ceiling. |
+| `config/runs/default.yml` | Selected scenarios, candidates, SGLang reference, GPU UUID and execution policy. |
+| `config/runs/readme.yml` | Qwen3-1.7B comparison against the pinned SGLang beam-search branch. |
 
 A scenario defines reusable cases. Each `e2e` invocation creates a new run.
 Paths in scenario/candidate files resolve from this directory.
-`output_dir` resolves beside the run template.
+`output_dir` resolves beside the run config (`../../results` in supplied configs).
 
 | Measurement | Definition |
 | --- | --- |
-| Latency | Median completed-batch wall time, with IQR. |
+| Latency | Median completed-batch wall time; IQR is the 75th minus 25th percentile, in ms. |
+| Δ latency % | `100 × (candidate median / SGLang median − 1)`; negative means faster. |
 | Throughput | Batch size / median latency. Offline requests/s. |
 | Timing scope | CPU token IDs through completed CPU beam IDs/scores, including synchronization. |
 | Excluded work | Setup, warmup, validation and serialization. |
 | Structural checks | Request IDs, beam counts, lengths, unique sequences, finite scores and score order. |
-| Parity | Exact ordered beams/scores; top-1 agreement, minimum overlap and shared-beam score difference. |
 | Compute floor | Partial matrix-compute estimate. Not GPU utilization or a promised speedup. |
 
 Adapters require BF16 weights/KV, fixed-length output, all beams, no quantization,
@@ -96,6 +114,28 @@ Synthetic inputs use a fixed seed and exclude BOS/EOS/PAD. For real inputs, set
 `inputs.type: jsonl` and `inputs.path`; rows contain `request_id` and `input_ids`.
 JSONL uses the first `batch_size` rows. Each input must match the case's context
 length; no token padding or truncation.
+
+### Output parity
+
+For each case, compare every request in every measured repeat with that request
+in the reference candidate's first measured repeat from the same run. Inputs
+must have identical checksums. Reference rows therefore also check repeat
+consistency. Failed jobs or a missing reference leave parity unavailable.
+
+| Metric | Meaning |
+| --- | --- |
+| Exact | All beam sequences, their order and cumulative scores match exactly; no tolerance. |
+| Top-1 % | Percentage of request/repeat pairs with identical rank-1 token IDs. |
+| Mean / min overlap % | Average / minimum fraction of beam sequences shared with the reference, ignoring rank. |
+| Rank match % | Average fraction of beams with identical token IDs at the same rank. |
+| Max score Δ | Largest absolute cumulative-score difference among shared sequences. |
+
+These cover the existing [offline accuracy benchmark](../sid-gr-inference/scripts/run_offline_accuracy_benchmark.sh)'s
+top-1, mean overlap and ordered-match metrics; structural checks enforce its
+output-length and token-budget requirements. SGLang's verified mean-logprob
+scores are multiplied by fixed output length to match SID-GR cumulative scores.
+`success` means execution and structural validation passed; it does not imply
+cross-engine parity. Mismatches remain visible beside performance results.
 
 ## Published samples
 
@@ -137,14 +177,14 @@ The upstream `sglang` candidate requires native `SamplingParams.beam_width`.
 ```bash
 export QWEN3_1_7B_MODEL=/absolute/path/to/Qwen3-1.7B
 export SGLANG_BEAM_SOURCE=/absolute/path/to/sglang_beam_search
-# Check out source.expected_commit from solutions/sglang_beam_search.yml.
+# Check out source.expected_commit from config/solutions/sglang_beam_search.yml.
 docker build -f entrypoints/sglang/Dockerfile.beam_search \
   -t sid-gr-benchmark:readme "$SGLANG_BEAM_SOURCE"
 export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
 export SID_GR_IMAGE=sid-gr-benchmark:readme SGLANG_IMAGE=sid-gr-benchmark:readme
 export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
 # Set GR_DECODE_ATTEN_ROOT, BENCHMARK_GPU and the hardware profile as above.
-python3 bench.py e2e --config run.readme.yml --case 'qwen3_1_7B/*_w256'
+python3 bench.py e2e --config config/runs/readme.yml --case 'qwen3_1_7B/*_w256'
 ```
 
 For profiling, install `nsys` in each runtime **before** the source `e2e` run.

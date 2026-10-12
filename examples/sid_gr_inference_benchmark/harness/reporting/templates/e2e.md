@@ -2,9 +2,11 @@
 
 Run `$run_id`
 
-[Latency](#latency-comparison) · [Parity](#output-parity) · [Details](#run-details) · [Artifacts](#artifacts)
+[Latency](#latency-comparison) · [Parity](#output-parity) · [GPU diagnosis](#gpu-diagnosis) · [Environment](#run-details) · [Artifacts](#artifacts)
 
 $summary
+
+One evaluation = one candidate on one case, including its warmups and timed repeats.
 
 $attention
 
@@ -28,7 +30,7 @@ $measurements
 | Metric | Meaning |
 | --- | --- |
 | Δ latency % | Relative to reference; negative = faster |
-| IQR ms | Sample variation; not online tail latency |
+| IQR ms | 75th − 25th percentile latency; spread of the middle 50% of repeats |
 | Requests/s | Batch size / median batch latency |
 | Bold median | Lowest observed value; no significance or parity claim |
 
@@ -41,18 +43,34 @@ $measurements
 
 $validation
 
+Compare every request and repeat with the first same-run reference output on identical token inputs.
+
 | Check | Meaning |
 | --- | --- |
 | Success | Structural checks passed |
 | Exact | Ordered beams and scores match the first same-run reference output |
-| Top-1 | Leading sequence matches; scores may differ |
-| Overlap % | Minimum shared-beam percentage across measured outputs |
+| Top-1 % | Requests with matching leading sequence / all compared requests |
+| Mean overlap % | Mean shared-beam fraction, ignoring rank |
+| Min overlap % | Lowest shared-beam fraction across requests and repeats |
+| Rank match % | Mean fraction of beam sequences matching at the same rank |
 | Max score Δ | Largest score difference among shared sequences |
+| Token lengths / output budget | Every beam must contain exactly the requested token count; checked before success |
 | Reference row | Repeat consistency |
 
 </details>
 
+## GPU diagnosis
+
+$diagnostics
+
 ## Run details
+
+<details>
+<summary>Configuration environment</summary>
+
+$environment
+
+</details>
 
 <details>
 <summary>Protocol and source versions</summary>
@@ -64,9 +82,11 @@ $versions
 </details>
 
 <details>
-<summary>Speed-of-light estimate</summary>
+<summary>Optional compute-floor estimate</summary>
 
 $sol
+
+This estimate needs a sourced dense BF16 ceiling. GPU diagnosis above uses measured Nsight traces independently.
 
 </details>
 
@@ -100,8 +120,6 @@ ${extract}python3 bench.py report --run $directory
 | Derived measurements | `summary.json` |
 | Exact inputs | `workloads/` |
 | Requests, commands, logs, samples and beams | `jobs/<candidate>/<scenario>/<case>/` |
-
-$diagnostics
 
 **Scenario leaderboards**
 

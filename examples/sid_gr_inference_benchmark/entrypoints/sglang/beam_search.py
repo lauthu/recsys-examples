@@ -1,7 +1,7 @@
 """The pinned feature/beam_search baseline named in the SID-GR README."""
 
 from entrypoints.sglang import adapter
-from scenarios.validation import Unsupported
+from harness.validation import Unsupported
 
 
 def check_support(case, solution):

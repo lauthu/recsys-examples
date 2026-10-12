@@ -6,11 +6,11 @@ from pathlib import Path
 
 from harness.artifacts import model_info, read, source_info, suite_hash, write
 from harness.config import ROOT
+from harness.profiling.timeline import summarize
+from harness.reporting.diagnosis import render
+from harness.reporting.report import render as render_run
 from harness.runner import launch
 from harness.runtime import cpu_info, gpu_info
-from profiling.timeline import summarize
-from reporting.diagnosis import render
-from reporting.report import render as render_run
 
 
 def run(directory, case_id):

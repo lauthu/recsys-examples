@@ -5,3 +5,4 @@ __pycache__/
 results/
 *.local.yml
 *.local.sh
+config/runs/local.yml

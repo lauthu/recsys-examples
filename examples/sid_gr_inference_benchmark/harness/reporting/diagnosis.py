@@ -5,7 +5,7 @@ from string import Template
 
 from harness.artifacts import read
 from harness.config import ROOT
-from reporting.report import details, number, table
+from harness.reporting.report import details, number, table
 
 
 def render(directory):
@@ -59,7 +59,9 @@ def render(directory):
                 ),
             )
         )
-    text = Template((ROOT / "reporting/templates/diagnosis.md").read_text()).substitute(
+    text = Template(
+        (ROOT / "harness/reporting/templates/diagnosis.md").read_text()
+    ).substitute(
         case_id=case["id"],
         original=f"[{run_dir.name}](../../report.md)",
         workload=table(

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from scenarios.validation import Unsupported, supported
+from harness.validation import Unsupported, supported
 
 
 def check_support(case, solution):
@@ -129,6 +129,7 @@ class Adapter:
         from gr_inference.gr_kernels.attention.existing_kernel_backend import (
             ExistingGRDecodeAttentionBackend,
         )
+
         from harness.artifacts import source_info
 
         return {

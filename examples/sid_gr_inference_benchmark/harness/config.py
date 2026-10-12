@@ -30,22 +30,26 @@ def mapping(loader, node):
 UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
 
 
-def expand(value):
+def expand(value, environment=None):
     if isinstance(value, str):
 
         def replace(match):
             name, default = match.group(1), match.group(2)
             if name in os.environ:
-                return os.environ[name]
-            if default is not None:
-                return default
-            raise ValueError(f"Set environment variable {name}")
+                selected = os.environ[name]
+            elif default is not None:
+                selected = default
+            else:
+                raise ValueError(f"Set environment variable {name}")
+            if environment is not None:
+                environment[name] = selected
+            return selected
 
         return re.sub(r"\$\{([A-Za-z_][A-Za-z_0-9]*)(?::-([^}]*))?\}", replace, value)
     if isinstance(value, list):
-        return [expand(x) for x in value]
+        return [expand(x, environment) for x in value]
     if isinstance(value, dict):
-        return {k: expand(v) for k, v in value.items()}
+        return {k: expand(v, environment) for k, v in value.items()}
     return value
 
 
@@ -65,10 +69,10 @@ def integer(value, name, minimum=1):
         raise ValueError(f"{name} must be an integer >= {minimum}")
 
 
-def read_yaml(path):
+def read_yaml(path, environment=None):
     with Path(path).open() as stream:
         try:
-            result = expand(yaml.load(stream, Loader=UniqueLoader))
+            result = expand(yaml.load(stream, Loader=UniqueLoader), environment)
         except yaml.YAMLError as exc:
             raise ValueError(f"{path}: {exc}") from exc
     if not isinstance(result, dict):
@@ -80,9 +84,9 @@ def resolve(path, base=ROOT):
     return str((Path(base) / Path(path).expanduser()).resolve())
 
 
-def scenario(name):
-    path = ROOT / "scenarios" / f"{name}.yml"
-    cfg = read_yaml(path)
+def scenario(name, environment=None):
+    path = ROOT / "config/scenarios" / f"{name}.yml"
+    cfg = read_yaml(path, environment)
     fields(
         cfg,
         ["name", "model", "inputs", "generation", "prefix_cache", "measurement"],
@@ -146,8 +150,8 @@ def scenario(name):
     return cfg
 
 
-def solution(name):
-    cfg = read_yaml(ROOT / "solutions" / f"{name}.yml")
+def solution(name, environment=None):
+    cfg = read_yaml(ROOT / "config/solutions" / f"{name}.yml", environment)
     fields(cfg, ["name", "adapter", "source", "runtime", "engine"], optional=["env"])
     if cfg["name"] != name:
         raise ValueError(f"Solution name must match filename: {name}")
@@ -169,7 +173,8 @@ def solution(name):
 
 
 def load(path):
-    cfg = read_yaml(path)
+    environment = {}
+    cfg = read_yaml(path, environment)
     fields(
         cfg,
         [
@@ -201,8 +206,8 @@ def load(path):
         raise ValueError("continue_on_error must be a boolean")
     name = cfg["hardware"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-        raise ValueError("hardware must name a profile in hardware/")
-    hardware = read_yaml(ROOT / "hardware" / f"{name}.yml")
+        raise ValueError("hardware must name a profile in config/hardware/")
+    hardware = read_yaml(ROOT / "config/hardware" / f"{name}.yml", environment)
     fields(hardware, ["gpu_name", "source"], optional=["dense_bf16_tflops"])
     if not all(
         isinstance(hardware[k], str) and hardware[k].strip()
@@ -219,8 +224,13 @@ def load(path):
             raise ValueError("dense_bf16_tflops must be finite and positive")
     cfg["hardware_config"] = hardware
     cfg["output_dir"] = resolve(cfg["output_dir"], Path(path).resolve().parent)
-    cfg["solution_configs"] = {name: solution(name) for name in cfg["solutions"]}
-    cfg["scenario_configs"] = {name: scenario(name) for name in cfg["scenarios"]}
+    cfg["solution_configs"] = {
+        name: solution(name, environment) for name in cfg["solutions"]
+    }
+    cfg["scenario_configs"] = {
+        name: scenario(name, environment) for name in cfg["scenarios"]
+    }
+    cfg["environment"] = environment
     return cfg
 
 

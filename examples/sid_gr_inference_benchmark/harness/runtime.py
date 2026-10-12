@@ -55,7 +55,7 @@ def command(request_path, output_path, request, *, profile=False):
     worker = [
         runtime["python"],
         "-m",
-        "profiling.capture" if profile else "harness.worker",
+        "harness.profiling.capture" if profile else "harness.worker",
         "--request",
         str(request_path),
         "--output",

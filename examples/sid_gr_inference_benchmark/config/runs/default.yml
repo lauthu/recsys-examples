@@ -1,8 +1,8 @@
-# Reusable run template. Copy to run.local.yml and select candidates/hardware.
+# Default comparison: SID-GR against the installed SGLang API.
 # Every invocation creates a new results/<run-id>/; it never replaces a prior run.
 scenarios: [qwen3_0_6B, qwen3_1_7B]
 solutions: [sid_gr_inference, sglang]
-baseline: sid_gr_inference
+baseline: sglang
 hardware: rtx_pro_6000_blackwell_server
 
 execution:
@@ -12,4 +12,4 @@ execution:
   timeout_seconds: 1800
   continue_on_error: true
 
-output_dir: results
+output_dir: ../../results

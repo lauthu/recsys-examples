@@ -17,16 +17,16 @@ from entrypoints.sglang.adapter import normalize
 from harness import runtime, worker
 from harness.artifacts import digest, read, source_info, suite_hash, write
 from harness.config import ROOT, cases, load, read_yaml
+from harness.profiling.timeline import summarize
+from harness.reporting.sol import estimate
 from harness.runner import e2e, launch, select_cases
-from profiling.timeline import summarize
-from reporting.sol import estimate
-from scenarios.validation import Unsupported, check, compare, supported
-from scenarios.workload import build
+from harness.validation import Unsupported, check, compare, supported
+from harness.workload import build
 
 
 class SuiteTests(unittest.TestCase):
     def setUp(self):
-        self.case = next(cases(load(ROOT / "run.template.yml")))
+        self.case = next(cases(load(ROOT / "config/runs/default.yml")))
         self.case.update(batch_size=1, context_length=4, beam_width=2)
         self.model = {"vocab_size": 32, "bos_token_id": 0, "eos_token_id": [1, 2]}
         self.workload = build(self.case, self.model)
@@ -41,7 +41,7 @@ class SuiteTests(unittest.TestCase):
         ]
 
     def test_grid_and_selection(self):
-        cfg = load(ROOT / "run.template.yml")
+        cfg = load(ROOT / "config/runs/default.yml")
         self.assertEqual(len(list(cases(cfg))), 48)
         self.assertEqual(
             select_cases(cfg, "*/ctx1000_b1_w256", True)[0]["beam_width"], 256
@@ -55,7 +55,9 @@ class SuiteTests(unittest.TestCase):
             path.write_text("repeats: 3\nrepeats: 5\n")
             with self.assertRaisesRegex(ValueError, "Duplicate"):
                 read_yaml(path)
-            path.write_text((ROOT / "run.template.yml").read_text() + "\nrepeets: 3\n")
+            path.write_text(
+                (ROOT / "config/runs/default.yml").read_text() + "\nrepeets: 3\n"
+            )
             with self.assertRaisesRegex(ValueError, "unknown keys"):
                 load(path)
 
@@ -428,7 +430,7 @@ class SuiteTests(unittest.TestCase):
             Adapter({"case": self.case, "solution": {"source": {}}})
 
     def test_scenario_owns_measurement_and_smoke_is_an_explicit_override(self):
-        cfg = load(ROOT / "run.template.yml")
+        cfg = load(ROOT / "config/runs/default.yml")
         self.assertNotIn("measurement", cfg)
         self.assertEqual(self.case["measurement"], {"warmup_runs": 5, "repeats": 30})
         smoke = select_cases(cfg, smoke=True)[0]
@@ -436,7 +438,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(next(cases(cfg))["measurement"]["repeats"], 30)
 
     def test_hardware_is_required_and_sku_mismatch_prevents_launch(self):
-        template = (ROOT / "run.template.yml").read_text()
+        template = (ROOT / "config/runs/default.yml").read_text()
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "run.yml"
             path.write_text(
@@ -451,7 +453,7 @@ class SuiteTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "missing keys.*hardware"):
                 load(path)
-            cfg = load(ROOT / "run.template.yml")
+            cfg = load(ROOT / "config/runs/default.yml")
             cfg["output_dir"] = d
             with patch(
                 "harness.runtime.gpu_info", return_value={"name": "Other GPU"}
@@ -463,9 +465,9 @@ class SuiteTests(unittest.TestCase):
                 launch_worker.assert_not_called()
 
     def test_scenario_leaderboards_track_latest_results_without_rolling_back(self):
-        from reporting.report import render
+        from harness.reporting.report import render
 
-        cfg = load(ROOT / "run.template.yml")
+        cfg = load(ROOT / "config/runs/default.yml")
         baseline = cfg["baseline"]
         changed = copy.deepcopy(self.outputs)
         changed[0]["beams"][0]["token_ids"] = [8, 9, 10]
@@ -521,7 +523,7 @@ class SuiteTests(unittest.TestCase):
             board = (
                 root.parent / "leaderboards" / f"{self.case['name']}.md"
             ).read_text()
-            self.assertTrue("sid_gr_inference" in board)
+            self.assertTrue(baseline in board)
             self.assertTrue("running" in board)
             write(root / "manifest.json", manifest)
             records = render(root)
@@ -530,6 +532,9 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(candidate["requests_per_second"], 100)
             self.assertEqual(candidate["parity"], "different")
             self.assertEqual(candidate["agreement"]["min_overlap"], 0.5)
+            self.assertEqual(candidate["agreement"]["top1_match_rate"], 0)
+            self.assertEqual(candidate["agreement"]["mean_overlap"], 0.5)
+            self.assertEqual(candidate["agreement"]["mean_ordered_match"], 0.5)
             self.assertEqual(records[0]["parity"], "exact")
             report = (root / "report.md").read_text()
             # The overview must expose output mismatches and unsuccessful jobs
@@ -540,6 +545,9 @@ class SuiteTests(unittest.TestCase):
             self.assertTrue("Top-1 mismatch case" in overview)
             self.assertTrue("broken" in overview)
             self.assertTrue("failed" in overview)
+            self.assertTrue("| 4 of 4 |" in overview)
+            self.assertTrue(cfg["hardware_config"]["source"] in overview)
+            self.assertTrue("`BENCHMARK_GPU`" in report)
             board = (
                 root.parent / "leaderboards" / f"{self.case['name']}.md"
             ).read_text()
@@ -568,7 +576,7 @@ class SuiteTests(unittest.TestCase):
             board = board_path.read_text()
             self.assertTrue("run-two" in board)
             self.assertTrue("| candidate | failed |" in board)
-            self.assertTrue("| sid_gr_inference | success |" in board)
+            self.assertTrue(f"| {baseline} | success |" in board)
             render(root)
             self.assertEqual(board, board_path.read_text())
 
@@ -665,7 +673,7 @@ class SuiteTests(unittest.TestCase):
                 "ignore_eos": True,
             },
         )
-        cfg = load(ROOT / "run.readme.yml")
+        cfg = load(ROOT / "config/runs/readme.yml")
         self.assertEqual(len(select_cases(cfg, "qwen3_1_7B/*_w256")), 8)
         self.assertEqual(
             cfg["solution_configs"]["sglang_beam_search"]["source"]["expected_commit"],
@@ -677,7 +685,7 @@ class SuiteTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "run"
-            cfg = load(ROOT / "run.template.yml")
+            cfg = load(ROOT / "config/runs/default.yml")
             cfg["baseline"] = "measured"
             model = {"path": d, "sha256": "checkpoint", "config": self.model}
             hardware = {"name": cfg["hardware_config"]["gpu_name"], "cpu": {}}
@@ -755,7 +763,7 @@ class SuiteTests(unittest.TestCase):
             original = (capture / "diagnosis.json").read_bytes()
             with patch.object(
                 sys, "argv", ["bench.py", "report", "--run", str(root)]
-            ), patch("profiling.diagnose.run") as recapture:
+            ), patch("harness.profiling.diagnose.run") as recapture:
                 self.assertEqual(main(), 0)
                 recapture.assert_not_called()
             self.assertTrue(
@@ -773,21 +781,26 @@ class SuiteTests(unittest.TestCase):
 
             # A new capture also updates its source report without a separate
             # report command. Mock only collection and identity checks.
-            from profiling.diagnose import run
+            from harness.profiling.diagnose import run
 
             def capture_timeline(request, target, *, profile):
                 self.assertTrue(profile)
                 write(target / "request.json", request)
                 return {"status": "unsupported", "reason": "nsys unavailable"}
 
-            with patch("profiling.diagnose.suite_hash", return_value="suite"), patch(
-                "profiling.diagnose.gpu_info", return_value={"name": hardware["name"]}
-            ), patch("profiling.diagnose.cpu_info", return_value={}), patch(
-                "profiling.diagnose.source_info", return_value={}
+            with patch(
+                "harness.profiling.diagnose.suite_hash", return_value="suite"
             ), patch(
-                "profiling.diagnose.model_info", return_value=model
+                "harness.profiling.diagnose.gpu_info",
+                return_value={"name": hardware["name"]},
             ), patch(
-                "profiling.diagnose.launch", side_effect=capture_timeline
+                "harness.profiling.diagnose.cpu_info", return_value={}
+            ), patch(
+                "harness.profiling.diagnose.source_info", return_value={}
+            ), patch(
+                "harness.profiling.diagnose.model_info", return_value=model
+            ), patch(
+                "harness.profiling.diagnose.launch", side_effect=capture_timeline
             ):
                 new_capture, _ = run(root, self.case["id"])
             self.assertTrue(
@@ -796,7 +809,7 @@ class SuiteTests(unittest.TestCase):
             )
 
     def test_timeline_capture_failures_are_not_successful_results(self):
-        from profiling.capture import main
+        from harness.profiling.capture import main
 
         with tempfile.TemporaryDirectory() as d:
             output = Path(d) / "result.json"
@@ -810,9 +823,9 @@ class SuiteTests(unittest.TestCase):
             # Worker inference can succeed even if exporting the trace fails.
             write(output, {"status": "success", "samples_ms": [1.0]})
             with patch.object(sys, "argv", argv), patch(
-                "profiling.capture.shutil.which", return_value="nsys"
+                "harness.profiling.capture.shutil.which", return_value="nsys"
             ), patch(
-                "profiling.capture.subprocess.run",
+                "harness.profiling.capture.subprocess.run",
                 side_effect=[
                     None,
                     subprocess.CalledProcessError(1, ["nsys", "export"]),
@@ -821,13 +834,13 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual(main(), 1)
             self.assertEqual(read(output)["status"], "failed")
             with patch.object(sys, "argv", argv), patch(
-                "profiling.capture.shutil.which", return_value=None
+                "harness.profiling.capture.shutil.which", return_value=None
             ):
                 self.assertEqual(main(), 0)
             self.assertEqual(read(output)["status"], "unsupported")
 
     def test_e2e_records_unsupported_and_failed_workers_without_gpu(self):
-        cfg = load(ROOT / "run.template.yml")
+        cfg = load(ROOT / "config/runs/default.yml")
         cfg["solutions"] = ["sid_gr_inference", "broken"]
         cfg["solution_configs"]["broken"] = copy.deepcopy(
             cfg["solution_configs"]["sid_gr_inference"]

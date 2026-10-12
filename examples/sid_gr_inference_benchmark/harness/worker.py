@@ -12,7 +12,7 @@ import time
 import traceback
 
 from harness.artifacts import digest, read, write
-from scenarios.validation import Unsupported, check
+from harness.validation import Unsupported, check
 
 
 def environment(torch):

@@ -80,6 +80,7 @@ def compare(reference, candidate):
             {
                 "top1_exact": ai[0] == bi[0],
                 "ordered_exact": ai == bi,
+                "ordered_match_fraction": sum(x == y for x, y in zip(ai, bi)) / len(ai),
                 "beam_overlap": len(common) / len(ai),
                 "max_score_difference": max(
                     (abs(sa[t] - sb[t]) for t in common), default=None

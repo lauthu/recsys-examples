@@ -17,7 +17,7 @@ def main():
         "e2e": "Run candidates and save measurements on the selected GPU",
     }.items():
         p = sub.add_parser(name, help=help_text)
-        p.add_argument("--config", type=Path, default=ROOT / "run.template.yml")
+        p.add_argument("--config", type=Path, default=ROOT / "config/runs/default.yml")
         p.add_argument("--case", help="Exact case ID or shell-style pattern")
         p.add_argument("--solutions", nargs="+")
         p.add_argument(
@@ -58,15 +58,15 @@ def main():
                 _, manifest = e2e(cfg, selected)
                 return int(any(j["status"] != "success" for j in manifest["jobs"]))
         elif args.command == "diagnose":
-            from profiling.diagnose import run
+            from harness.profiling.diagnose import run
 
             _, records = run(args.run, args.case)
             return int(
                 any(r["summary"]["status"] in {"failed", "timed_out"} for r in records)
             )
         elif args.command == "report":
-            from reporting.diagnosis import render as render_diagnosis
-            from reporting.report import render
+            from harness.reporting.diagnosis import render as render_diagnosis
+            from harness.reporting.report import render
 
             for path in sorted((args.run / "diagnostics").glob("*/diagnosis.json")):
                 render_diagnosis(path.parent)

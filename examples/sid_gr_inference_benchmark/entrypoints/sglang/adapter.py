@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-from scenarios.validation import Unsupported, supported
+from harness.validation import Unsupported, supported
 
 
 def check_support(case, solution):
