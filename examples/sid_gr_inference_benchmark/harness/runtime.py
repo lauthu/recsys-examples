@@ -33,6 +33,8 @@ def command(request_path, output_path, request, *, profile=False):
     cache = Path(request["run_dir"]) / "cache" / solution["name"]
     cache.mkdir(parents=True, exist_ok=True)
     env = {
+        # Docker's numeric --user may have no passwd entry; getpass needs USER.
+        "USER": os.environ.get("USER", str(os.getuid())),
         "PYTHONUNBUFFERED": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
         "XDG_CACHE_HOME": str(cache),
@@ -45,6 +47,7 @@ def command(request_path, output_path, request, *, profile=False):
         "QUACK_CACHE_DIR": str(cache / "quack"),
         "CUTE_DSL_CACHE_DIR": str(cache / "cute"),
         "TORCHINDUCTOR_CACHE_DIR": str(cache / "inductor"),
+        "TVM_FFI_CACHE_DIR": str(cache / "tvm_ffi"),
         **solution.get("env", {}),
         "CUDA_VISIBLE_DEVICES": execution["gpu"],
     }
@@ -68,6 +71,8 @@ def command(request_path, output_path, request, *, profile=False):
             container,
             "--gpus",
             f"device={execution['gpu']}",
+            "--cpuset-cpus",
+            ",".join(str(cpu) for cpu in sorted(os.sched_getaffinity(0))),
             "--shm-size",
             "4g",
             "--user",
@@ -161,3 +166,20 @@ def gpu_info(gpu):
         }
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         raise ValueError(f"Cannot identify selected GPU {gpu}: {exc}") from exc
+
+
+def cpu_info():
+    """Record host topology and the CPUs available to the benchmark process."""
+    info = json.loads(
+        subprocess.check_output(
+            ["lscpu", "--json"], text=True, env={**os.environ, "LC_ALL": "C"}
+        )
+    )
+    fields = {row["field"].rstrip(":"): row["data"] for row in info["lscpu"]}
+    return {
+        "model": fields["Model name"],
+        "sockets": int(fields["Socket(s)"]),
+        "physical_cores": int(fields["Socket(s)"]) * int(fields["Core(s) per socket"]),
+        "logical_cpus": int(fields["CPU(s)"]),
+        "affinity": sorted(os.sched_getaffinity(0)),
+    }

@@ -8,7 +8,7 @@ from string import Template
 from harness.artifacts import model_info, read, source_info, suite_hash, write
 from harness.config import ROOT
 from harness.runner import launch
-from harness.runtime import gpu_info
+from harness.runtime import cpu_info, gpu_info
 from profiling.timeline import summarize
 from reporting.report import number, table
 
@@ -20,8 +20,12 @@ def run(directory, case_id):
         raise ValueError(
             "Suite code changed since this run; rerun e2e before diagnosis"
         )
-    if gpu_info(manifest["config"]["execution"]["gpu"]) != manifest["hardware"]:
-        raise ValueError("GPU/driver changed since the source benchmark")
+    hardware = gpu_info(manifest["config"]["execution"]["gpu"])
+    hardware["cpu"] = cpu_info()
+    if hardware != manifest["hardware"]:
+        raise ValueError(
+            "GPU, driver or CPU configuration changed since the source benchmark"
+        )
     jobs = [
         j
         for j in manifest["jobs"]

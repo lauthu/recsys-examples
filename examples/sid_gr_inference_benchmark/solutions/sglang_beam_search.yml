@@ -1,0 +1,15 @@
+name: sglang_beam_search
+adapter: entrypoints.sglang.beam_search
+source:
+  path: ${SGLANG_BEAM_SOURCE:-../sglang_beam_search}
+  expected_commit: af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
+runtime:
+  kind: ${SGLANG_RUNTIME:-local}
+  python: ${SGLANG_PYTHON:-python3}
+  image: ${SGLANG_IMAGE:-}
+engine:
+  page_size: 1
+  disable_overlap_schedule: true
+  mem_fraction_static: 0.70
+  log_level: warning
+env: {}

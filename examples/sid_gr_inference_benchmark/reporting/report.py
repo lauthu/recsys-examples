@@ -1,10 +1,11 @@
 """Readable reports from recorded results; no execution or GPU dependencies."""
 
+import copy
 import statistics
 from pathlib import Path
 from string import Template
 
-from harness.artifacts import read, write
+from harness.artifacts import digest, read, write
 from harness.config import ROOT
 from reporting.sol import estimate
 from scenarios.validation import compare
@@ -178,7 +179,7 @@ def render(directory):
     rendered = Template((ROOT / "reporting/templates/e2e.md").read_text()).substitute(
         run_id=manifest["run_id"],
         summary=message,
-        hardware=f"{hardware.get('name', 'unavailable')}; driver {hardware.get('driver', 'unavailable')}; {hardware.get('memory_mib', 'unavailable')} MiB",
+        hardware=hardware_text(hardware),
         baseline=cfg["baseline"],
         measurement="Offline batches on one GPU; protocol is recorded per scenario below.",
         protocols=table(
@@ -194,8 +195,13 @@ def render(directory):
                 }
             ),
         ),
-        leaderboards="\n".join(
-            f"- [{name}](leaderboards/{name}.md)" for name in manifest["scenario_jobs"]
+        leaderboards=(
+            "Smoke runs do not update scenario leaderboards."
+            if manifest["mode"] == "smoke"
+            else "\n".join(
+                f"- [{name}](../leaderboards/{name}.md)"
+                for name in manifest["scenario_jobs"]
+            )
         ),
         results=table(
             [
@@ -235,40 +241,87 @@ def render(directory):
         "The manifest records checkpoint hashes, source changes, image IDs and shared input checksums.",
     )
     (directory / "report.md").write_text(rendered)
-    leaderboards(directory, manifest, data)
+    leaderboards(directory.parent)
     return data
 
 
-def leaderboards(directory, manifest, data):
-    """Refresh each scenario's status within this run, without mixing runs or SKUs."""
-    target = directory / "leaderboards"
-    target.mkdir(exist_ok=True)
-    for scenario, planned in manifest["scenario_jobs"].items():
-        records = [r for r in data if r["scenario"] == scenario]
-        rows = []
-        for r in sorted(
-            records, key=lambda r: (r["case"], r.get("median_ms", float("inf")))
+def hardware_text(hardware):
+    cpu = hardware.get("cpu")
+    text = f"{hardware['name']}; {hardware.get('memory_mib', 'unrecorded')} MiB; driver {hardware.get('driver', 'unrecorded')}"
+    if cpu:
+        text += (
+            f"; {cpu['model']}; {cpu['sockets']} sockets, "
+            f"{cpu['physical_cores']} physical cores, {cpu['logical_cpus']} logical CPUs, "
+            f"{len(cpu['affinity'])} CPUs in process affinity"
+        )
+    else:
+        text += "; CPU unrecorded"
+    return text
+
+
+def leaderboards(root):
+    """Rebuild stable scenario boards from the latest measured result per row."""
+    groups = {}
+    # Chronological run IDs make regeneration of old reports unable to roll back
+    # newer results. Failed/unsupported attempts also supersede older successes.
+    for path in sorted(root.glob("*/manifest.json")):
+        manifest = read(path)
+        summary = path.parent / "summary.json"
+        if (
+            manifest["schema_version"] != 2
+            or manifest["mode"] != "e2e"
+            or not summary.is_file()
         ):
-            agreement = r.get("agreement") or {}
+            continue
+        cases = {r["case"]["id"]: r for r in manifest["cases"]}
+        for record in read(summary):
+            scenario = record["scenario"]
+            spec = copy.deepcopy(manifest["config"]["scenario_configs"][scenario])
+            # Installation paths are not workload semantics; checkpoint bytes are.
+            spec["model"].pop("path", None)
+            spec["inputs"].pop("path", None)
+            revision = digest(
+                {"scenario": spec, "model": cases[record["case"]]["model"]["sha256"]}
+            )
+            hardware = {k: v for k, v in manifest["hardware"].items() if k != "uuid"}
+            key = scenario, revision, digest(hardware)
+            group = groups.setdefault(key, {"hardware": hardware, "rows": {}})
+            group["rows"][(record["case"], record["solution"])] = (
+                record,
+                manifest,
+                path.parent.name,
+            )
+    target = root / "leaderboards"
+    target.mkdir(exist_ok=True)
+    boards = {}
+    for (scenario, revision, _), group in sorted(groups.items()):
+        rows = []
+        for record, manifest, run_dir in sorted(
+            group["rows"].values(),
+            key=lambda item: (
+                item[0]["case"],
+                item[0].get("median_ms", float("inf")),
+                item[0]["solution"],
+            ),
+        ):
+            agreement = record.get("agreement") or {}
             rows.append(
                 [
-                    r["case"],
-                    r["solution"],
-                    r["status"],
-                    number(r.get("median_ms")),
-                    number(r.get("requests_per_second")),
-                    r["parity"],
+                    record["case"],
+                    record["solution"],
+                    record["status"],
+                    number(record.get("median_ms")),
+                    number(record.get("requests_per_second")),
+                    record["parity"],
                     agreement.get("top1_exact", "—"),
                     number(agreement.get("min_overlap")),
                     number(agreement.get("max_score_difference")),
+                    manifest["config"]["baseline"],
+                    f"[{manifest['run_id']}](../{run_dir}/report.md) ({manifest['status']})",
                 ]
             )
-        text = (
-            f"# {scenario} — {manifest['run_id']}\n\n"
-            f"Run status: {manifest['status']}. Mode: {manifest['mode']}. "
-            f"{len(records)}/{planned} jobs finished.\n\n"
-            f"Hardware: {manifest['hardware']['name']} ({manifest['config']['hardware']}). "
-            f"UUID: {manifest['hardware']['uuid']}.\n\n"
+        section = (
+            f"## {hardware_text(group['hardware'])}\n\nScenario/checkpoint revision: `{revision[:12]}`.\n\n"
             + table(
                 [
                     "Case",
@@ -280,13 +333,24 @@ def leaderboards(directory, manifest, data):
                     "Top-1 exact",
                     "Min overlap",
                     "Max score Δ",
+                    "Reference",
+                    "Source run",
                 ],
                 rows,
             )
-            + "\n\nParity is exact only when ordered beams and scores match the baseline exactly. "
-            "Different results remain visible; unavailable means no comparable baseline. "
-            "The baseline row checks repeat consistency, not independent accuracy. "
-            "Requests/s is completed batch size divided by median latency.\n\n"
-            "[Full report](../report.md) · [Frozen run](../manifest.json) · [Raw metrics](../summary.json)\n"
+        )
+        boards.setdefault(scenario, []).append(section)
+    for scenario, sections in boards.items():
+        text = (
+            f"# {scenario} leaderboard\n\n"
+            "Latest non-smoke result for each case and candidate, grouped by scenario/checkpoint "
+            "revision and GPU/CPU/driver configuration. Each completed job refreshes this view; "
+            "unexecuted cases retain their last result. Failed and unsupported attempts replace "
+            "older successes. Source runs preserve raw evidence and execution status.\n\n"
+            "Parity compares with the reference from the same source run; results from different "
+            "runs are never used to recompute parity. The reference row checks repeat consistency. "
+            "Requests/s is batch size divided by median latency.\n\n"
+            + "\n\n".join(sections)
+            + "\n"
         )
         (target / f"{scenario}.md").write_text(text)

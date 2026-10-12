@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from entrypoints.sglang.adapter import normalize
@@ -277,12 +277,20 @@ class SuiteTests(unittest.TestCase):
                 Path(d) / "request.json", Path(d) / "result.json", request
             )
             self.assertEqual(cmd[cmd.index("--gpus") + 1], "device=GPU-assigned")
+            self.assertEqual(
+                cmd[cmd.index("--cpuset-cpus") + 1],
+                ",".join(str(cpu) for cpu in sorted(os.sched_getaffinity(0))),
+            )
             self.assertTrue("CUDA_VISIBLE_DEVICES=GPU-assigned" in cmd)
             request["solution"]["runtime"]["kind"] = "local"
             cmd, env, _ = runtime.command(
                 Path(d) / "request.json", Path(d) / "result.json", request
             )
             self.assertEqual(env["CUDA_VISIBLE_DEVICES"], "GPU-assigned")
+            self.assertTrue(env["USER"])
+            self.assertEqual(
+                env["TVM_FFI_CACHE_DIR"], str(Path(d) / "cache/test/tvm_ffi")
+            )
             self.assertEqual(cmd[1:3], ["-m", "harness.worker"])
         for gpu in [0, "0", "", "3,1"]:
             with self.subTest(gpu=gpu), self.assertRaisesRegex(
@@ -451,7 +459,7 @@ class SuiteTests(unittest.TestCase):
                     e2e(cfg, [self.case])
                 launch_worker.assert_not_called()
 
-    def test_leaderboards_keep_latency_throughput_and_parity_per_run_and_scenario(self):
+    def test_scenario_leaderboards_track_latest_results_without_rolling_back(self):
         from reporting.report import render
 
         cfg = load(ROOT / "run.template.yml")
@@ -461,8 +469,9 @@ class SuiteTests(unittest.TestCase):
         other_case = copy.deepcopy(self.case)
         other_case.update(name="other_scenario", id="other_scenario/test")
         hardware = {"name": cfg["hardware_config"]["gpu_name"], "uuid": "GPU-assigned"}
+        cfg["scenario_configs"]["other_scenario"] = other_case
         with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
+            root = Path(d) / "run-one"
             manifest = {
                 "schema_version": 2,
                 "run_id": "run-one",
@@ -472,7 +481,7 @@ class SuiteTests(unittest.TestCase):
                 "hardware": hardware,
                 "scenario_jobs": {self.case["name"]: 3, other_case["name"]: 1},
                 "cases": [
-                    {"case": c, "model": {"config": self.model}}
+                    {"case": c, "model": {"config": self.model, "sha256": "checkpoint"}}
                     for c in [self.case, other_case]
                 ],
                 "jobs": [],
@@ -506,8 +515,10 @@ class SuiteTests(unittest.TestCase):
             partial = {**manifest, "status": "running", "jobs": manifest["jobs"][:1]}
             write(root / "manifest.json", partial)
             render(root)
-            board = (root / "leaderboards" / f"{self.case['name']}.md").read_text()
-            self.assertTrue("1/3 jobs finished" in board)
+            board = (
+                root.parent / "leaderboards" / f"{self.case['name']}.md"
+            ).read_text()
+            self.assertTrue("sid_gr_inference" in board)
             self.assertTrue("running" in board)
             write(root / "manifest.json", manifest)
             records = render(root)
@@ -517,12 +528,137 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(candidate["parity"], "different")
             self.assertEqual(candidate["agreement"]["min_overlap"], 0.5)
             self.assertEqual(records[0]["parity"], "exact")
-            board = (root / "leaderboards" / f"{self.case['name']}.md").read_text()
+            board = (
+                root.parent / "leaderboards" / f"{self.case['name']}.md"
+            ).read_text()
             self.assertTrue("run-one" in board)
             self.assertTrue("candidate" in board)
             self.assertTrue("failed" in board)
             self.assertNotIn("other_scenario", board)
-            self.assertTrue((root / "leaderboards" / "other_scenario.md").is_file())
+            self.assertTrue(
+                (root.parent / "leaderboards" / "other_scenario.md").is_file()
+            )
+            board_path = root.parent / "leaderboards" / f"{self.case['name']}.md"
+
+            # A partial rerun replaces only its completed row, including failure.
+            import shutil
+
+            newer = root.parent / "run-two"
+            shutil.copytree(root, newer)
+            rerun = copy.deepcopy(manifest)
+            rerun.update(run_id="run-two", jobs=manifest["jobs"][1:2])
+            write(newer / "manifest.json", rerun)
+            write(
+                newer / rerun["jobs"][0]["directory"] / "result.json",
+                {"status": "failed"},
+            )
+            render(newer)
+            board = board_path.read_text()
+            self.assertTrue("run-two" in board)
+            self.assertTrue("| candidate | failed |" in board)
+            self.assertTrue("| sid_gr_inference | success |" in board)
+            render(root)
+            self.assertEqual(board, board_path.read_text())
+
+            # Smoke executions cannot replace measured rankings.
+            smoke = root.parent / "run-three"
+            shutil.copytree(root, smoke)
+            write(
+                smoke / "manifest.json",
+                {**manifest, "run_id": "run-three", "mode": "smoke"},
+            )
+            render(smoke)
+            self.assertEqual(board, board_path.read_text())
+
+            # CPU changes and scenario/checkpoint revisions get separate sections.
+            third = root.parent / "run-z"
+            shutil.copytree(root, third)
+            different = copy.deepcopy(manifest)
+            different.update(run_id="run-z")
+            different["hardware"]["cpu"] = {
+                "model": "Other CPU",
+                "sockets": 1,
+                "physical_cores": 8,
+                "logical_cpus": 16,
+                "affinity": list(range(16)),
+            }
+            write(third / "manifest.json", different)
+            render(third)
+            self.assertEqual(board_path.read_text().count("\n## "), 2)
+            different["hardware"] = hardware
+            different["cases"][0]["model"]["sha256"] = "new-checkpoint"
+            write(third / "manifest.json", different)
+            render(third)
+            self.assertEqual(board_path.read_text().count("\n## "), 2)
+
+    def test_cpu_topology_and_process_affinity_are_recorded(self):
+        fields = {
+            "Model name:": "Test CPU",
+            "Socket(s):": "2",
+            "Core(s) per socket:": "4",
+            "CPU(s):": "16",
+        }
+        probe = json.dumps(
+            {"lscpu": [{"field": k, "data": v} for k, v in fields.items()]}
+        )
+        with patch(
+            "harness.runtime.subprocess.check_output", return_value=probe
+        ), patch("harness.runtime.os.sched_getaffinity", return_value={2, 3}):
+            cpu = runtime.cpu_info()
+        self.assertEqual(
+            cpu,
+            {
+                "model": "Test CPU",
+                "sockets": 2,
+                "physical_cores": 8,
+                "logical_cpus": 16,
+                "affinity": [2, 3],
+            },
+        )
+
+    def test_readme_sglang_candidate_uses_global_beam_search_not_sampling(self):
+        from entrypoints.sglang.beam_search import Adapter
+
+        engine = Mock()
+        factory = Mock(return_value=engine)
+        modules = {
+            "sglang": SimpleNamespace(Engine=factory, __file__="sglang/__init__.py"),
+            "sglang.srt.server_args": SimpleNamespace(
+                ServerArgs=SimpleNamespace(enable_beam_search=False)
+            ),
+        }
+        beams = [
+            {
+                "output_ids": b["token_ids"],
+                "meta_info": {"sequence_score": b["score"] / 3},
+            }
+            for b in self.outputs[0]["beams"]
+        ]
+        engine.generate.return_value = [{"meta_info": {"beam_results": beams}}]
+        with patch.dict(sys.modules, modules):
+            adapter = Adapter(
+                {
+                    "case": self.case,
+                    "model": {"path": "model"},
+                    "solution": {"source": {}, "engine": {}},
+                }
+            )
+            self.assertEqual(adapter.generate(self.workload), self.outputs)
+        self.assertTrue(factory.call_args.kwargs["enable_beam_search"])
+        self.assertEqual(
+            engine.generate.call_args.kwargs["sampling_params"],
+            {
+                "n": 2,
+                "max_new_tokens": 3,
+                "ignore_eos": True,
+            },
+        )
+        cfg = load(ROOT / "run.readme.yml")
+        self.assertEqual(len(select_cases(cfg, "qwen3_1_7B/*_w256")), 8)
+        self.assertEqual(
+            cfg["solution_configs"]["sglang_beam_search"]["source"]["expected_commit"],
+            "af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d",
+        )
 
     def test_timeline_capture_failures_are_not_successful_results(self):
         from profiling.capture import main
@@ -588,7 +724,9 @@ class SuiteTests(unittest.TestCase):
                 self.assertNotEqual(directory, second)
                 self.assertEqual((directory / "report.md").read_bytes(), original)
                 self.assertTrue(
-                    (second / "leaderboards" / f"{self.case['name']}.md").is_file()
+                    (
+                        second.parent / "leaderboards" / f"{self.case['name']}.md"
+                    ).is_file()
                 )
             self.assertEqual(
                 [j["status"] for j in manifest["jobs"]], ["unsupported", "failed"]
@@ -604,9 +742,10 @@ class SuiteTests(unittest.TestCase):
                 ["unsupported", "failed"],
             )
             self.assertTrue((directory / "report.md").is_file())
-            board = (directory / "leaderboards" / f"{self.case['name']}.md").read_text()
-            self.assertTrue(manifest["run_id"] in board)
-            self.assertTrue("2/2 jobs finished" in board)
+            board = (
+                directory.parent / "leaderboards" / f"{self.case['name']}.md"
+            ).read_text()
+            self.assertTrue(second.name in board)
             self.assertTrue("unsupported" in board)
             self.assertTrue("failed" in board)
 

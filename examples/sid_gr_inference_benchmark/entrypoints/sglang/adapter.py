@@ -22,7 +22,7 @@ def check_support(case, solution):
             f"Unrecognized SGLang engine options: {sorted(set(solution['engine']) - allowed)}"
         )
     if solution["engine"].get("page_size", 1) != 1:
-        raise Unsupported("The migrated upstream beam path uses page_size=1")
+        raise Unsupported("Beam-search candidates require page_size=1")
     if case["beam_width"] == 1:
         raise Unsupported(
             "SGLang width-1 sampling does not expose the same beam-score contract"
@@ -61,6 +61,28 @@ class Adapter:
         if source:
             sys.path.insert(0, str(Path(source) / "python"))
         import sglang
+
+        engine_options, beam_params = self.beam_api()
+        self.sampling_params = {
+            "n": self.case["beam_width"],
+            "max_new_tokens": self.case["generation"]["output_tokens"],
+            "ignore_eos": True,
+            **beam_params,
+        }
+        self.module = sglang.__file__
+        self.engine = sglang.Engine(
+            model_path=request["model"]["path"],
+            dtype="bfloat16",
+            kv_cache_dtype="auto",
+            disable_radix_cache=True,
+            skip_tokenizer_init=True,
+            tp_size=1,
+            random_seed=self.case["inputs"].get("seed", 42),
+            **request["solution"]["engine"],
+            **engine_options,
+        )
+
+    def beam_api(self):
         from sglang.srt.sampling.sampling_params import SamplingParams
 
         if "beam_width" not in getattr(SamplingParams, "__struct_fields__", ()):
@@ -80,28 +102,12 @@ class Adapter:
         probe.length_penalty = 1.0
         if probe.beam_score(-6.0, 3) != -2.0:
             raise Unsupported("SGLang beam score semantics changed; update the adapter")
-        self.module = sglang.__file__
-        self.engine = sglang.Engine(
-            model_path=request["model"]["path"],
-            dtype="bfloat16",
-            kv_cache_dtype="auto",
-            disable_radix_cache=True,
-            skip_tokenizer_init=True,
-            tp_size=1,
-            random_seed=self.case["inputs"].get("seed", 42),
-            **request["solution"]["engine"],
-        )
+        return {}, {"beam_width": self.case["beam_width"]}
 
     def generate(self, workload):
-        c = self.case
         output = self.engine.generate(
             input_ids=[r["input_ids"] for r in workload],
-            sampling_params={
-                "beam_width": c["beam_width"],
-                "n": c["beam_width"],
-                "max_new_tokens": c["generation"]["output_tokens"],
-                "ignore_eos": True,
-            },
+            sampling_params=self.sampling_params,
         )
         # Convert the verified native mean-logprob score to cumulative logprob.
         # Equal fixed output lengths make the internal normalization rank-equivalent.

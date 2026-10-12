@@ -75,8 +75,9 @@ def e2e(cfg, selected):
         raise ValueError(
             f"Selected GPU {hardware['name']!r} does not match hardware profile {cfg['hardware']!r}"
         )
+    hardware["cpu"] = runtime.cpu_info()
     run_id = (
-        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         + "-"
         + uuid.uuid4().hex[:6]
     )
