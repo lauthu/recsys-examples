@@ -4,6 +4,8 @@ Compare each solution's latest latency on the same workload and hardware.
 
 Median batch **ms**; lower is better. The **Fastest** column names the winner for each workload.
 
+Parity counts are workload cases; each reference row checks repeat consistency.
+
 $sections
 
 <details>

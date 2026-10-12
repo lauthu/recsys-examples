@@ -76,6 +76,11 @@ class ReportProvenanceTests(unittest.TestCase):
             options, [[name, "`prefix_cache`", "`true`"] for name in solutions]
         )
 
+        cfg["solutions"] = ["sid"]
+        environment, _, options = configuration_rows(cfg, [], [], [])
+        self.assertTrue(all(row[1] == "sid" for row in environment))
+        self.assertEqual(options, [["sid", "`prefix_cache`", "`true`"]])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,8 @@ $summary
 
 Each solution runs every workload combination, with the warmups and repeats listed below.
 
+Counts below are workload cases; the reference row checks repeat consistency.
+
 $attention
 
 **Reference:** `$baseline` · Offline batches on one GPU
@@ -81,7 +83,7 @@ $protocols
 
 $sources
 
-Shared image: [build recipe]($image_recipe) with a pinned public SGLang base and beam-search source commit. Local image IDs above identify the containers actually used.
+SID-GR / pinned SGLang: [Docker build recipe]($image_recipe), including the public base image and beam-search source commit. Recorded image IDs above identify Docker runs.
 
 $versions
 

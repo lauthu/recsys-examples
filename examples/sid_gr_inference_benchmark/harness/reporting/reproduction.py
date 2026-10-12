@@ -62,7 +62,8 @@ def configuration_rows(cfg, cases, requests, results):
             origins[runtime.get("requested_image", image)] = identity
 
     values, options = {}, []
-    for name, solution in cfg["solution_configs"].items():
+    for name in cfg["solutions"]:
+        solution = cfg["solution_configs"][name]
         for key, value in {
             **cfg.get("environment", {}).get(name, {}),
             **solution.get("env", {}),
