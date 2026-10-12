@@ -54,15 +54,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg["run_profile"], "config/runs/default.yml")
 
     def test_candidates_keep_distinct_image_defaults(self):
-        def with_all_candidates(path, environment=None):
-            value = read_yaml(path, environment)
-            if Path(path).parent.name == "runs":
-                value["solutions"].append("sglang_beam_search")
-            return value
-
-        with patch.dict(os.environ, {}, clear=True), patch(
-            "harness.config.read_yaml", side_effect=with_all_candidates
-        ):
+        with patch.dict(os.environ, {}, clear=True):
             cfg = load(ROOT / "config/runs/default.yml")
         native = cfg["environment"]["sglang"]["SGLANG_IMAGE"]
         beam = cfg["environment"]["sglang_beam_search"]["SGLANG_BEAM_IMAGE"]

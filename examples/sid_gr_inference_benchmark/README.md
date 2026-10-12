@@ -23,22 +23,35 @@ Run from this directory. Use `python3 bench.py COMMAND --help` for options.
 `--smoke` selects one case with two warmups and three measurements.
 Smoke and profiled results never enter scenario rankings.
 
+The default compares Qwen3-0.6B and Qwen3-1.7B across all four candidates:
+48 workloads and 192 jobs, with five warmups and 30 measured repeats per job.
+
 ## Quick start
 
 The controller needs Python 3.10+ and the small dependencies in `requirements.txt`.
 Prepare candidate runtimes first. `e2e` downloads the scenario's pinned Hugging Face
 checkpoint when needed; `plan` and `report` do not download models or import GPU frameworks.
+For the two beam branches, use the pinned source checkouts listed under
+[Compare all four candidates](#compare-all-four-candidates).
 
 ```bash
 python3 -m pip install -r requirements.txt
+export SID_GR_RUNTIME=local SGLANG_RUNTIME=local
+export SGLANG_BEAM_RUNTIME=local SGLANG_BEAM_NEW_RUNTIME=local
 export SID_GR_PYTHON=/absolute/path/to/sid-gr-env/bin/python
 export SGLANG_PYTHON=/absolute/path/to/sglang-env/bin/python
+export SGLANG_BEAM_PYTHON=/absolute/path/to/sglang-beam-env/bin/python
+export SGLANG_BEAM_NEW_PYTHON=/absolute/path/to/sglang-beam-new-env/bin/python
+export SGLANG_BEAM_SOURCE=/absolute/path/to/sglang_beam_search
+export SGLANG_BEAM_NEW_SOURCE=/absolute/path/to/sglang_beam_search_new
 nvidia-smi -L
 export BENCHMARK_GPU=GPU-...  # Use the full UUID from nvidia-smi.
 # The default hardware profile is RTX PRO 6000 Blackwell Server Edition.
 python3 bench.py plan --config config/runs/default.yml --smoke
 python3 bench.py e2e --config config/runs/default.yml --smoke
 ```
+
+Remove `--smoke` to run the full matrix for both models.
 
 Use the checked-in config directly, or copy `config/runs/default.yml` to
 `config/runs/local.yml` to change scenarios, candidates, hardware or execution
@@ -107,9 +120,9 @@ reachable. Reports retain checkpoint hashes and source repository/commit links.
 | `config/scenarios/*.yml` | Model, inputs, context/batch/beam grid, generation rules and repeat counts. |
 | `config/solutions/*.yml` | Adapter, source checkout, runtime and engine settings. |
 | `config/hardware/*.yml` | Required GPU SKU and physical CPU core count; optional dense BF16 compute ceiling. |
-| `config/runs/default.yml` | Selected scenarios, candidates, SGLang reference, GPU UUID and execution policy. |
+| `config/runs/default.yml` | Both models, all four candidates, public SGLang reference, GPU UUID and execution policy. |
 | `config/runs/readme.yml` | Qwen3-1.7B comparison against the pinned old SGLang beam branch. |
-| `config/runs/comparison.yml` | Both models and all four candidates; native SGLang reference. |
+| `config/runs/comparison.yml` | Equivalent to the default; retained for existing comparison commands. |
 
 A scenario defines reusable cases. Each `e2e` invocation creates a new run.
 Paths in scenario/candidate files resolve from this directory.
@@ -170,25 +183,40 @@ cross-engine parity. Mismatches remain visible beside performance results.
 
 ## Published example
 
-Qwen3-1.7B: one workload × four engines, with 5 warmups and 30 measured repeats.
-All candidates use 10 CPU cores and enable prefix caching.
-Nsight compares all four at context 1000 / batch 1 / beam 256.
+Qwen3-0.6B and Qwen3-1.7B: 24 workloads per model × four engines. All 192 jobs
+passed execution and structural checks, with 5 warmups and 30 measured repeats
+per job (5,760 timing samples). All candidates use 10 CPU cores and enable prefix
+caching. The saved `comparison.yml` profile is equivalent to the current default.
 
-| Example | Reports | Raw data |
-| --- | --- | --- |
-| Four-engine comparison + GPU diagnosis | [Run](results/20261012T112352414091Z-d89b64/report.md) · [Diagnosis](results/20261012T112352414091Z-d89b64/report.md#gpu-diagnosis) · [Leaderboard](leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T112352414091Z-d89b64/raw_artifacts.tar.gz) |
+Representative median batch latency at **context 1000 / batch 1 / beam 256**;
+lower is better. The linked reports contain all 48 workloads.
+
+| Candidate | Qwen3-0.6B ms | Qwen3-1.7B ms |
+| --- | ---: | ---: |
+| `sid_gr_inference` | 10.920 | 15.868 |
+| `sglang` | 34.160 | 46.678 |
+| `sglang_beam_search` | 27.903 | 34.228 |
+| `sglang_beam_search_new` | 25.589 | 31.601 |
+
+| Reports | Raw data |
+| --- | --- |
+| [Full run](results/20261012T113832092061Z-c0ad33/report.md) · [0.6B leaderboard](leaderboards/qwen3_0_6B.md) · [1.7B leaderboard](leaderboards/qwen3_1_7B.md) · [GPU diagnosis](results/20261012T113832092061Z-c0ad33/report.md#gpu-diagnosis) | [Archive](results/20261012T113832092061Z-c0ad33/raw_artifacts.tar.gz) |
+
+Top-1 outputs agree for the representative workload above. Other workloads
+have top-1 mismatches; all parity differences remain visible in the reports.
+Nsight compares all four engines on Qwen3-1.7B at context 1000 / batch 1 / beam 256.
 
 One archive contains frozen metadata, inputs, requests, logs, results and native
 Nsight/SQLite traces. Compilation caches are omitted. Extract it before rebuilding:
 
 ```bash
-benchmark_run=results/20261012T112352414091Z-d89b64
+benchmark_run=results/20261012T113832092061Z-c0ad33
 tar -xzf "$benchmark_run/raw_artifacts.tar.gz" -C "$benchmark_run"
 python3 bench.py report --run "$benchmark_run"
 ```
 
-The report shows output mismatches alongside performance. Measurements use RTX
-PRO 6000 Blackwell; the original README's H100 timings are not directly comparable.
+Measurements use RTX PRO 6000 Blackwell; the original README's H100 timings
+are not directly comparable.
 
 Suite-root `leaderboards/` keeps the latest non-smoke result per case/candidate. Partial runs
 replace only executed rows; failures replace older successes. Hardware, checkpoint,
@@ -224,8 +252,8 @@ export SGLANG_BEAM_RUNTIME=docker SGLANG_BEAM_NEW_RUNTIME=docker
 export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
 export SGLANG_BEAM_PYTHON=python3 SGLANG_BEAM_NEW_PYTHON=python3
 # Set BENCHMARK_GPU and the hardware profile as above.
-python3 bench.py plan --config config/runs/comparison.yml
-python3 bench.py e2e --config config/runs/comparison.yml
+python3 bench.py plan --config config/runs/default.yml
+python3 bench.py e2e --config config/runs/default.yml
 ```
 
 This profile defines **48 cases × 4 candidates = 192 jobs**: two models, context

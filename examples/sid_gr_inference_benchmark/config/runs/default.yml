@@ -1,7 +1,7 @@
-# Default comparison: SID-GR against the installed SGLang API.
+# Both models/all four candidates: 48 workloads / 192 jobs; public SGLang reference.
 # Every invocation creates a new results/<run-id>/; it never replaces a prior run.
 scenarios: [qwen3_0_6B, qwen3_1_7B]
-solutions: [sid_gr_inference, sglang]
+solutions: [sid_gr_inference, sglang, sglang_beam_search, sglang_beam_search_new]
 baseline: sglang
 hardware: rtx_pro_6000_blackwell_server
 
