@@ -68,9 +68,9 @@ def main():
             from reporting.diagnosis import render as render_diagnosis
             from reporting.report import render
 
-            render(args.run)
             for path in sorted((args.run / "diagnostics").glob("*/diagnosis.json")):
                 render_diagnosis(path.parent)
+            render(args.run)
             print(args.run / "report.md")
     except (ValueError, OSError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

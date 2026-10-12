@@ -676,7 +676,54 @@ class SuiteTests(unittest.TestCase):
         from bench import main
 
         with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
+            root = Path(d) / "run"
+            cfg = load(ROOT / "run.template.yml")
+            cfg["baseline"] = "measured"
+            model = {"path": d, "sha256": "checkpoint", "config": self.model}
+            hardware = {"name": cfg["hardware_config"]["gpu_name"], "cpu": {}}
+            write(
+                root / "manifest.json",
+                {
+                    "schema_version": 2,
+                    "suite_sha256": "suite",
+                    "run_id": "run",
+                    "mode": "smoke",
+                    "status": "completed",
+                    "config": cfg,
+                    "hardware": hardware,
+                    "scenario_jobs": {self.case["name"]: 1},
+                    "cases": [{"case": self.case, "model": model}],
+                    "jobs": [
+                        {
+                            "case_id": self.case["id"],
+                            "solution": "measured",
+                            "directory": "jobs/measured",
+                            "status": "success",
+                        }
+                    ],
+                },
+            )
+            write(
+                root / "jobs/measured/request.json",
+                {
+                    "case": self.case,
+                    "measurement": self.case["measurement"],
+                    "model": model,
+                    "solution": {"name": "measured", "source": {}},
+                    "source": {},
+                },
+            )
+            write(
+                root / "jobs/measured/result.json",
+                {
+                    "status": "success",
+                    "samples_ms": [10, 10],
+                    "outputs": [self.outputs],
+                    "workload_sha256": "same",
+                    "environment": {"gpu": hardware["name"], "packages": {}},
+                    "adapter": {},
+                },
+            )
             capture = root / "diagnostics/saved"
             records = [
                 {
@@ -708,12 +755,13 @@ class SuiteTests(unittest.TestCase):
             original = (capture / "diagnosis.json").read_bytes()
             with patch.object(
                 sys, "argv", ["bench.py", "report", "--run", str(root)]
-            ), patch("reporting.report.render") as render_run, patch(
-                "profiling.diagnose.run"
-            ) as recapture:
+            ), patch("profiling.diagnose.run") as recapture:
                 self.assertEqual(main(), 0)
-                render_run.assert_called_once_with(root)
                 recapture.assert_not_called()
+            self.assertTrue(
+                "[saved](diagnostics/saved/diagnosis.md)"
+                in (root / "report.md").read_text()
+            )
             report = (capture / "diagnosis.md").read_text()
             self.assertTrue(
                 "| measured | success | 1 | 4.000 | 3.000 | 5.000 |" in report
@@ -722,6 +770,30 @@ class SuiteTests(unittest.TestCase):
             self.assertTrue("`kernel<float>`" in report)
             self.assertTrue("(../../report.md)" in report)
             self.assertEqual((capture / "diagnosis.json").read_bytes(), original)
+
+            # A new capture also updates its source report without a separate
+            # report command. Mock only collection and identity checks.
+            from profiling.diagnose import run
+
+            def capture_timeline(request, target, *, profile):
+                self.assertTrue(profile)
+                write(target / "request.json", request)
+                return {"status": "unsupported", "reason": "nsys unavailable"}
+
+            with patch("profiling.diagnose.suite_hash", return_value="suite"), patch(
+                "profiling.diagnose.gpu_info", return_value={"name": hardware["name"]}
+            ), patch("profiling.diagnose.cpu_info", return_value={}), patch(
+                "profiling.diagnose.source_info", return_value={}
+            ), patch(
+                "profiling.diagnose.model_info", return_value=model
+            ), patch(
+                "profiling.diagnose.launch", side_effect=capture_timeline
+            ):
+                new_capture, _ = run(root, self.case["id"])
+            self.assertTrue(
+                f"diagnostics/{new_capture.name}/diagnosis.md"
+                in (root / "report.md").read_text()
+            )
 
     def test_timeline_capture_failures_are_not_successful_results(self):
         from profiling.capture import main

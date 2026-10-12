@@ -94,7 +94,8 @@ Adapters require BF16 weights/KV, fixed-length output, all beams, no quantizatio
 no prefix reuse and no catalog constraints. Unsupported settings are explicit.
 Synthetic inputs use a fixed seed and exclude BOS/EOS/PAD. For real inputs, set
 `inputs.type: jsonl` and `inputs.path`; rows contain `request_id` and `input_ids`.
-Inputs must match the case's batch and context lengths; no padding or truncation.
+JSONL uses the first `batch_size` rows. Each input must match the case's context
+length; no token padding or truncation.
 
 ## Published samples
 
@@ -124,8 +125,8 @@ python3 bench.py report --run "$benchmark_run"
 | Interpretation | Workflow validation, not reproduction of H100 latencies or recommendation quality. |
 
 Leaderboards keep the latest non-smoke result per case/candidate. Partial runs
-replace only executed rows; failures replace older successes. Hardware and
-scenario/checkpoint revisions get separate groups. Parity uses each row's source
+replace only executed rows; failures replace older successes. Hardware, checkpoint,
+scenario and JSONL input revisions get separate groups. Parity uses each row's source
 run. See [harness internals](harness/README.md) for the artifact layout.
 
 ## Reproduce the SID-GR README comparison

@@ -441,6 +441,8 @@ def leaderboards(root):
             # Installation paths are not workload semantics; checkpoint bytes are.
             spec["model"].pop("path", None)
             spec["inputs"].pop("path", None)
+            if spec["inputs"]["type"] == "jsonl":
+                spec["inputs"]["sha256"] = cases[record["case"]]["input_file_sha256"]
             revision = digest(
                 {"scenario": spec, "model": cases[record["case"]]["model"]["sha256"]}
             )

@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 from harness.config import ROOT
@@ -121,12 +122,16 @@ def execute(cmd, env, log, timeout, container=None):
             code = process.wait(timeout=timeout)
             return {"returncode": code, "timed_out": False}
         except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-            os.killpg(process.pid, signal.SIGTERM)
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
+                pass
+            # Children may outlive a parent that exits promptly on SIGTERM.
+            with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            process.wait()
             if container:
                 subprocess.run(
                     ["docker", "rm", "-f", container],

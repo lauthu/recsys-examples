@@ -9,7 +9,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from harness import runtime
-from harness.artifacts import digest, model_info, read, source_info, suite_hash, write
+from harness.artifacts import (
+    digest,
+    file_hash,
+    model_info,
+    read,
+    source_info,
+    suite_hash,
+    write,
+)
 from harness.config import ROOT, cases
 from reporting.report import render
 from scenarios.workload import build
@@ -119,9 +127,14 @@ def e2e(cfg, selected):
             case_fingerprint = digest(
                 {"case": case, "model": model["sha256"], "workload": workload}
             )
-            manifest["cases"].append(
-                {"case": case, "model": model, "fingerprint": case_fingerprint}
-            )
+            case_record = {
+                "case": case,
+                "model": model,
+                "fingerprint": case_fingerprint,
+            }
+            if case["inputs"]["type"] == "jsonl":
+                case_record["input_file_sha256"] = file_hash(case["inputs"]["path"])
+            manifest["cases"].append(case_record)
             names = (
                 cfg["solutions"][index % len(cfg["solutions"]) :]
                 + cfg["solutions"][: index % len(cfg["solutions"])]

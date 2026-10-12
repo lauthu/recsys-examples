@@ -10,6 +10,7 @@ from harness.runner import launch
 from harness.runtime import cpu_info, gpu_info
 from profiling.timeline import summarize
 from reporting.diagnosis import render
+from reporting.report import render as render_run
 
 
 def run(directory, case_id):
@@ -73,5 +74,6 @@ def run(directory, case_id):
         records.append({"solution": job["solution"], "summary": summary})
     write(output / "diagnosis.json", records)
     render(output)
+    render_run(directory)
     print(f"Diagnosis: {output / 'diagnosis.md'}")
     return output, records
