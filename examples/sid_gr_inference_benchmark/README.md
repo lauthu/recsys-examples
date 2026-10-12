@@ -50,6 +50,7 @@ before running on a different GPU.
 | `runtime.kind: local` | Start `runtime.python` as a subprocess. Default. |
 | `runtime.kind: docker` | Start `runtime.python` inside `runtime.image`. |
 | `runtime.image` | Prepared local image. Tags are frozen to image IDs. |
+| `runtime.build_recipe` | Optional Dockerfile link shown beside the recorded image identity. |
 | `runtime.mounts` | Extra directories mounted read-only at the same paths in Docker. |
 | `env` | Environment variables forwarded to the worker. |
 | `source.path` | Engine checkout. Empty SGLang path uses the installed package. |
@@ -57,32 +58,29 @@ before running on a different GPU.
 | `engine.prefix_cache` | Candidate-owned prefix reuse; supplied candidates enable it. |
 
 `${NAME:-default}` reads the controller's environment when loading YAML.
-These are all environment overrides in the supplied configurations; paths
-resolve from this directory. Defaults apply when the variable is unset.
+Paths resolve from this directory; defaults apply when a variable is unset.
+Each candidate has independent source and runtime settings.
 
-| Environment variable | Default | Purpose |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `BENCHMARK_GPU` | Empty | Required full GPU UUID for execution. |
-| `QWEN3_0_6B_MODEL`, `QWEN3_1_7B_MODEL` | Empty | Optional local copy, verified against the scenario's pinned Hugging Face revision. |
-| `SID_GR_SOURCE` | `../sid-gr-inference` | SID-GR checkout. |
-| `SGLANG_SOURCE` | Empty | Upstream SGLang checkout; empty uses the installed package. |
-| `SGLANG_BEAM_SOURCE` | `../sglang_beam_search` | Pinned README baseline checkout. |
-| `SID_GR_RUNTIME`, `SGLANG_RUNTIME` | `local` | Select `local` or `docker`. |
-| `SID_GR_PYTHON`, `SGLANG_PYTHON` | `python3` | Python executable inside the chosen runtime. |
-| `SID_GR_IMAGE` | `sid-gr-benchmark:beam-af4e3f4-cu130` | Local image built from the [shared recipe](entrypoints/sglang/Dockerfile.beam_search). |
-| `SGLANG_IMAGE` | [Native candidate: pinned public digest](config/solutions/sglang.yml); beam candidate: `sid-gr-benchmark:beam-af4e3f4-cu130` | Runtime image for the selected SGLang candidate. |
-| `GR_DECODE_ATTEN_ROOT` | `../../corelib/gr_decode_atten` | [Tracked GR kernel](../../corelib/gr_decode_atten); forwarded to workers and mounted in Docker. |
+| `BENCHMARK_GPU` | Empty | Required full GPU UUID. |
+| `QWEN3_0_6B_MODEL`, `QWEN3_1_7B_MODEL` | Empty | Optional local copy, verified against the pinned Hugging Face revision. |
+| `GR_DECODE_ATTEN_ROOT` | `../../corelib/gr_decode_atten` | [Tracked GR kernel](../../corelib/gr_decode_atten), used only by SID-GR. |
 
-For Docker, set:
+For each prefix below, `_RUNTIME` defaults to `local`, `_PYTHON` to `python3`, and
+`_IMAGE` to the listed image. For example, `SGLANG_BEAM_NEW_RUNTIME=docker` selects
+Docker for the new beam branch without changing the other candidates.
 
-```bash
-export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
-export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
-```
+| Candidate | Variable prefix | `_SOURCE` default | `_IMAGE` default |
+| --- | --- | --- | --- |
+| `sid_gr_inference` | `SID_GR` | `../sid-gr-inference` | `sid-gr-benchmark:beam-af4e3f4-cu130` |
+| `sglang` | `SGLANG` | Empty: installed package | [Pinned public digest](config/solutions/sglang.yml) |
+| `sglang_beam_search` | `SGLANG_BEAM` | `../sglang_beam_search` | `sid-gr-benchmark:beam-af4e3f4-cu130` |
+| `sglang_beam_search_new` | `SGLANG_BEAM_NEW` | `../sglang_beam_search_new` | `sid-gr-benchmark:beam-df191d6-cu130` |
 
-Build or pull the selected image before execution; the suite freezes its local image
-ID and never pulls implicitly. The native SGLang candidate uses the public image;
-the pinned beam-search comparison uses the shared recipe below for both engines.
+Build or pull images before execution; the suite freezes local image IDs and never
+pulls implicitly. SID-GR shares the old branch's image. The new branch has its own
+[recipe](entrypoints/sglang/Dockerfile.beam_search_new) with matching dependencies.
 
 The supplied hardware profile assigns **10 physical CPU cores**, one allowed logical
 CPU per core. Local workers use `taskset`; Docker uses the same CPU set. The manifest
@@ -107,7 +105,8 @@ reachable. Reports retain checkpoint hashes and source repository/commit links.
 | `config/solutions/*.yml` | Adapter, source checkout, runtime and engine settings. |
 | `config/hardware/*.yml` | Required GPU SKU and physical CPU core count; optional dense BF16 compute ceiling. |
 | `config/runs/default.yml` | Selected scenarios, candidates, SGLang reference, GPU UUID and execution policy. |
-| `config/runs/readme.yml` | Qwen3-1.7B comparison against the pinned SGLang beam-search branch. |
+| `config/runs/readme.yml` | Qwen3-1.7B comparison against the pinned old SGLang beam branch. |
+| `config/runs/comparison.yml` | Both models and all four candidates; native SGLang reference. |
 
 A scenario defines reusable cases. Each `e2e` invocation creates a new run.
 Paths in scenario/candidate files resolve from this directory.
@@ -193,20 +192,47 @@ replace only executed rows; failures replace older successes. Hardware, checkpoi
 scenario and JSONL input revisions get separate groups. Parity uses each row's source
 run. See [harness internals](harness/README.md) for the artifact layout.
 
-## Reproduce the SID-GR README comparison
+## Compare all four candidates
 
-`sglang_beam_search` pins the README's `feature/beam_search` source commit.
-The upstream `sglang` candidate requires native `SamplingParams.beam_width`.
+| SGLang candidate | Pinned source | Beam implementation |
+| --- | --- | --- |
+| Public/native | [Upstream e6072935](https://github.com/sgl-project/sglang/tree/e6072935bfa1036d4e20e8ed042ce1ff09872f57) in the public image | Native `beam_width` API |
+| Old branch | [feature/beam_search @ af4e3f42](https://github.com/cswuyg/sglang/tree/af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d) | Server beam mode; `n` sets width |
+| New branch | [feature/beam_search_update_0801 @ df191d67](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891) | Request `use_beam_search`; FlashInfer cascade enabled |
+
+The new candidate sets `enable_beam_cascade_attention: true` and
+`decode_attention_backend: flashinfer`. Each version uses its matching dependencies;
+performance differences include runtime changes as well as beam implementation changes.
 
 ```bash
 export SGLANG_BEAM_SOURCE=/absolute/path/to/sglang_beam_search
+export SGLANG_BEAM_NEW_SOURCE=/absolute/path/to/sglang_beam_search_new
 git clone https://github.com/cswuyg/sglang.git "$SGLANG_BEAM_SOURCE"
 git -C "$SGLANG_BEAM_SOURCE" checkout af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
+git clone https://github.com/cswuyg/sglang.git "$SGLANG_BEAM_NEW_SOURCE"
+git -C "$SGLANG_BEAM_NEW_SOURCE" checkout df191d672f1955d273bf56fe21684b60dcf6a891
+docker pull lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306
 docker build -f entrypoints/sglang/Dockerfile.beam_search \
   -t sid-gr-benchmark:beam-af4e3f4-cu130 "$SGLANG_BEAM_SOURCE"
+docker build -f entrypoints/sglang/Dockerfile.beam_search_new \
+  -t sid-gr-benchmark:beam-df191d6-cu130 "$SGLANG_BEAM_NEW_SOURCE"
 export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
+export SGLANG_BEAM_RUNTIME=docker SGLANG_BEAM_NEW_RUNTIME=docker
 export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
+export SGLANG_BEAM_PYTHON=python3 SGLANG_BEAM_NEW_PYTHON=python3
 # Set BENCHMARK_GPU and the hardware profile as above.
+python3 bench.py plan --config config/runs/comparison.yml
+python3 bench.py e2e --config config/runs/comparison.yml
+```
+
+This profile defines **48 cases × 4 candidates = 192 jobs**: two models, context
+lengths 1000/5000, batches 1/2/4/8, and beam widths 64/128/256. Each job uses five
+warmups and 30 measured repeats. Add `--smoke` for one case, or select cases and
+candidates with `--case` and `--solutions`.
+
+For the original two-candidate README matrix instead:
+
+```bash
 python3 bench.py e2e --config config/runs/readme.yml --case 'qwen3_1_7B/*_w256'
 ```
 

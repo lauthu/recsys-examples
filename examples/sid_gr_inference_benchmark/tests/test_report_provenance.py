@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from harness.config import ROOT
 from harness.reporting.reproduction import configuration_rows
 
 
@@ -38,6 +39,9 @@ class ReportProvenanceTests(unittest.TestCase):
             }
             for name in ["sid", "sglang"]
         }
+        solutions["sid"]["runtime"][
+            "build_recipe"
+        ] = "entrypoints/sglang/Dockerfile.beam_search"
         cfg = {
             "solutions": list(solutions),
             "solution_configs": solutions,
@@ -51,13 +55,19 @@ class ReportProvenanceTests(unittest.TestCase):
             [{"model": model}],
             [{"solution": solution} for solution in solutions.values()],
             [{"adapter": {"decode_kernel": source}}, {}],
+            ROOT / "results" / "test",
         )
         images = [row for row in environment if row[0] == "`IMAGE`"]
         self.assertEqual(
             images,
             [
                 ["`IMAGE`", "sglang", "`image:sglang`", "`sha256:sglang`"],
-                ["`IMAGE`", "sid", "`image:sid`", "`sha256:sid`"],
+                [
+                    "`IMAGE`",
+                    "sid",
+                    "`image:sid`",
+                    "`sha256:sid` · [Build recipe](../../entrypoints/sglang/Dockerfile.beam_search)",
+                ],
             ],
         )
         kernel = next(row for row in environment if row[0] == "`GR_DECODE_ATTEN_ROOT`")
@@ -77,7 +87,9 @@ class ReportProvenanceTests(unittest.TestCase):
         )
 
         cfg["solutions"] = ["sid"]
-        environment, _, options = configuration_rows(cfg, [], [], [])
+        environment, _, options = configuration_rows(
+            cfg, [], [], [], ROOT / "results" / "test"
+        )
         self.assertTrue(all(row[1] == "sid" for row in environment))
         self.assertEqual(options, [["sid", "`prefix_cache`", "`true`"]])
 

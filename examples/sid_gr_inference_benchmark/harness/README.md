@@ -34,9 +34,11 @@ flowchart LR
 | [../config/hardware](../config/hardware) | Required GPU SKU and physical CPU core count; optional compute ceiling. |
 
 `plan` and `e2e` default to `config/runs/default.yml`, with SGLang as the baseline.
-`--config config/runs/readme.yml` selects the pinned SGLang beam-search branch.
+`--config config/runs/readme.yml` selects the old SGLang beam branch;
+`config/runs/comparison.yml` selects SID-GR, public/native SGLang, and both pinned
+beam branches: 48 cases and 192 jobs, with native SGLang as reference.
 Model, input, source and mount paths are relative to the suite root; `output_dir`
-is relative to the run YAML. Both supplied runs write to the suite's `results/`.
+is relative to the run YAML. All supplied runs write to the suite's `results/`.
 Resolved `${VARIABLE:-default}` values and their candidate scope are saved with the
 run configuration. Models require a Hugging Face ID and full commit SHA. A local
 model override must match the pinned snapshot; otherwise `e2e` downloads it into
@@ -74,7 +76,12 @@ local and Docker execution.
 Each solution owns `engine.prefix_cache`, enabled in the supplied candidates.
 Warmup and measured repeats use identical inputs, allowing warm prefix reuse.
 SID-GR's YAML also fixes its prefill, CUDA graph and fused/JIT optimization defaults.
+Each candidate has independent `_SOURCE`, `_RUNTIME`, `_PYTHON` and `_IMAGE`
+variables, prefixed by `SID_GR`, `SGLANG`, `SGLANG_BEAM` or `SGLANG_BEAM_NEW`.
 Docker image tags are resolved to immutable local IDs before workers launch.
+Public SGLang uses its pinned image; the old and new beam branches use separate
+recipes for their dependency versions. The new adapter explicitly requests beam
+search and enables FlashInfer cascade through its solution settings.
 
 ## Run artifacts
 

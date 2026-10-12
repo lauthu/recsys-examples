@@ -163,7 +163,9 @@ def solution(name, environment=None):
     if cfg["name"] != name:
         raise ValueError(f"Solution name must match filename: {name}")
     fields(cfg["source"], [], optional=["path", "expected_commit"])
-    fields(cfg["runtime"], ["kind", "python"], optional=["image", "mounts"])
+    fields(
+        cfg["runtime"], ["kind", "python"], optional=["image", "mounts", "build_recipe"]
+    )
     if cfg["runtime"]["kind"] not in {"local", "docker"}:
         raise ValueError("runtime.kind must be local or docker")
     if cfg["runtime"]["kind"] == "docker" and not cfg["runtime"].get("image"):

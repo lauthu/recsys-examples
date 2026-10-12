@@ -83,7 +83,7 @@ $protocols
 
 $sources
 
-SID-GR / pinned SGLang: [Docker build recipe]($image_recipe), including the public base image and beam-search source commit. Recorded image IDs above identify Docker runs.
+Docker rows identify the actual image; build recipes link the pinned public base and branch dependencies.
 
 $versions
 

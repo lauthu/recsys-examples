@@ -1,0 +1,22 @@
+name: sglang_beam_search_new
+adapter: entrypoints.sglang.beam_search_new
+source:
+  path: ${SGLANG_BEAM_NEW_SOURCE:-../sglang_beam_search_new}
+  expected_commit: df191d672f1955d273bf56fe21684b60dcf6a891
+runtime:
+  kind: ${SGLANG_BEAM_NEW_RUNTIME:-local}
+  python: ${SGLANG_BEAM_NEW_PYTHON:-python3}
+  # Build with entrypoints/sglang/Dockerfile.beam_search_new at source.expected_commit.
+  image: ${SGLANG_BEAM_NEW_IMAGE:-sid-gr-benchmark:beam-df191d6-cu130}
+  build_recipe: entrypoints/sglang/Dockerfile.beam_search_new
+engine:
+  prefix_cache: true
+  page_size: 1
+  disable_overlap_schedule: true
+  disable_cuda_graph: false
+  # Cascade is optional; this backend supports both its enabled and disabled modes.
+  decode_attention_backend: flashinfer
+  enable_beam_cascade_attention: true
+  mem_fraction_static: 0.70
+  log_level: warning
+env: {}

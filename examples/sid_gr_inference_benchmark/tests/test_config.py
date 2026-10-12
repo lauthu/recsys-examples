@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from harness.config import ROOT, load, read_yaml, scenario
+from harness.config import ROOT, cases, load, read_yaml, scenario
 
 
 class ConfigTests(unittest.TestCase):
@@ -15,6 +15,7 @@ class ConfigTests(unittest.TestCase):
         for name, baseline in [
             ("default", "sglang"),
             ("readme", "sglang_beam_search"),
+            ("comparison", "sglang"),
         ]:
             with self.subTest(name=name):
                 cfg = load(ROOT / "config/runs" / f"{name}.yml")
@@ -52,7 +53,7 @@ class ConfigTests(unittest.TestCase):
             self.assertNotIn("UNRELATED_SECRET", values)
         self.assertEqual(cfg["run_profile"], "config/runs/default.yml")
 
-    def test_candidates_keep_distinct_defaults_for_the_same_variable(self):
+    def test_candidates_keep_distinct_image_defaults(self):
         def with_all_candidates(path, environment=None):
             value = read_yaml(path, environment)
             if Path(path).parent.name == "runs":
@@ -64,13 +65,61 @@ class ConfigTests(unittest.TestCase):
         ):
             cfg = load(ROOT / "config/runs/default.yml")
         native = cfg["environment"]["sglang"]["SGLANG_IMAGE"]
-        beam = cfg["environment"]["sglang_beam_search"]["SGLANG_IMAGE"]
+        beam = cfg["environment"]["sglang_beam_search"]["SGLANG_BEAM_IMAGE"]
         self.assertNotEqual(native, beam)
         self.assertEqual(native, cfg["solution_configs"]["sglang"]["runtime"]["image"])
         self.assertEqual(
             beam, cfg["solution_configs"]["sglang_beam_search"]["runtime"]["image"]
         )
         self.assertNotIn("SGLANG_IMAGE", cfg["environment"]["sid_gr_inference"])
+
+    def test_comparison_keeps_four_candidates_and_runtime_overrides_separate(self):
+        names = {
+            "sid_gr_inference": "SID_GR",
+            "sglang": "SGLANG",
+            "sglang_beam_search": "SGLANG_BEAM",
+            "sglang_beam_search_new": "SGLANG_BEAM_NEW",
+        }
+        environment = {}
+        for name, prefix in names.items():
+            environment.update(
+                {
+                    f"{prefix}_RUNTIME": "docker",
+                    f"{prefix}_PYTHON": f"/test/{name}/python",
+                    f"{prefix}_IMAGE": f"test-{name}:pinned",
+                    f"{prefix}_SOURCE": "" if name == "sglang" else f"/test/{name}",
+                }
+            )
+        with patch.dict(os.environ, environment, clear=True):
+            cfg = load(ROOT / "config/runs/comparison.yml")
+        self.assertEqual(cfg["solutions"], list(names))
+        self.assertEqual(cfg["baseline"], "sglang")
+        self.assertEqual(len(list(cases(cfg))), 48)
+        for name, prefix in names.items():
+            solution = cfg["solution_configs"][name]
+            self.assertEqual(solution["runtime"]["kind"], "docker")
+            self.assertEqual(solution["runtime"]["python"], f"/test/{name}/python")
+            self.assertEqual(solution["runtime"]["image"], f"test-{name}:pinned")
+            self.assertEqual(
+                solution["source"]["path"], environment[f"{prefix}_SOURCE"]
+            )
+            self.assertEqual(
+                cfg["environment"][name][f"{prefix}_IMAGE"], f"test-{name}:pinned"
+            )
+            for other in set(names.values()) - {prefix}:
+                self.assertNotIn(f"{other}_IMAGE", cfg["environment"][name])
+            self.assertTrue(solution["engine"]["prefix_cache"])
+        old = cfg["solution_configs"]["sglang_beam_search"]
+        updated = cfg["solution_configs"]["sglang_beam_search_new"]
+        self.assertEqual(
+            old["source"]["expected_commit"], "af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d"
+        )
+        self.assertEqual(
+            updated["source"]["expected_commit"],
+            "df191d672f1955d273bf56fe21684b60dcf6a891",
+        )
+        self.assertTrue(updated["engine"]["enable_beam_cascade_attention"])
+        self.assertEqual(updated["engine"]["decode_attention_backend"], "flashinfer")
 
     def test_models_require_immutable_hub_revisions(self):
         spec = read_yaml(ROOT / "config/scenarios/qwen3_0_6B.yml")

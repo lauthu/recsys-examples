@@ -1,0 +1,10 @@
+# Both models/all beams: 48 workloads / 192 jobs; public SGLang is the reference.
+scenarios: [qwen3_0_6B, qwen3_1_7B]
+solutions: [sid_gr_inference, sglang, sglang_beam_search, sglang_beam_search_new]
+baseline: sglang
+hardware: rtx_pro_6000_blackwell_server
+execution:
+  gpu: ${BENCHMARK_GPU:-}
+  timeout_seconds: 1800
+  continue_on_error: true
+output_dir: ../../results

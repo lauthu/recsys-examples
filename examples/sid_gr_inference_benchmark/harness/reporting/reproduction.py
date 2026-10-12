@@ -1,5 +1,6 @@
 """Show saved source identities beside machine-local configuration values."""
 
+import os
 from pathlib import Path
 from urllib.parse import quote
 
@@ -20,7 +21,7 @@ def source_link(source):
     return label + (" + local changes" if source.get("dirty") else "")
 
 
-def configuration_rows(cfg, cases, requests, results):
+def configuration_rows(cfg, cases, requests, results, directory):
     """Return environment, artifact and engine-option rows from frozen metadata."""
     origins, artifacts = {}, []
 
@@ -58,6 +59,9 @@ def configuration_rows(cfg, cases, requests, results):
                 identity += " · " + ", ".join(
                     f"`{value}`" for value in runtime["repo_digests"]
                 )
+            if runtime.get("build_recipe"):
+                recipe = os.path.relpath(ROOT / runtime["build_recipe"], directory)
+                identity += f" · [Build recipe]({recipe})"
             artifact(name, "Container image", identity)
             origins[runtime.get("requested_image", image)] = identity
 

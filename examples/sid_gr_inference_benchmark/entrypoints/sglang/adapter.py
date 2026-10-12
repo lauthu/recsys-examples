@@ -6,7 +6,7 @@ from pathlib import Path
 from harness.validation import Unsupported, supported
 
 
-def check_support(case, solution):
+def check_support(case, solution, extra_options=()):
     supported(case)
     allowed = {
         "prefix_cache",
@@ -18,6 +18,7 @@ def check_support(case, solution):
         "disable_piecewise_cuda_graph",
         "log_level",
     }
+    allowed.update(extra_options)
     if set(solution["engine"]) - allowed:
         raise Unsupported(
             f"Unrecognized SGLang engine options: {sorted(set(solution['engine']) - allowed)}"

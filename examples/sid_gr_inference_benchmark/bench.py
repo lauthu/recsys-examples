@@ -39,6 +39,8 @@ def main():
         if args.command in {"plan", "e2e"}:
             cfg = load(args.config)
             if args.solutions:
+                if len(set(args.solutions)) != len(args.solutions):
+                    raise ValueError("Selected solutions must be unique")
                 if set(args.solutions) - set(cfg["solutions"]):
                     raise ValueError(
                         "Selected solution is not in the run configuration"

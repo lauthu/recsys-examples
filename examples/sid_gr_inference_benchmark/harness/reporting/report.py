@@ -386,6 +386,7 @@ def render(directory):
         manifest["cases"],
         requests,
         [records[j["case_id"], j["solution"]] for j in jobs],
+        directory,
     )
     rendered = Template(
         (ROOT / "harness/reporting/templates/e2e.md").read_text()
@@ -446,9 +447,6 @@ def render(directory):
             ["Solution", "Component", "Reproducible source / image ID"], artifacts
         ),
         options=table(["Solution", "Engine option", "Value used"], options),
-        image_recipe=os.path.relpath(
-            ROOT / "entrypoints/sglang/Dockerfile.beam_search", directory
-        ),
         artifacts=(
             "[Run archive](raw_artifacts.tar.gz)"
             if archive.is_file()

@@ -4,10 +4,11 @@ source:
   path: ${SGLANG_BEAM_SOURCE:-../sglang_beam_search}
   expected_commit: af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
 runtime:
-  kind: ${SGLANG_RUNTIME:-local} # local: Python subprocess; docker: container
-  python: ${SGLANG_PYTHON:-python3}
+  kind: ${SGLANG_BEAM_RUNTIME:-local} # local: Python subprocess; docker: container
+  python: ${SGLANG_BEAM_PYTHON:-python3}
   # Build with entrypoints/sglang/Dockerfile.beam_search at source.expected_commit.
-  image: ${SGLANG_IMAGE:-sid-gr-benchmark:beam-af4e3f4-cu130}
+  image: ${SGLANG_BEAM_IMAGE:-sid-gr-benchmark:beam-af4e3f4-cu130}
+  build_recipe: entrypoints/sglang/Dockerfile.beam_search
 engine:
   prefix_cache: true
   page_size: 1
