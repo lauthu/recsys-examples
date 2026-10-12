@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from entrypoints.sglang import beam_search_new
+from entrypoints.sglang_beam_search_new import adapter as beam_search_new
 from harness.config import ROOT, cases, load
 from harness.validation import Unsupported
 

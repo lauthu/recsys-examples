@@ -1,14 +1,14 @@
 """The pinned feature/beam_search baseline named in the SID-GR README."""
 
-from entrypoints.sglang import adapter
+from entrypoints import sglang_common
 from harness.validation import Unsupported
 
 
 def check_support(case, solution):
-    adapter.check_support(case, solution)
+    sglang_common.check_support(case, solution)
 
 
-class Adapter(adapter.Adapter):
+class Adapter(sglang_common.BaseAdapter):
     def beam_api(self):
         from sglang.srt.server_args import ServerArgs
 

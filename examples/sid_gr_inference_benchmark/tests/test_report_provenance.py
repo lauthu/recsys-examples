@@ -41,7 +41,7 @@ class ReportProvenanceTests(unittest.TestCase):
         }
         solutions["sid"]["runtime"][
             "build_recipe"
-        ] = "entrypoints/sglang/Dockerfile.beam_search"
+        ] = "entrypoints/sglang_beam_search/Dockerfile"
         cfg = {
             "solutions": list(solutions),
             "solution_configs": solutions,
@@ -66,7 +66,7 @@ class ReportProvenanceTests(unittest.TestCase):
                     "`IMAGE`",
                     "sid",
                     "`image:sid`",
-                    "`sha256:sid` · [Build recipe](../../entrypoints/sglang/Dockerfile.beam_search)",
+                    "`sha256:sid` · [Build recipe](../../entrypoints/sglang_beam_search/Dockerfile)",
                 ],
             ],
         )

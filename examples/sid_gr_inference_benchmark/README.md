@@ -3,6 +3,9 @@
 Compare latency, throughput and beam parity on identical token inputs.
 Use separate Nsight captures to inspect GPU kernels.
 
+Four independent [entrypoints](entrypoints/README.md) cover SID-GR and the three
+SGLang solutions. Each workload has one measurement row per selected candidate.
+
 [Leaderboards](leaderboards/README.md) · [Published example](#published-example)
 
 ## Commands
@@ -80,7 +83,7 @@ Docker for the new beam branch without changing the other candidates.
 
 Build or pull images before execution; the suite freezes local image IDs and never
 pulls implicitly. SID-GR shares the old branch's image. The new branch has its own
-[recipe](entrypoints/sglang/Dockerfile.beam_search_new) with matching dependencies.
+[recipe](entrypoints/sglang_beam_search_new/Dockerfile) with matching dependencies.
 
 The supplied hardware profile assigns **10 physical CPU cores**, one allowed logical
 CPU per core. Local workers use `taskset`; Docker uses the same CPU set. The manifest
@@ -167,19 +170,19 @@ cross-engine parity. Mismatches remain visible beside performance results.
 
 ## Published example
 
-Qwen3-1.7B: 8 cases × 2 engines, with 5 warmups and 30 measured repeats.
-Both candidates use 10 CPU cores and enable prefix caching.
-Nsight compares both engines at context 1000 / batch 1 / beam 256.
+Qwen3-1.7B: one workload × four engines, with 5 warmups and 30 measured repeats.
+All candidates use 10 CPU cores and enable prefix caching.
+Nsight compares all four at context 1000 / batch 1 / beam 256.
 
 | Example | Reports | Raw data |
 | --- | --- | --- |
-| README comparison + GPU diagnosis | [Run](results/20261012T085705933753Z-b3fc71/report.md) · [Diagnosis](results/20261012T085705933753Z-b3fc71/report.md#gpu-diagnosis) · [Leaderboard](leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T085705933753Z-b3fc71/raw_artifacts.tar.gz) |
+| Four-engine comparison + GPU diagnosis | [Run](results/20261012T112352414091Z-d89b64/report.md) · [Diagnosis](results/20261012T112352414091Z-d89b64/report.md#gpu-diagnosis) · [Leaderboard](leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T112352414091Z-d89b64/raw_artifacts.tar.gz) |
 
 One archive contains frozen metadata, inputs, requests, logs, results and native
 Nsight/SQLite traces. Compilation caches are omitted. Extract it before rebuilding:
 
 ```bash
-benchmark_run=results/20261012T085705933753Z-b3fc71
+benchmark_run=results/20261012T112352414091Z-d89b64
 tar -xzf "$benchmark_run/raw_artifacts.tar.gz" -C "$benchmark_run"
 python3 bench.py report --run "$benchmark_run"
 ```
@@ -212,9 +215,9 @@ git -C "$SGLANG_BEAM_SOURCE" checkout af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
 git clone https://github.com/cswuyg/sglang.git "$SGLANG_BEAM_NEW_SOURCE"
 git -C "$SGLANG_BEAM_NEW_SOURCE" checkout df191d672f1955d273bf56fe21684b60dcf6a891
 docker pull lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306
-docker build -f entrypoints/sglang/Dockerfile.beam_search \
+docker build -f entrypoints/sglang_beam_search/Dockerfile \
   -t sid-gr-benchmark:beam-af4e3f4-cu130 "$SGLANG_BEAM_SOURCE"
-docker build -f entrypoints/sglang/Dockerfile.beam_search_new \
+docker build -f entrypoints/sglang_beam_search_new/Dockerfile \
   -t sid-gr-benchmark:beam-df191d6-cu130 "$SGLANG_BEAM_NEW_SOURCE"
 export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
 export SGLANG_BEAM_RUNTIME=docker SGLANG_BEAM_NEW_RUNTIME=docker

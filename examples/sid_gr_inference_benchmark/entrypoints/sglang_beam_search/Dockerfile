@@ -1,6 +1,6 @@
 # Build with https://github.com/cswuyg/sglang at
 # af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d as the build context:
-# docker build -f entrypoints/sglang/Dockerfile.beam_search \
+# docker build -f entrypoints/sglang_beam_search/Dockerfile \
 #   -t sid-gr-benchmark:beam-af4e3f4-cu130 "$SGLANG_BEAM_SOURCE"
 FROM lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306
 RUN uv pip install --python /opt/sglang/bin/python \

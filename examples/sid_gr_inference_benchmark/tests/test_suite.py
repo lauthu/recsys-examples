@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from entrypoints.sglang.adapter import normalize
+from entrypoints.sglang_common import normalize
 from harness import runtime, worker
 from harness.artifacts import digest, read, source_info, suite_hash, write
 from harness.config import ROOT, cases, load, read_yaml
@@ -647,7 +647,7 @@ class SuiteTests(unittest.TestCase):
         )
 
     def test_readme_sglang_candidate_uses_global_beam_search_not_sampling(self):
-        from entrypoints.sglang.beam_search import Adapter
+        from entrypoints.sglang_beam_search.adapter import Adapter
 
         engine = Mock()
         factory = Mock(return_value=engine)

@@ -8,7 +8,7 @@ $summary
 
 Each solution runs every workload combination, with the warmups and repeats listed below.
 
-Counts below are workload cases; the reference row checks repeat consistency.
+Parity counts below include finished workload cases only; the reference row checks repeat consistency.
 
 $attention
 
@@ -18,7 +18,7 @@ $hardware
 
 ## Latency comparison
 
-Median batch **ms**; lower is better. **Bold** = lowest recorded median. — = no result.
+Median batch **ms**; lower is better. **Bold** = lowest recorded median. Pending = no finished result. — = unavailable.
 
 $results
 

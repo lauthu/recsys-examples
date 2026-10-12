@@ -5,9 +5,9 @@ source:
 runtime:
   kind: ${SID_GR_RUNTIME:-local}
   python: ${SID_GR_PYTHON:-python3}
-  # Build with entrypoints/sglang/Dockerfile.beam_search; both engines share it.
+  # Build with entrypoints/sglang_beam_search/Dockerfile; both engines share it.
   image: ${SID_GR_IMAGE:-sid-gr-benchmark:beam-af4e3f4-cu130}
-  build_recipe: entrypoints/sglang/Dockerfile.beam_search
+  build_recipe: entrypoints/sglang_beam_search/Dockerfile
   mounts: ["${GR_DECODE_ATTEN_ROOT:-../../corelib/gr_decode_atten}"]
 engine:
   prefix_cache: true

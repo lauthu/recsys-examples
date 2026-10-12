@@ -1,6 +1,6 @@
 # Build with https://github.com/cswuyg/sglang at
 # df191d672f1955d273bf56fe21684b60dcf6a891 as the build context:
-# docker build -f entrypoints/sglang/Dockerfile.beam_search_new \
+# docker build -f entrypoints/sglang_beam_search_new/Dockerfile \
 #   -t sid-gr-benchmark:beam-df191d6-cu130 "$SGLANG_BEAM_NEW_SOURCE"
 FROM lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306
 COPY python/pyproject.toml /tmp/beam-pyproject.toml

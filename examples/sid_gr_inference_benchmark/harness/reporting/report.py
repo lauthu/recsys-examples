@@ -89,22 +89,32 @@ def comparison(data, cases):
     )
 
 
-def parity_notice(data):
+def parity_notice(data, solutions=None, expected_cases=None, run_status=None):
     mismatches = [
         r for r in data if (r.get("agreement") or {}).get("top1_exact") is False
     ]
     rows = []
-    for name in dict.fromkeys(r["solution"] for r in data):
+    for name in solutions or dict.fromkeys(r["solution"] for r in data):
         records = [r for r in data if r["solution"] == name]
-        rows.append(
+        row = [name] + (
             [
-                name,
                 f"{sum(r['parity'] == 'exact' for r in records)} of {len(records)} cases",
                 f"{sum(r['parity'] == 'different' for r in records)} of {len(records)} cases",
                 f"{sum((r.get('agreement') or {}).get('top1_exact') is False for r in records)} cases",
                 f"{sum(r['parity'] == 'unavailable' for r in records)} cases",
             ]
+            if records
+            else ["—"] * 4
         )
+        if expected_cases is not None:
+            if len(records) >= expected_cases:
+                status = "completed"
+            elif not records:
+                status = "pending"
+            else:
+                status = "in progress" if run_status == "running" else "incomplete"
+            row.extend([f"{len(records)} of {expected_cases}", status])
+        rows.append(row)
     summary = table(
         [
             "Solution",
@@ -112,7 +122,8 @@ def parity_notice(data):
             "Different beams or scores",
             "Top-1 mismatches",
             "Not compared",
-        ],
+        ]
+        + (["Finished runs", "Status"] if expected_cases is not None else []),
         rows,
     )
     if mismatches:
@@ -328,11 +339,25 @@ def render(directory):
             (r for r in data if r["scenario"] == scenario),
             key=lambda r: (r["case"], r["solution"] != cfg["baseline"], r["solution"]),
         )
-        if not rows:
+        completed = {(r["case"], r["solution"]): r for r in rows}
+        display_rows = [
+            completed.get(
+                (case["id"], name),
+                {"case": case["id"], "solution": name, "status": "pending"},
+            )
+            for case in sorted(
+                (r["case"] for r in cases.values() if r["case"]["name"] == scenario),
+                key=lambda c: c["id"],
+            )
+            for name in cfg["solutions"]
+        ]
+        if not display_rows:
             continue
         comparisons.append(
             f"### {scenario}\n\n"
-            + comparison(rows, {key: value["case"] for key, value in cases.items()})
+            + comparison(
+                display_rows, {key: value["case"] for key, value in cases.items()}
+            )
         )
         measurements.append(
             f"### {scenario}\n\n"
@@ -361,7 +386,7 @@ def render(directory):
                             ]
                         ],
                     ]
-                    for r in rows
+                    for r in display_rows
                 ],
                 right_align=(3, 4, 5, 6),
             )
@@ -403,7 +428,12 @@ def render(directory):
             if manifest["mode"] == "smoke"
             else ""
         )
-        + parity_notice(data),
+        + parity_notice(
+            data,
+            cfg["solutions"],
+            sum(manifest["scenario_jobs"].values()) // len(cfg["solutions"]),
+            manifest["status"],
+        ),
         failures=(
             "### Failed or unsupported jobs\n\n"
             + table(["Case", "Candidate", "Reason"], failures)
