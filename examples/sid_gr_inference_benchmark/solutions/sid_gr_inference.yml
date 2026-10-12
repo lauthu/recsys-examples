@@ -9,4 +9,6 @@ runtime:
   mounts: ["${GR_DECODE_ATTEN_ROOT:-}"]
 engine: {}
 env:
+  # Expanded from the controller's environment; forwarded to the worker environment.
+  # runtime.mounts above exposes this same path inside Docker.
   GR_DECODE_ATTEN_ROOT: ${GR_DECODE_ATTEN_ROOT:-}

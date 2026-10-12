@@ -1,8 +1,8 @@
 # qwen3_1_7B leaderboard
 
-Latest non-smoke result per case and candidate, grouped by scenario/checkpoint revision and hardware.
+Latest non-smoke result per case/candidate. Groups separate hardware and scenario revisions.
 
-**Median batch latency in milliseconds · lower is better.** Bold marks the lowest recorded median in each row, without implying statistical significance or output equivalence. A dash means no recorded result.
+Median batch **ms**; lower is better. **Bold** = lowest recorded median. — = no result.
 
 ## NVIDIA RTX PRO 6000 Blackwell Server Edition
 
@@ -10,8 +10,13 @@ Scenario/checkpoint revision: `c12dfcf838df`.
 
 **CPU:** Intel(R) Xeon(R) Platinum 8480+ · **Driver:** 595.58.03
 
-> **Results with output differences: 8.** **Top-1 mismatches: 1.** Compared with the same-run reference.
-> - `qwen3_1_7B/ctx5000_b4_w256` · `sglang_beam_search`
+| Exact | Different | Top-1 mismatches | Unavailable |
+| ---: | ---: | ---: | ---: |
+| 8 | 8 | 1 | 0 |
+
+| Top-1 mismatch case | Candidate |
+| --- | --- |
+| qwen3_1_7B/ctx5000_b4_w256 | sglang_beam_search |
 
 <details>
 <summary>Hardware configuration</summary>
@@ -87,10 +92,19 @@ Scenario/checkpoint revision: `c12dfcf838df`.
 </details>
 
 <details>
-<summary>How this leaderboard is updated</summary>
+<summary>Ranking rules</summary>
 
-Each completed job refreshes its row; unexecuted cases retain their last result. Failed and unsupported attempts replace older successes. Source links identify the run behind every row.
-
-Parity always uses the reference from that same source run. The reference row checks repeat consistency. Latency cells may come from different runs; this table does not recompute cross-run parity. Requests/s is batch size divided by median latency. Smoke and diagnostic runs do not update rankings.
+| Rule | Behavior |
+| --- | --- |
+| Latest result | Each finished job replaces its case/candidate row |
+| Partial run | Unexecuted rows keep their last result |
+| Failed / unsupported | Replaces earlier success |
+| Grouping | Scenario, checkpoint, GPU, CPU and driver |
+| Source runs | Recorded per row; latency cells may come from different runs |
+| Parity | Same-run reference only; never recomputed across runs |
+| Reference parity | Repeat consistency |
+| Requests/s | Batch size / median batch latency |
+| Bold median | No significance or output-equivalence claim |
+| Excluded | Smoke and diagnosis runs |
 
 </details>

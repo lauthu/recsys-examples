@@ -4,7 +4,7 @@ source:
   path: ${SGLANG_BEAM_SOURCE:-../sglang_beam_search}
   expected_commit: af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
 runtime:
-  kind: ${SGLANG_RUNTIME:-local}
+  kind: ${SGLANG_RUNTIME:-local} # local: Python subprocess; docker: container
   python: ${SGLANG_PYTHON:-python3}
   image: ${SGLANG_IMAGE:-}
 engine:

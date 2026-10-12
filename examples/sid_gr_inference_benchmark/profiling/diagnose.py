@@ -3,14 +3,13 @@
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from string import Template
 
 from harness.artifacts import model_info, read, source_info, suite_hash, write
 from harness.config import ROOT
 from harness.runner import launch
 from harness.runtime import cpu_info, gpu_info
 from profiling.timeline import summarize
-from reporting.report import number, table
+from reporting.diagnosis import render
 
 
 def run(directory, case_id):
@@ -43,7 +42,7 @@ def run(directory, case_id):
         )
     )
     output.mkdir(parents=True)
-    timelines, measured, records = [], [], []
+    records = []
     for job in jobs:
         original = directory / job["directory"]
         request, result = read(original / "request.json"), read(
@@ -72,33 +71,7 @@ def run(directory, case_id):
         )
         write(target / "summary.json", summary)
         records.append({"solution": job["solution"], "summary": summary})
-        if summary["status"] == "success":
-            rows = [
-                [r["name"], r["calls"], number(r["gpu_ms"])]
-                for r in summary["kernels"][:10]
-            ]
-            timelines.append(
-                f"**{job['solution']}**\n\n"
-                + table(["Kernel", "Calls", "GPU ms"], rows)
-            )
-            measured.append(
-                f"{job['solution']}: {summary['gpu_active_union_ms']:.3f} ms GPU-active union in {summary['measured_window_ms']:.3f} ms measured window."
-            )
-        else:
-            timelines.append(
-                f"**{job['solution']}:** {summary.get('reason', summary['status'])}"
-            )
     write(output / "diagnosis.json", records)
-    report = Template(
-        (ROOT / "reporting/templates/diagnosis.md").read_text()
-    ).substitute(
-        case_id=case_id,
-        original=f"[{manifest['run_id']}]({directory / 'report.md'})",
-        timelines="\n\n".join(timelines),
-        measured=" ".join(measured)
-        or "No usable timeline collected; consult capture status and logs.",
-        reproduce=f"```bash\npython bench.py diagnose --run {directory} --case {case_id}\n```\n",
-    )
-    (output / "diagnosis.md").write_text(report)
+    render(output)
     print(f"Diagnosis: {output / 'diagnosis.md'}")
     return output, records

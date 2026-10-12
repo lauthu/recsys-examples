@@ -2,7 +2,7 @@
 
 Run `$run_id`
 
-[Latency](#latency-comparison) · [Output parity](#output-parity) · [Run details](#run-details) · [Reproduce](#reproduce)
+[Latency](#latency-comparison) · [Parity](#output-parity) · [Details](#run-details) · [Artifacts](#artifacts)
 
 $summary
 
@@ -14,42 +14,50 @@ $hardware
 
 ## Latency comparison
 
-Median batch latency in **milliseconds**; lower is better. **Bold** marks the lowest recorded median in each row, without implying statistical significance or output equivalence. A dash means no recorded result.
+Median batch **ms**; lower is better. **Bold** = lowest recorded median. — = no result.
 
 $results
 
 $failures
 
 <details>
-<summary>All measurements: latency, variation and throughput</summary>
+<summary>All measurements</summary>
 
 $measurements
 
-Δ latency compares each candidate with the reference; negative means faster. IQR describes sample variation, not online request-tail latency. Requests/s is batch size divided by median batch latency.
+| Metric | Meaning |
+| --- | --- |
+| Δ latency % | Relative to reference; negative = faster |
+| IQR ms | Sample variation; not online tail latency |
+| Requests/s | Batch size / median batch latency |
+| Bold median | Lowest observed value; no significance or parity claim |
 
 </details>
 
 ## Output parity
 
-Successful jobs pass structural checks. Exact parity additionally requires ordered beams and scores to match the reference. Top-1 agreement alone does not establish exact parity or recommendation quality.
-
 <details>
-<summary>All parity checks, including reference repeat consistency</summary>
+<summary>All parity checks</summary>
 
 $validation
 
-Overlap is the minimum shared-beam percentage across measured outputs. Score differences use only shared sequences. Each result is checked against the first measured reference output from the same run; the reference's own row checks repeat consistency.
+| Check | Meaning |
+| --- | --- |
+| Success | Structural checks passed |
+| Exact | Ordered beams and scores match the first same-run reference output |
+| Top-1 | Leading sequence matches; scores may differ |
+| Overlap % | Minimum shared-beam percentage across measured outputs |
+| Max score Δ | Largest score difference among shared sequences |
+| Reference row | Repeat consistency |
 
 </details>
 
 ## Run details
 
 <details>
-<summary>Measurement protocol and source versions</summary>
+<summary>Protocol and source versions</summary>
 
 $protocols
-
-The timer includes input submission, engine execution and conversion to completed CPU beam IDs/scores. Setup, warmup, validation and serialization are excluded.
 
 $versions
 
@@ -60,24 +68,40 @@ $versions
 
 $sol
 
-This is a partial matrix-compute floor. Memory traffic, reductions and host overhead remain unmodeled. A gap to this floor is not a promised speedup.
-
 </details>
 
 <details>
-<summary>Limitations</summary>
+<summary>Measurement scope and limitations</summary>
 
-$limitations
+| Item | Scope |
+| --- | --- |
+| Timer | CPU token IDs through completed CPU beam IDs/scores |
+| Included | Submission, transfers, execution, conversion and synchronization |
+| Excluded | Setup, warmup, validation and serialization |
+| Execution | Serial candidates; order rotates by case; clocks unlocked |
+| GPU memory usage | Not measured across engine process trees |
+| Compute floor | Matrix math only; omits memory traffic and host work |
+| Synthetic inputs | No recommendation-quality claim |
+| Historical timings | Different timing boundary; excluded from rankings |
 
 </details>
 
-## Reproduce
+## Artifacts
 
 $artifacts
 
-$reproduce
+```bash
+${extract}python3 bench.py report --run $directory
+```
 
-Executed jobs retain frozen requests, commands and worker logs; successful jobs also retain raw latency samples and measured beam outputs. Profiling artifacts remain separate from unprofiled headline timings.
+| Saved data | Location inside the run |
+| --- | --- |
+| Frozen configuration and hardware | `manifest.json` |
+| Derived measurements | `summary.json` |
+| Exact inputs | `workloads/` |
+| Requests, commands, logs, samples and beams | `jobs/<candidate>/<scenario>/<case>/` |
+
+$diagnostics
 
 **Scenario leaderboards**
 

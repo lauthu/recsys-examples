@@ -12,8 +12,11 @@ from harness.runner import e2e, select_cases
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ["plan", "e2e"]:
-        p = sub.add_parser(name)
+    for name, help_text in {
+        "plan": "List selected cases and protocol; no GPU work",
+        "e2e": "Run candidates and save measurements on the selected GPU",
+    }.items():
+        p = sub.add_parser(name, help=help_text)
         p.add_argument("--config", type=Path, default=ROOT / "run.template.yml")
         p.add_argument("--case", help="Exact case ID or shell-style pattern")
         p.add_argument("--solutions", nargs="+")
@@ -22,10 +25,14 @@ def main():
             action="store_true",
             help="First selected case; two warmups and three measurements",
         )
-    p = sub.add_parser("diagnose")
+    p = sub.add_parser(
+        "diagnose", help="Capture GPU kernels for a saved case with Nsight"
+    )
     p.add_argument("--run", type=Path, required=True)
     p.add_argument("--case", required=True)
-    p = sub.add_parser("report")
+    p = sub.add_parser(
+        "report", help="Rebuild run, diagnosis and leaderboard reports; no GPU work"
+    )
     p.add_argument("--run", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -58,9 +65,12 @@ def main():
                 any(r["summary"]["status"] in {"failed", "timed_out"} for r in records)
             )
         elif args.command == "report":
+            from reporting.diagnosis import render as render_diagnosis
             from reporting.report import render
 
             render(args.run)
+            for path in sorted((args.run / "diagnostics").glob("*/diagnosis.json")):
+                render_diagnosis(path.parent)
             print(args.run / "report.md")
     except (ValueError, OSError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

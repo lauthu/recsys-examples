@@ -265,6 +265,7 @@ class SuiteTests(unittest.TestCase):
                 "execution": {"gpu": "GPU-assigned"},
                 "solution": {
                     "name": "test",
+                    "env": {"GR_DECODE_ATTEN_ROOT": d},
                     "source": {},
                     "runtime": {
                         "kind": "docker",
@@ -282,11 +283,13 @@ class SuiteTests(unittest.TestCase):
                 ",".join(str(cpu) for cpu in sorted(os.sched_getaffinity(0))),
             )
             self.assertTrue("CUDA_VISIBLE_DEVICES=GPU-assigned" in cmd)
+            self.assertTrue(f"GR_DECODE_ATTEN_ROOT={d}" in cmd)
             request["solution"]["runtime"]["kind"] = "local"
             cmd, env, _ = runtime.command(
                 Path(d) / "request.json", Path(d) / "result.json", request
             )
             self.assertEqual(env["CUDA_VISIBLE_DEVICES"], "GPU-assigned")
+            self.assertEqual(env["GR_DECODE_ATTEN_ROOT"], d)
             self.assertTrue(env["USER"])
             self.assertEqual(
                 env["TVM_FFI_CACHE_DIR"], str(Path(d) / "cache/test/tvm_ffi")
@@ -532,8 +535,9 @@ class SuiteTests(unittest.TestCase):
             # The overview must expose output mismatches and unsuccessful jobs
             # even when the detailed tables are collapsed.
             overview = report.split("<details>", 1)[0]
-            self.assertTrue("**Top-1 mismatches: 1.**" in overview)
-            self.assertTrue("Results with unavailable parity: 1." in overview)
+            self.assertTrue("Top-1 mismatches" in overview)
+            self.assertTrue("| 2 | 1 | 1 | 1 |" in overview)
+            self.assertTrue("Top-1 mismatch case" in overview)
             self.assertTrue("broken" in overview)
             self.assertTrue("failed" in overview)
             board = (
@@ -667,6 +671,57 @@ class SuiteTests(unittest.TestCase):
             cfg["solution_configs"]["sglang_beam_search"]["source"]["expected_commit"],
             "af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d",
         )
+
+    def test_report_renders_saved_diagnosis_without_recapturing(self):
+        from bench import main
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            capture = root / "diagnostics/saved"
+            records = [
+                {
+                    "solution": "measured",
+                    "summary": {
+                        "status": "success",
+                        "measured_requests": 1,
+                        "measured_window_ms": 4.0,
+                        "gpu_active_union_ms": 3.0,
+                        "kernel_duration_sum_ms": 5.0,
+                        "kernels": [
+                            {"name": "kernel<float>", "calls": 2, "gpu_ms": 5.0}
+                        ],
+                    },
+                },
+                {
+                    "solution": "missing",
+                    "summary": {"status": "unsupported", "reason": "nsys unavailable"},
+                },
+            ]
+            write(capture / "diagnosis.json", records)
+            write(
+                capture / "measured/timeline/request.json",
+                {
+                    "case": self.case,
+                    "measurement": {"warmup_runs": 2, "repeats": 1},
+                },
+            )
+            original = (capture / "diagnosis.json").read_bytes()
+            with patch.object(
+                sys, "argv", ["bench.py", "report", "--run", str(root)]
+            ), patch("reporting.report.render") as render_run, patch(
+                "profiling.diagnose.run"
+            ) as recapture:
+                self.assertEqual(main(), 0)
+                render_run.assert_called_once_with(root)
+                recapture.assert_not_called()
+            report = (capture / "diagnosis.md").read_text()
+            self.assertTrue(
+                "| measured | success | 1 | 4.000 | 3.000 | 5.000 |" in report
+            )
+            self.assertTrue("nsys unavailable" in report)
+            self.assertTrue("`kernel<float>`" in report)
+            self.assertTrue("(../../report.md)" in report)
+            self.assertEqual((capture / "diagnosis.json").read_bytes(), original)
 
     def test_timeline_capture_failures_are_not_successful_results(self):
         from profiling.capture import main

@@ -1,6 +1,7 @@
 """Readable reports from recorded results; no execution or GPU dependencies."""
 
 import copy
+import shlex
 import statistics
 from pathlib import Path
 from string import Template
@@ -74,27 +75,27 @@ def comparison(data, cases):
 
 
 def parity_notice(data):
-    if not data:
-        return "No finished jobs to compare."
-    different = sum(r["parity"] == "different" for r in data)
-    missing = sum(r["parity"] == "unavailable" for r in data)
     mismatches = [
         r for r in data if (r.get("agreement") or {}).get("top1_exact") is False
     ]
-    lines = []
-    if different:
-        lines.append(
-            f"> **Results with output differences: {different}.** **Top-1 mismatches: {len(mismatches)}.** Compared with the same-run reference."
-        )
-        lines.extend(f"> - `{r['case']}` · `{r['solution']}`" for r in mismatches)
-    if missing:
-        lines.append(
-            f"> Results with unavailable parity: {missing}. These are not counted as matches."
-        )
-    return (
-        "\n".join(lines)
-        or "All recorded results exactly match their same-run reference."
+    summary = table(
+        ["Exact", "Different", "Top-1 mismatches", "Unavailable"],
+        [
+            [
+                sum(r["parity"] == "exact" for r in data),
+                sum(r["parity"] == "different" for r in data),
+                len(mismatches),
+                sum(r["parity"] == "unavailable" for r in data),
+            ]
+        ],
+        right_align=range(4),
     )
+    if mismatches:
+        summary += "\n\n" + table(
+            ["Top-1 mismatch case", "Candidate"],
+            [[r["case"], r["solution"]] for r in mismatches],
+        )
+    return summary
 
 
 def parity_table(data):
@@ -237,7 +238,6 @@ def render(directory):
     )
     if manifest.get("reason"):
         message += "\n\n> " + manifest["reason"]
-    limitations = "- Frameworks run serially, with case order rotating the solution order; clocks are not locked by this suite.\n- GPU memory is unavailable until a comparable process-tree collector is configured.\n- Historical reports use a different timing boundary and are not merged into this leaderboard.\n- Structural validity does not imply exact beam agreement.\n- Small sample counts are smoke evidence, not a regression conclusion."
     bounds, unavailable = [], set()
     for row in data:
         bound = row.get("speed_of_light", {})
@@ -258,9 +258,21 @@ def render(directory):
         if bounds
         else ""
     )
-    sol_table += "\n\n" + "\n".join(f"- {reason}." for reason in sorted(unavailable))
+    if unavailable:
+        sol_table += "\n\n" + table(
+            ["Estimate", "Reason"],
+            [["Unavailable", reason] for reason in sorted(unavailable)],
+        )
     if "dense_bf16_tflops" in cfg["hardware_config"]:
-        sol_table += f"\n\nConfigured dense BF16 ceiling: {cfg['hardware_config']['dense_bf16_tflops']} TFLOP/s. Source: {cfg['hardware_config']['source']}"
+        sol_table += "\n\n" + table(
+            ["Dense BF16 TFLOP/s", "Source"],
+            [
+                [
+                    cfg["hardware_config"]["dense_bf16_tflops"],
+                    cfg["hardware_config"]["source"],
+                ]
+            ],
+        )
     comparisons, measurements, validation = [], [], []
     for scenario in manifest["scenario_jobs"]:
         rows = sorted(
@@ -315,6 +327,11 @@ def render(directory):
         for job in jobs
         if job["status"] != "success"
     ]
+    archive = directory / "raw_artifacts.tar.gz"
+    diagnostic_links = [
+        [f"[{path.parent.name}]({path.relative_to(directory).as_posix()})"]
+        for path in sorted((directory / "diagnostics").glob("*/diagnosis.md"))
+    ]
     rendered = Template((ROOT / "reporting/templates/e2e.md").read_text()).substitute(
         run_id=manifest["run_id"],
         summary=message,
@@ -361,20 +378,18 @@ def render(directory):
             ["Solution", "Source commit/tree", "Dirty", "Key packages"],
             versions.values(),
         ),
-        limitations=limitations,
         artifacts=(
-            "[Raw artifact archive](raw_artifacts.tar.gz) (extract into this run directory before regenerating) · "
-            if (directory / "raw_artifacts.tar.gz").is_file()
-            else ""
-        )
-        + "[Manifest](manifest.json) · [Summary JSON](summary.json)",
-        reproduce="Use the frozen `jobs/*/*/*/request.json` and `command.json` for exact execution settings.\n\n"
-        "```bash\npython bench.py report --run "
-        + str(directory)
-        + "\npython bench.py diagnose --run "
-        + str(directory)
-        + " --case <case-id>\n```\n"
-        "The manifest records checkpoint hashes, source changes, image IDs and shared input checksums.",
+            "[Run archive](raw_artifacts.tar.gz)"
+            if archive.is_file()
+            else "[Manifest](manifest.json) · [Summary JSON](summary.json)"
+        ),
+        extract=f"tar -xzf {shlex.quote(str(archive))} -C {shlex.quote(str(directory))}\n"
+        if archive.is_file()
+        else "",
+        directory=shlex.quote(str(directory)),
+        diagnostics=table(["Saved GPU diagnosis"], diagnostic_links)
+        if diagnostic_links
+        else "",
     )
     (directory / "report.md").write_text(rendered)
     leaderboards(directory.parent)
@@ -496,20 +511,7 @@ def leaderboards(root):
         )
         boards.setdefault(scenario, []).append(section)
     for scenario, sections in boards.items():
-        text = (
-            f"# {scenario} leaderboard\n\n"
-            "Latest non-smoke result per case and candidate, grouped by scenario/checkpoint revision and hardware.\n\n"
-            "**Median batch latency in milliseconds · lower is better.** Bold marks the lowest recorded median in each row, without implying statistical significance or output equivalence. A dash means no recorded result.\n\n"
-            + "\n\n".join(sections)
-            + "\n\n"
-            + details(
-                "How this leaderboard is updated",
-                "Each completed job refreshes its row; unexecuted cases retain their last result. Failed and unsupported attempts replace older successes. "
-                "Source links identify the run behind every row.\n\n"
-                "Parity always uses the reference from that same source run. The reference row checks repeat consistency. "
-                "Latency cells may come from different runs; this table does not recompute cross-run parity. "
-                "Requests/s is batch size divided by median latency. Smoke and diagnostic runs do not update rankings.",
-            )
-            + "\n"
-        )
+        text = Template(
+            (ROOT / "reporting/templates/leaderboard.md").read_text()
+        ).substitute(scenario=scenario, sections="\n\n".join(sections))
         (target / f"{scenario}.md").write_text(text)

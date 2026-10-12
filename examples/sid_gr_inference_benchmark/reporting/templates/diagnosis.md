@@ -1,23 +1,38 @@
-# SID-GR diagnosis — $case_id
+# GPU diagnosis
 
-Source benchmark: $original
+| Field | Value |
+| --- | --- |
+| Case | `$case_id` |
+| Source run | $original |
+| Timing class | Profiled; excluded from e2e rankings |
 
-## GPU timeline
+$workload
 
-$timelines
+## Measured GPU work
 
 $measured
 
-Only kernels within complete `sid_bench/measured` NVTX ranges enter this summary.
-Startup and warmup are excluded. Kernel durations can overlap; their sum is not
-request latency. The GPU-active union counts overlapping intervals once.
+| Metric | Scope |
+| --- | --- |
+| Measured ranges | Complete `sid_bench/measured` NVTX ranges; warmup excluded |
+| Window ms | Union of measured NVTX intervals |
+| GPU-active ms | Union of kernel intervals inside measured ranges |
+| Kernel sum ms | Sum of kernel durations; overlaps count more than once |
+| Share % | Kernel duration / total kernel duration |
+| Attribution | Raw kernel names; no inferred semantic stages |
 
-Use these captures to locate expensive work, then rerun the unprofiled benchmark
-to measure an optimization. Profiled timings do not enter the e2e report.
+## Kernel breakdown
 
-## Reproduce
+$kernels
 
-$reproduce
+## Artifacts
 
-Requests, commands, logs, native `.nsys-rep` files and exported SQLite traces are
-saved alongside `diagnosis.json`.
+$artifacts
+
+| Path inside the run | Contents |
+| --- | --- |
+| `diagnostics/<capture>/diagnosis.json` | Capture status and all kernel totals |
+| `diagnostics/<capture>/<candidate>/timeline/` | Request, commands, logs, `.nsys-rep` and SQLite trace |
+
+Use the source run's `report` command to rebuild this view without a GPU.
+Rerun `e2e` after an optimization to measure its unprofiled impact.
