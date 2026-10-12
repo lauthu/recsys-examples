@@ -12,8 +12,8 @@ from harness import runtime
 from harness.artifacts import (
     digest,
     file_hash,
-    model_info,
     read,
+    resolve_model,
     source_info,
     suite_hash,
     write,
@@ -83,7 +83,11 @@ def e2e(cfg, selected):
         raise ValueError(
             f"Selected GPU {hardware['name']!r} does not match hardware profile {cfg['hardware']!r}"
         )
-    hardware["cpu"] = runtime.cpu_info()
+    cfg = copy.deepcopy(cfg)
+    cfg["execution"]["cpu_affinity"] = runtime.select_cpu_affinity(
+        cfg["hardware_config"]["cpu_cores"]
+    )
+    hardware["cpu"] = runtime.cpu_info(cfg["execution"]["cpu_affinity"])
     run_id = (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         + "-"
@@ -110,15 +114,14 @@ def e2e(cfg, selected):
     model_cache, solution_cache = {}, {}
     try:
         for index, case in enumerate(selected):
-            model_path = case["model"].get("path")
-            if not model_path or not Path(model_path).is_dir():
-                raise ValueError(
-                    f"Missing checkpoint for {case['name']}. Set its model-path environment variable; see README."
+            model_key = digest(case["model"])
+            if model_key not in model_cache:
+                print(
+                    f"Resolving checkpoint: {case['model']['id']}@{case['model']['revision']}",
+                    flush=True,
                 )
-            if model_path not in model_cache:
-                print(f"Hashing checkpoint: {model_path}", flush=True)
-                model_cache[model_path] = model_info(model_path)
-            model = model_cache[model_path]
+                model_cache[model_key] = resolve_model(case["model"])
+            model = model_cache[model_key]
             workload = build(case, model["config"])
             workload_path = (
                 directory / "workloads" / (case["id"].replace("/", "_") + ".json")

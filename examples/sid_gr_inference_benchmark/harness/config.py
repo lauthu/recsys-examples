@@ -89,7 +89,7 @@ def scenario(name, environment=None):
     cfg = read_yaml(path, environment)
     fields(
         cfg,
-        ["name", "model", "inputs", "generation", "prefix_cache", "measurement"],
+        ["name", "model", "inputs", "generation", "measurement"],
         label=str(path),
     )
     if cfg["name"] != name:
@@ -100,6 +100,14 @@ def scenario(name, environment=None):
         optional=["path"],
         label="model",
     )
+    if not isinstance(cfg["model"]["id"], str) or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", cfg["model"]["id"]
+    ):
+        raise ValueError("model.id must be a Hugging Face repository ID")
+    if not isinstance(cfg["model"]["revision"], str) or not re.fullmatch(
+        r"[0-9a-f]{40}", cfg["model"]["revision"]
+    ):
+        raise ValueError("model.revision must be a full immutable commit SHA")
     fields(
         cfg["inputs"],
         ["type", "context_lengths", "batch_sizes"],
@@ -140,9 +148,8 @@ def scenario(name, environment=None):
             integer(value, key)
         if len(set(values)) != len(values):
             raise ValueError(f"{key} contains duplicates")
-    for obj, key in [(cfg, "prefix_cache"), (cfg["generation"], "ignore_eos")]:
-        if type(obj[key]) is not bool:
-            raise ValueError(f"{key} must be a boolean")
+    if type(cfg["generation"]["ignore_eos"]) is not bool:
+        raise ValueError("ignore_eos must be a boolean")
     if cfg["model"].get("path"):
         cfg["model"]["path"] = resolve(cfg["model"]["path"])
     if cfg["inputs"].get("path"):
@@ -208,7 +215,10 @@ def load(path):
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
         raise ValueError("hardware must name a profile in config/hardware/")
     hardware = read_yaml(ROOT / "config/hardware" / f"{name}.yml", environment)
-    fields(hardware, ["gpu_name", "source"], optional=["dense_bf16_tflops"])
+    fields(
+        hardware, ["gpu_name", "source", "cpu_cores"], optional=["dense_bf16_tflops"]
+    )
+    integer(hardware["cpu_cores"], "hardware.cpu_cores")
     if not all(
         isinstance(hardware[k], str) and hardware[k].strip()
         for k in ["gpu_name", "source"]
@@ -223,14 +233,19 @@ def load(path):
         ):
             raise ValueError("dense_bf16_tflops must be finite and positive")
     cfg["hardware_config"] = hardware
+    profile = Path(path).resolve()
+    cfg["run_profile"] = str(
+        profile.relative_to(ROOT) if profile.is_relative_to(ROOT) else profile
+    )
     cfg["output_dir"] = resolve(cfg["output_dir"], Path(path).resolve().parent)
-    cfg["solution_configs"] = {
-        name: solution(name, environment) for name in cfg["solutions"]
-    }
     cfg["scenario_configs"] = {
         name: scenario(name, environment) for name in cfg["scenarios"]
     }
-    cfg["environment"] = environment
+    cfg["solution_configs"], cfg["environment"] = {}, {}
+    for name in cfg["solutions"]:
+        values = {}
+        cfg["solution_configs"][name] = solution(name, values)
+        cfg["environment"][name] = {**environment, **values}
     return cfg
 
 

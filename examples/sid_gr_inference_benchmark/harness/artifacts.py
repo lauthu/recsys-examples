@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
+from fnmatch import fnmatch
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+MODEL_PATTERNS = ("*.safetensors", "*.bin", "*.json", "*.txt", "*.model")
 
 
 def read(path):
@@ -66,8 +71,22 @@ def source_info(path):
         untracked = {
             n: file_hash(root / n) for n in names if n and (root / n).is_file()
         }
+        remote = "origin"
+        try:
+            branch = git("symbolic-ref", "--short", "HEAD").decode().strip()
+            remote = git("config", "--get", f"branch.{branch}.remote").decode().strip()
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            remote_url = public_git_url(
+                git("remote", "get-url", remote).decode().strip()
+            )
+        except subprocess.CalledProcessError:
+            remote_url = None
         return {
             "path": str(path),
+            "remote_url": remote_url,
+            "subdirectory": str(path.relative_to(root)),
             "commit": git("rev-parse", "HEAD").decode().strip(),
             "dirty": bool(status),
             "patch_sha256": hashlib.sha256(patch).hexdigest(),
@@ -82,6 +101,22 @@ def source_info(path):
         return {"path": str(path), "tree_sha256": digest(files)}
 
 
+def public_git_url(value):
+    """Record repository locations without Git credentials or URL query tokens."""
+    if "://" not in value:
+        match = re.fullmatch(r"(?:[^@]+@)?([^/:]+):(.+)", value)
+        if not match:
+            return None
+        value = f"https://{match[1]}/{match[2]}"
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https", "ssh", "git"}:
+        return None
+    hostname = parsed.hostname or ""
+    if parsed.scheme in {"http", "https"} and parsed.port:
+        hostname += f":{parsed.port}"
+    return urlunsplit(("https", hostname, parsed.path, "", ""))
+
+
 def suite_hash(root):
     root = Path(root)
     paths = list(root.glob("*.py"))
@@ -92,9 +127,8 @@ def suite_hash(root):
 
 def model_info(path):
     path = Path(path)
-    patterns = ("*.safetensors", "*.bin", "*.json", "*.txt", "*.model")
     files = sorted(
-        {p for pattern in patterns for p in path.glob(pattern) if p.is_file()}
+        {p for pattern in MODEL_PATTERNS for p in path.glob(pattern) if p.is_file()}
     )
     if not (path / "config.json").is_file() or not any(
         p.suffix in {".bin", ".safetensors"} for p in files
@@ -107,3 +141,44 @@ def model_info(path):
         "sha256": digest(hashes),
         "config": read(path / "config.json"),
     }
+
+
+def resolve_model(spec):
+    """Fetch a pinned snapshot, or verify an explicit local copy against that pin."""
+    from huggingface_hub import HfApi, snapshot_download
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    repo_id, revision = spec["id"], spec["revision"]
+    metadata = HfApi().model_info(repo_id, revision=revision, files_metadata=True)
+    if metadata.sha != revision:
+        raise ValueError(f"{repo_id}: Hub revision differs from requested commit")
+    expected = {
+        item.rfilename: item
+        for item in metadata.siblings
+        if "/" not in item.rfilename
+        and any(fnmatch(item.rfilename, pattern) for pattern in MODEL_PATTERNS)
+    }
+    path = spec.get("path")
+    if not path:
+        # A local_dir snapshot contains regular files, so a Docker bind mount of
+        # this directory also contains the weights (Hub cache snapshots use symlinks).
+        destination = Path(HF_HUB_CACHE) / repo_id.replace("/", "--") / revision
+        path = snapshot_download(
+            repo_id,
+            revision=revision,
+            local_dir=destination,
+            allow_patterns=list(expected),
+        )
+    info = model_info(path)
+    if set(info["files"]) != set(expected):
+        raise ValueError(f"{path}: model files differ from {repo_id}@{revision}")
+    for name, item in expected.items():
+        if item.lfs:
+            matches = info["files"][name] == item.lfs.sha256
+        else:
+            content = (Path(path) / name).read_bytes()
+            blob = f"blob {len(content)}\0".encode() + content
+            matches = hashlib.sha1(blob).hexdigest() == item.blob_id
+        if not matches:
+            raise ValueError(f"{path}/{name}: does not match {repo_id}@{revision}")
+    return {**info, "repo_id": repo_id, "revision": revision}

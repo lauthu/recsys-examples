@@ -21,7 +21,7 @@ def run(directory, case_id):
             "Suite code changed since this run; rerun e2e before diagnosis"
         )
     hardware = gpu_info(manifest["config"]["execution"]["gpu"])
-    hardware["cpu"] = cpu_info()
+    hardware["cpu"] = cpu_info(manifest["config"]["execution"]["cpu_affinity"])
     if hardware != manifest["hardware"]:
         raise ValueError(
             "GPU, driver or CPU configuration changed since the source benchmark"

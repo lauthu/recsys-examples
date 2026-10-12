@@ -9,6 +9,7 @@ from string import Template
 
 from harness.artifacts import digest, read, write
 from harness.config import ROOT
+from harness.reporting.reproduction import configuration_rows, source_link
 from harness.reporting.sol import estimate
 from harness.validation import compare
 
@@ -68,10 +69,23 @@ def comparison(data, cases):
                 value = f"**{value}**"
             values.append(value)
         rows.append(
-            [case["context_length"], case["batch_size"], case["beam_width"], *values]
+            [
+                case["context_length"],
+                case["batch_size"],
+                case["beam_width"],
+                *values,
+                ", ".join(
+                    f"**{name}**"
+                    for name, record in zip(names, candidates)
+                    if best is not None and record.get("median_ms") == best
+                )
+                or "—",
+            ]
         )
     return table(
-        ["Context", "Batch", "Beam", *names], rows, right_align=range(3 + len(names))
+        ["Context", "Batch", "Beam", *names, "Fastest"],
+        rows,
+        right_align=range(3 + len(names)),
     )
 
 
@@ -79,17 +93,27 @@ def parity_notice(data):
     mismatches = [
         r for r in data if (r.get("agreement") or {}).get("top1_exact") is False
     ]
-    summary = table(
-        ["Exact", "Different", "Top-1 mismatches", "Unavailable"],
-        [
+    rows = []
+    for name in dict.fromkeys(r["solution"] for r in data):
+        records = [r for r in data if r["solution"] == name]
+        rows.append(
             [
-                sum(r["parity"] == "exact" for r in data),
-                sum(r["parity"] == "different" for r in data),
-                len(mismatches),
-                sum(r["parity"] == "unavailable" for r in data),
+                name,
+                f"{sum(r['parity'] == 'exact' for r in records)} of {len(records)} cases",
+                f"{sum(r['parity'] == 'different' for r in records)} of {len(records)} cases",
+                f"{sum((r.get('agreement') or {}).get('top1_exact') is False for r in records)} cases",
+                f"{sum(r['parity'] == 'unavailable' for r in records)} cases",
             ]
+        )
+    summary = table(
+        [
+            "Solution",
+            "Exact beam/score match",
+            "Different beams or scores",
+            "Top-1 mismatches",
+            "Not compared",
         ],
-        right_align=range(4),
+        rows,
     )
     if mismatches:
         summary += "\n\n" + table(
@@ -161,8 +185,9 @@ def render(directory):
         (j["case_id"], j["solution"]): read(directory / j["directory"] / "result.json")
         for j in jobs
     }
+    requests = [read(directory / job["directory"] / "request.json") for job in jobs]
     versions, data = {}, []
-    for job in jobs:
+    for job, req in zip(jobs, requests):
         key = job["case_id"], job["solution"]
         result, case = records[key], cases[job["case_id"]]["case"]
         baseline = records.get((key[0], cfg["baseline"]), {})
@@ -214,12 +239,11 @@ def render(directory):
             result["environment"]["gpu"],
             median,
         )
-        req = read(directory / job["directory"] / "request.json")
         source = req.get("source") or result.get("adapter", {}).get("source") or {}
         packages = result["environment"]["packages"]
         versions[key[1]] = [
             key[1],
-            source.get("commit", source.get("tree_sha256", "installed"))[:16],
+            source_link(source),
             str(source.get("dirty", False)),
             ", ".join(
                 f"{k} {v}"
@@ -246,25 +270,19 @@ def render(directory):
     write(directory / "summary.json", data)
     succeeded = sum(r["status"] == "success" for r in data)
     message = table(
+        ["Run summary", "Meaning"],
         [
-            "Run status",
-            "Cases",
-            "Candidates",
-            "Completed evaluations",
-            "Passed",
-            "Failed / unsupported",
-            "Mode",
-        ],
-        [
+            ["Status", manifest["status"]],
+            ["Workload", f"{len(cases)} context / batch / beam combinations"],
+            ["Solutions compared", ", ".join(cfg["solutions"])],
             [
-                manifest["status"],
-                len(cases),
-                len(cfg["solutions"]),
-                f"{len(data)} of {sum(manifest['scenario_jobs'].values())}",
-                succeeded,
-                len(data) - succeeded,
-                manifest["mode"],
-            ]
+                "Progress",
+                f"{len(data)} of {sum(manifest['scenario_jobs'].values())} solution–workload runs finished",
+            ],
+            [
+                "Execution checks",
+                f"{succeeded} passed; {len(data) - succeeded} failed or unsupported",
+            ],
         ],
     )
     if manifest.get("reason"):
@@ -363,13 +381,21 @@ def render(directory):
         [f"[{path.parent.name}]({path.relative_to(directory).as_posix()})"]
         for path in sorted((directory / "diagnostics").glob("*/diagnosis.md"))
     ]
+    environment, artifacts, options = configuration_rows(
+        cfg,
+        manifest["cases"],
+        requests,
+        [records[j["case_id"], j["solution"]] for j in jobs],
+    )
     rendered = Template(
         (ROOT / "harness/reporting/templates/e2e.md").read_text()
     ).substitute(
         run_id=manifest["run_id"],
+        run_profile=f"[Run profile]({os.path.relpath(ROOT / cfg['run_profile'], directory)})"
+        if cfg.get("run_profile")
+        else "Run profile not recorded",
         summary=message,
-        hardware=hardware_table(manifest["hardware"], cfg["hardware_config"])
-        + f"\n\nHardware profile: [{cfg['hardware']}]({os.path.relpath(ROOT / 'config/hardware' / (cfg['hardware'] + '.yml'), directory)}).",
+        hardware=f"Hardware profile: [{cfg['hardware']}]({os.path.relpath(ROOT / 'config/hardware' / (cfg['hardware'] + '.yml'), directory)}).",
         baseline=cfg["baseline"],
         attention=(
             "> **Smoke run:** small-sample validation only; excluded from scenario rankings.\n\n"
@@ -400,7 +426,7 @@ def render(directory):
             "Smoke runs do not update scenario leaderboards."
             if manifest["mode"] == "smoke"
             else "\n".join(
-                f"- [{name}](../leaderboards/{name}.md)"
+                f"- [{name}](../../leaderboards/{name}.md)"
                 for name in manifest["scenario_jobs"]
             )
         ),
@@ -413,14 +439,16 @@ def render(directory):
             versions.values(),
         ),
         environment=table(
-            ["Configuration variable", "Value used (including defaults)"],
-            [
-                [f"`{key}`", f"`{value}`" if value else "(unset)"]
-                for key, value in sorted(cfg.get("environment", {}).items())
-            ],
-        )
-        if cfg.get("environment")
-        else "Configuration environment was not recorded for this run.",
+            ["Configuration variable", "Solution(s)", "Value used", "Reproduce from"],
+            environment,
+        ),
+        sources=table(
+            ["Solution", "Component", "Reproducible source / image ID"], artifacts
+        ),
+        options=table(["Solution", "Engine option", "Value used"], options),
+        image_recipe=os.path.relpath(
+            ROOT / "entrypoints/sglang/Dockerfile.beam_search", directory
+        ),
         artifacts=(
             "[Run archive](raw_artifacts.tar.gz)"
             if archive.is_file()
@@ -437,35 +465,6 @@ def render(directory):
     (directory / "report.md").write_text(rendered)
     leaderboards(directory.parent)
     return data
-
-
-def hardware_table(hardware, profile=None):
-    cpu = hardware.get("cpu")
-    rows = [
-        [
-            "GPU",
-            f"[{hardware['name']}]({profile['source']})"
-            if profile
-            else hardware["name"],
-        ],
-        [
-            "GPU memory / driver",
-            f"{hardware.get('memory_mib', 'unrecorded')} MiB / {hardware.get('driver', 'unrecorded')}",
-        ],
-    ]
-    if cpu:
-        rows.extend(
-            [
-                ["CPU", cpu["model"]],
-                [
-                    "CPU topology / affinity",
-                    f"{cpu['sockets']} sockets · {cpu['physical_cores']} physical cores · {cpu['logical_cpus']} logical CPUs · {len(cpu['affinity'])} allowed CPUs",
-                ],
-            ]
-        )
-    else:
-        rows.append(["CPU", "unrecorded"])
-    return table(["Hardware", "Recorded configuration"], rows)
 
 
 def leaderboards(root):
@@ -505,7 +504,7 @@ def leaderboards(root):
                 manifest,
                 path.parent.name,
             )
-    target = root / "leaderboards"
+    target = root.parent / "leaderboards"
     target.mkdir(exist_ok=True)
     boards = {}
     for (scenario, revision, _), group in sorted(groups.items()):
@@ -526,16 +525,16 @@ def leaderboards(root):
                     record["status"],
                     number(record.get("requests_per_second")),
                     manifest["config"]["baseline"],
-                    f"[{manifest['run_id']}](../{run_dir}/report.md) ({manifest['status']})",
+                    f"[{manifest['run_id']}]({os.path.relpath(root / run_dir / 'report.md', target)}) ({manifest['status']})",
                 ]
             )
         section = (
-            f"## {group['hardware']['name']}\n\nScenario/checkpoint revision: `{revision[:12]}`.\n\n"
+            f"## [{group['hardware']['name']}]({os.path.relpath(ROOT / 'config/hardware' / (manifest['config']['hardware'] + '.yml'), target)})\n\n"
             f"**CPU:** {group['hardware'].get('cpu', {}).get('model', 'unrecorded')} · "
+            f"**Worker cores:** {len(group['hardware'].get('cpu', {}).get('affinity', []))} · "
             f"**Driver:** {group['hardware'].get('driver', 'unrecorded')}\n\n"
             + parity_notice(data)
             + "\n\n"
-            + details("Hardware configuration", hardware_table(group["hardware"]))
             + "\n\n### Latency comparison\n\n"
             + comparison(data, group["cases"])
             + "\n\n"
@@ -565,3 +564,12 @@ def leaderboards(root):
             (ROOT / "harness/reporting/templates/leaderboard.md").read_text()
         ).substitute(scenario=scenario, sections="\n\n".join(sections))
         (target / f"{scenario}.md").write_text(text)
+    (target / "README.md").write_text(
+        "# Leaderboards\n\nLatest benchmark results by scenario.\n\n"
+        + "\n".join(
+            f"- [{path.stem}]({path.name})"
+            for path in sorted(target.glob("*.md"))
+            if path.stem != "README"
+        )
+        + "\n"
+    )

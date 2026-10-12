@@ -17,6 +17,7 @@ from harness.runner import e2e, select_cases
 class InputIdentityTests(unittest.TestCase):
     def test_jsonl_revisions_stay_separate_across_partial_runs(self):
         cfg = load(ROOT / "config/runs/default.yml")
+        cfg["hardware_config"]["cpu_cores"] = 1
         name = cfg["scenarios"][0]
         spec = cfg["scenario_configs"][name]
         cfg["scenario_configs"] = {name: spec}
@@ -63,9 +64,9 @@ class InputIdentityTests(unittest.TestCase):
             spec["model"]["path"] = d
             cfg["output_dir"] = str(root / "results")
             model = {"path": d, "sha256": "model", "config": {"vocab_size": 32}}
-            board = root / "results/leaderboards" / f"{name}.md"
+            board = root / "leaderboards" / f"{name}.md"
             with patch("harness.runtime.gpu_info", return_value=hardware), patch(
-                "harness.runner.model_info", return_value=model
+                "harness.runner.resolve_model", return_value=model
             ), patch("harness.runner.source_info", return_value=None), patch(
                 "harness.runner.launch", side_effect=launch
             ):

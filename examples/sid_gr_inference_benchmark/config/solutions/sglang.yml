@@ -5,10 +5,13 @@ source:
 runtime:
   kind: ${SGLANG_RUNTIME:-local}
   python: ${SGLANG_PYTHON:-python3}
-  image: ${SGLANG_IMAGE:-}
+  image: ${SGLANG_IMAGE:-lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306}
 engine:
+  prefix_cache: true
   page_size: 1
   disable_overlap_schedule: true
+  disable_cuda_graph: false
+  disable_piecewise_cuda_graph: false
   mem_fraction_static: 0.70
   log_level: warning
 env: {}

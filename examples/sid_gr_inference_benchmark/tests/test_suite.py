@@ -264,7 +264,7 @@ class SuiteTests(unittest.TestCase):
             request = {
                 "run_dir": d,
                 "model": {"path": d},
-                "execution": {"gpu": "GPU-assigned"},
+                "execution": {"gpu": "GPU-assigned", "cpu_affinity": [2, 4]},
                 "solution": {
                     "name": "test",
                     "env": {"GR_DECODE_ATTEN_ROOT": d},
@@ -282,7 +282,7 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(cmd[cmd.index("--gpus") + 1], "device=GPU-assigned")
             self.assertEqual(
                 cmd[cmd.index("--cpuset-cpus") + 1],
-                ",".join(str(cpu) for cpu in sorted(os.sched_getaffinity(0))),
+                "2,4",
             )
             self.assertTrue("CUDA_VISIBLE_DEVICES=GPU-assigned" in cmd)
             self.assertTrue(f"GR_DECODE_ATTEN_ROOT={d}" in cmd)
@@ -296,7 +296,8 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(
                 env["TVM_FFI_CACHE_DIR"], str(Path(d) / "cache/test/tvm_ffi")
             )
-            self.assertEqual(cmd[1:3], ["-m", "harness.worker"])
+            self.assertEqual(cmd[:3], ["taskset", "--cpu-list", "2,4"])
+            self.assertEqual(cmd[4:6], ["-m", "harness.worker"])
         for gpu in [0, "0", "", "3,1"]:
             with self.subTest(gpu=gpu), self.assertRaisesRegex(
                 ValueError, "full GPU UUID"
@@ -454,7 +455,7 @@ class SuiteTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing keys.*hardware"):
                 load(path)
             cfg = load(ROOT / "config/runs/default.yml")
-            cfg["output_dir"] = d
+            cfg["output_dir"] = str(Path(d) / "results")
             with patch(
                 "harness.runtime.gpu_info", return_value={"name": "Other GPU"}
             ), patch("harness.runner.launch") as launch_worker:
@@ -469,6 +470,11 @@ class SuiteTests(unittest.TestCase):
 
         cfg = load(ROOT / "config/runs/default.yml")
         baseline = cfg["baseline"]
+        solution = cfg["solution_configs"][baseline]
+        cfg["solutions"] = [baseline, "candidate", "broken"]
+        cfg["solution_configs"] = {
+            name: {**copy.deepcopy(solution), "name": name} for name in cfg["solutions"]
+        }
         changed = copy.deepcopy(self.outputs)
         changed[0]["beams"][0]["token_ids"] = [8, 9, 10]
         other_case = copy.deepcopy(self.case)
@@ -476,7 +482,8 @@ class SuiteTests(unittest.TestCase):
         hardware = {"name": cfg["hardware_config"]["gpu_name"], "uuid": "GPU-assigned"}
         cfg["scenario_configs"]["other_scenario"] = other_case
         with tempfile.TemporaryDirectory() as d:
-            root = Path(d) / "run-one"
+            root = Path(d) / "results/run-one"
+            boards = Path(d) / "leaderboards"
             manifest = {
                 "schema_version": 2,
                 "run_id": "run-one",
@@ -506,7 +513,10 @@ class SuiteTests(unittest.TestCase):
                         "status": status,
                     }
                 )
-                write(root / directory / "request.json", {})
+                write(
+                    root / directory / "request.json",
+                    {"case": case, "solution": cfg["solution_configs"][name]},
+                )
                 write(
                     root / directory / "result.json",
                     {
@@ -520,9 +530,8 @@ class SuiteTests(unittest.TestCase):
             partial = {**manifest, "status": "running", "jobs": manifest["jobs"][:1]}
             write(root / "manifest.json", partial)
             render(root)
-            board = (
-                root.parent / "leaderboards" / f"{self.case['name']}.md"
-            ).read_text()
+            board_path = boards / f"{self.case['name']}.md"
+            board = board_path.read_text()
             self.assertTrue(baseline in board)
             self.assertTrue("running" in board)
             write(root / "manifest.json", manifest)
@@ -541,24 +550,24 @@ class SuiteTests(unittest.TestCase):
             # even when the detailed tables are collapsed.
             overview = report.split("<details>", 1)[0]
             self.assertTrue("Top-1 mismatches" in overview)
-            self.assertTrue("| 2 | 1 | 1 | 1 |" in overview)
+            self.assertTrue(f"| {baseline} | 2 of 2 cases |" in overview)
+            self.assertTrue(
+                "| candidate | 0 of 1 cases | 1 of 1 cases | 1 cases | 0 cases |"
+                in overview
+            )
             self.assertTrue("Top-1 mismatch case" in overview)
             self.assertTrue("broken" in overview)
             self.assertTrue("failed" in overview)
-            self.assertTrue("| 4 of 4 |" in overview)
-            self.assertTrue(cfg["hardware_config"]["source"] in overview)
+            self.assertTrue("4 of 4 solution–workload runs finished" in overview)
+            self.assertTrue(f"Hardware profile: [{cfg['hardware']}]" in overview)
             self.assertTrue("`BENCHMARK_GPU`" in report)
-            board = (
-                root.parent / "leaderboards" / f"{self.case['name']}.md"
-            ).read_text()
+            board = board_path.read_text()
             self.assertTrue("run-one" in board)
             self.assertTrue("candidate" in board)
             self.assertTrue("failed" in board)
             self.assertNotIn("other_scenario", board)
-            self.assertTrue(
-                (root.parent / "leaderboards" / "other_scenario.md").is_file()
-            )
-            board_path = root.parent / "leaderboards" / f"{self.case['name']}.md"
+            self.assertTrue((boards / "other_scenario.md").is_file())
+            self.assertTrue((boards / "README.md").is_file())
 
             # A partial rerun replaces only its completed row, including failure.
             import shutil
@@ -605,6 +614,7 @@ class SuiteTests(unittest.TestCase):
             write(third / "manifest.json", different)
             render(third)
             self.assertEqual(board_path.read_text().count("\n## "), 2)
+            self.assertTrue("**CPU:** Other CPU" in board_path.read_text())
             different["hardware"] = hardware
             different["cases"][0]["model"]["sha256"] = "new-checkpoint"
             write(third / "manifest.json", different)
@@ -684,9 +694,17 @@ class SuiteTests(unittest.TestCase):
         from bench import main
 
         with tempfile.TemporaryDirectory() as d:
-            root = Path(d) / "run"
+            root = Path(d) / "results/run"
             cfg = load(ROOT / "config/runs/default.yml")
             cfg["baseline"] = "measured"
+            cfg["solutions"] = ["measured"]
+            cfg["solution_configs"] = {
+                "measured": {
+                    **cfg["solution_configs"]["sid_gr_inference"],
+                    "name": "measured",
+                }
+            }
+            cfg["execution"]["cpu_affinity"] = [2, 4]
             model = {"path": d, "sha256": "checkpoint", "config": self.model}
             hardware = {"name": cfg["hardware_config"]["gpu_name"], "cpu": {}}
             write(
@@ -717,8 +735,9 @@ class SuiteTests(unittest.TestCase):
                     "case": self.case,
                     "measurement": self.case["measurement"],
                     "model": model,
-                    "solution": {"name": "measured", "source": {}},
+                    "solution": cfg["solution_configs"]["measured"],
                     "source": {},
+                    "execution": cfg["execution"],
                 },
             )
             write(
@@ -785,6 +804,7 @@ class SuiteTests(unittest.TestCase):
 
             def capture_timeline(request, target, *, profile):
                 self.assertTrue(profile)
+                self.assertEqual(request["execution"]["cpu_affinity"], [2, 4])
                 write(target / "request.json", request)
                 return {"status": "unsupported", "reason": "nsys unavailable"}
 
@@ -795,7 +815,7 @@ class SuiteTests(unittest.TestCase):
                 return_value={"name": hardware["name"]},
             ), patch(
                 "harness.profiling.diagnose.cpu_info", return_value={}
-            ), patch(
+            ) as identify_cpu, patch(
                 "harness.profiling.diagnose.source_info", return_value={}
             ), patch(
                 "harness.profiling.diagnose.model_info", return_value=model
@@ -803,6 +823,7 @@ class SuiteTests(unittest.TestCase):
                 "harness.profiling.diagnose.launch", side_effect=capture_timeline
             ):
                 new_capture, _ = run(root, self.case["id"])
+                identify_cpu.assert_called_once_with([2, 4])
             self.assertTrue(
                 f"diagnostics/{new_capture.name}/diagnosis.md"
                 in (root / "report.md").read_text()
@@ -841,6 +862,7 @@ class SuiteTests(unittest.TestCase):
 
     def test_e2e_records_unsupported_and_failed_workers_without_gpu(self):
         cfg = load(ROOT / "config/runs/default.yml")
+        cfg["hardware_config"]["cpu_cores"] = 1
         cfg["solutions"] = ["sid_gr_inference", "broken"]
         cfg["solution_configs"]["broken"] = copy.deepcopy(
             cfg["solution_configs"]["sid_gr_inference"]
@@ -854,10 +876,10 @@ class SuiteTests(unittest.TestCase):
         cfg["execution"]["gpu"] = "GPU-assigned"
         self.case["generation"]["constraints"] = "catalog"
         with tempfile.TemporaryDirectory() as d:
-            cfg["output_dir"] = d
+            cfg["output_dir"] = str(Path(d) / "results")
             self.case["model"]["path"] = d
             with patch(
-                "harness.runner.model_info",
+                "harness.runner.resolve_model",
                 return_value={"path": d, "sha256": "fixture", "config": self.model},
             ), patch(
                 "harness.runtime.gpu_info",
@@ -867,14 +889,15 @@ class SuiteTests(unittest.TestCase):
                 },
             ):
                 directory, manifest = e2e(cfg, [self.case])
+                selected_cpus = manifest["config"]["execution"]["cpu_affinity"]
+                self.assertEqual(len(selected_cpus), 1)
+                self.assertEqual(manifest["hardware"]["cpu"]["affinity"], selected_cpus)
                 original = (directory / "report.md").read_bytes()
                 second, _ = e2e(cfg, [self.case])
                 self.assertNotEqual(directory, second)
                 self.assertEqual((directory / "report.md").read_bytes(), original)
                 self.assertTrue(
-                    (
-                        second.parent / "leaderboards" / f"{self.case['name']}.md"
-                    ).is_file()
+                    (Path(d) / "leaderboards" / f"{self.case['name']}.md").is_file()
                 )
             self.assertEqual(
                 [j["status"] for j in manifest["jobs"]], ["unsupported", "failed"]
@@ -883,6 +906,10 @@ class SuiteTests(unittest.TestCase):
             for job in manifest["jobs"]:
                 job_dir = directory / job["directory"]
                 self.assertTrue((job_dir / "request.json").is_file())
+                self.assertEqual(
+                    read(job_dir / "request.json")["execution"]["cpu_affinity"],
+                    selected_cpus,
+                )
                 self.assertTrue((job_dir / "worker.log").is_file())
                 self.assertEqual(read(job_dir / "result.json")["status"], job["status"])
             self.assertEqual(
@@ -890,9 +917,7 @@ class SuiteTests(unittest.TestCase):
                 ["unsupported", "failed"],
             )
             self.assertTrue((directory / "report.md").is_file())
-            board = (
-                directory.parent / "leaderboards" / f"{self.case['name']}.md"
-            ).read_text()
+            board = (Path(d) / "leaderboards" / f"{self.case['name']}.md").read_text()
             self.assertTrue(second.name in board)
             self.assertTrue("unsupported" in board)
             self.assertTrue("failed" in board)

@@ -5,10 +5,20 @@ source:
 runtime:
   kind: ${SID_GR_RUNTIME:-local}
   python: ${SID_GR_PYTHON:-python3}
-  image: ${SID_GR_IMAGE:-}
-  mounts: ["${GR_DECODE_ATTEN_ROOT:-}"]
-engine: {}
+  # Build with entrypoints/sglang/Dockerfile.beam_search; both engines share it.
+  image: ${SID_GR_IMAGE:-sid-gr-benchmark:beam-af4e3f4-cu130}
+  mounts: ["${GR_DECODE_ATTEN_ROOT:-../../corelib/gr_decode_atten}"]
+engine:
+  prefix_cache: true
 env:
+  # Current serving defaults: native prefill, CUDA graphs and fused/JIT kernels.
+  GR_INFERENCE_PREFILL_BACKEND: auto
+  GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "0"
+  GR_INFERENCE_DISABLE_DECODE_CUDA_GRAPH: "0"
+  GR_INFERENCE_DISABLE_FLATTEN_LINEAR: "0"
+  GR_INFERENCE_GR_TRTLLM_KERNELS_JIT: "1"
+  GR_INFERENCE_TRTLLM_QK_NORM_ROPE_PHASE: all
+  GR_INFERENCE_TRTLLM_PACKED_GEMM_SCOPE: all
   # Expanded from the controller's environment; forwarded to the worker environment.
   # runtime.mounts above exposes this same path inside Docker.
-  GR_DECODE_ATTEN_ROOT: ${GR_DECODE_ATTEN_ROOT:-}
+  GR_DECODE_ATTEN_ROOT: ${GR_DECODE_ATTEN_ROOT:-../../corelib/gr_decode_atten}

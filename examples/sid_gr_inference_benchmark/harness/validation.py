@@ -24,10 +24,6 @@ def supported(case):
         ),
         (generation["length_penalty"] == 0, "only unnormalized scores are supported"),
         (generation["return_beams"] == "all", "all beams must be returned"),
-        (
-            case["prefix_cache"] is False,
-            "prefix-cache comparisons are not migrated yet",
-        ),
     ]
     for okay, reason in requirements:
         if not okay:

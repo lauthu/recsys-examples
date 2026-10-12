@@ -9,6 +9,7 @@ from harness.validation import Unsupported, supported
 def check_support(case, solution):
     supported(case)
     allowed = {
+        "prefix_cache",
         "page_size",
         "disable_overlap_schedule",
         "mem_fraction_static",
@@ -23,6 +24,8 @@ def check_support(case, solution):
         )
     if solution["engine"].get("page_size", 1) != 1:
         raise Unsupported("Beam-search candidates require page_size=1")
+    if type(solution["engine"].get("prefix_cache", False)) is not bool:
+        raise Unsupported("prefix_cache must be a boolean")
     if case["beam_width"] == 1:
         raise Unsupported(
             "SGLang width-1 sampling does not expose the same beam-score contract"
@@ -70,15 +73,17 @@ class Adapter:
             **beam_params,
         }
         self.module = sglang.__file__
+        configured_engine = dict(request["solution"]["engine"])
+        prefix_cache = configured_engine.pop("prefix_cache", False)
         self.engine = sglang.Engine(
             model_path=request["model"]["path"],
             dtype="bfloat16",
             kv_cache_dtype="auto",
-            disable_radix_cache=True,
+            disable_radix_cache=not prefix_cache,
             skip_tokenizer_init=True,
             tp_size=1,
             random_seed=self.case["inputs"].get("seed", 42),
-            **request["solution"]["engine"],
+            **configured_engine,
             **engine_options,
         )
 

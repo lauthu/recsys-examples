@@ -61,6 +61,7 @@ def command(request_path, output_path, request, *, profile=False):
         "--output",
         str(output_path),
     ]
+    cpu_list = ",".join(str(cpu) for cpu in execution["cpu_affinity"])
     container = None
     if runtime["kind"] == "docker":
         container = "sid-bench-" + uuid.uuid4().hex[:12]
@@ -73,7 +74,7 @@ def command(request_path, output_path, request, *, profile=False):
             "--gpus",
             f"device={execution['gpu']}",
             "--cpuset-cpus",
-            ",".join(str(cpu) for cpu in sorted(os.sched_getaffinity(0))),
+            cpu_list,
             "--shm-size",
             "4g",
             "--user",
@@ -105,7 +106,7 @@ def command(request_path, output_path, request, *, profile=False):
         cmd += ["--workdir", str(ROOT), runtime["image"], *worker[1:]]
         return cmd, os.environ.copy(), container
     env = {**os.environ, **env}
-    return worker, env, container
+    return ["taskset", "--cpu-list", cpu_list, *worker], env, container
 
 
 def execute(cmd, env, log, timeout, container=None):
@@ -173,8 +174,34 @@ def gpu_info(gpu):
         raise ValueError(f"Cannot identify selected GPU {gpu}: {exc}") from exc
 
 
-def cpu_info():
-    """Record host topology and the CPUs available to the benchmark process."""
+def select_cpu_affinity(core_count):
+    """Choose one allowed logical CPU per physical core, ordered by CPU ID."""
+    topology = subprocess.check_output(["lscpu", "--parse=CPU,CORE,SOCKET"], text=True)
+    allowed = os.sched_getaffinity(0)
+    cores = {}
+    rows = sorted(
+        tuple(map(int, row.split(",")))
+        for row in topology.splitlines()
+        if row and not row.startswith("#")
+    )
+    for cpu, core, socket in rows:
+        if cpu in allowed:
+            cores.setdefault((socket, core), cpu)
+    if len(cores) < core_count:
+        raise ValueError(
+            f"Hardware profile requires {core_count} CPU cores; "
+            f"only {len(cores)} physical cores are available in process affinity"
+        )
+    return list(cores.values())[:core_count]
+
+
+def cpu_info(affinity=None):
+    """Record host topology and the affinity assigned to benchmark workers."""
+    allowed = os.sched_getaffinity(0)
+    if affinity is None:
+        affinity = sorted(allowed)
+    elif not set(affinity).issubset(allowed):
+        raise ValueError("Recorded benchmark CPUs are no longer available")
     info = json.loads(
         subprocess.check_output(
             ["lscpu", "--json"], text=True, env={**os.environ, "LC_ALL": "C"}
@@ -186,5 +213,5 @@ def cpu_info():
         "sockets": int(fields["Socket(s)"]),
         "physical_cores": int(fields["Socket(s)"]) * int(fields["Core(s) per socket"]),
         "logical_cpus": int(fields["CPU(s)"]),
-        "affinity": sorted(os.sched_getaffinity(0)),
+        "affinity": affinity,
     }

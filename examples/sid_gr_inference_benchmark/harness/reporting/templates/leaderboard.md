@@ -1,8 +1,8 @@
 # $scenario leaderboard
 
-Latest non-smoke result per case/candidate. Groups separate hardware and scenario revisions.
+Compare each solution's latest latency on the same workload and hardware.
 
-Median batch **ms**; lower is better. **Bold** = lowest recorded median. — = no result.
+Median batch **ms**; lower is better. The **Fastest** column names the winner for each workload.
 
 $sections
 
@@ -20,6 +20,8 @@ $sections
 | Reference parity | Repeat consistency |
 | Requests/s | Batch size / median batch latency |
 | Bold median | No significance or output-equivalence claim |
-| Excluded | Smoke and diagnosis runs |
+| Excluded | Short validation runs (`--smoke`) and profiled timings |
 
 </details>
+
+Generated from the [leaderboard template](../harness/reporting/templates/leaderboard.md).

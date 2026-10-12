@@ -1,8 +1,8 @@
 name: qwen3_1_7B
 model:
   id: Qwen/Qwen3-1.7B
-  revision: main
-  path: ${QWEN3_1_7B_MODEL:-../sid-gr-inference/models/Qwen3-1.7B}
+  revision: 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+  path: ${QWEN3_1_7B_MODEL:-}  # Optional local copy, verified against the pinned snapshot.
   dtype: bfloat16
   quantization: none
   kv_cache_dtype: bfloat16
@@ -19,7 +19,6 @@ generation:
   length_penalty: 0
   score: cumulative_logprob
   constraints: none
-prefix_cache: false
 
 # Measurement protocol is part of the scenario, shared by all candidates.
 measurement:

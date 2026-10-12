@@ -1,6 +1,7 @@
 # Harness workflow
 
-The controller uses Python and PyYAML. GPU frameworks load only inside workers.
+The controller uses Python, PyYAML and Hugging Face Hub. GPU frameworks load only
+inside workers; Hub downloads happen only during `e2e`.
 
 ```mermaid
 flowchart LR
@@ -19,7 +20,7 @@ flowchart LR
 | [runtime.py](runtime.py) | Select GPU/CPU resources, build local/Docker commands and stop timed-out workers. |
 | [worker.py](worker.py) | Load one adapter, warm up, time completed outputs and validate every repeat. |
 | [workload.py](workload.py), [validation.py](validation.py) | Build scenario inputs and check beam outputs against the shared contract. |
-| [artifacts.py](artifacts.py) | Read/write JSON and hash model, source, suite and input identities. |
+| [artifacts.py](artifacts.py) | Resolve and verify pinned checkpoints; record hashes and sanitized Git repository/commit identities. |
 | [reporting](reporting) | Derive measurements and render saved results. No GPU work. |
 | [profiling](profiling) | Capture and summarize measured NVTX ranges with Nsight. |
 
@@ -30,20 +31,23 @@ flowchart LR
 | [../config/runs](../config/runs) | Selected scenarios, candidates, baseline, hardware and execution policy. |
 | [../config/scenarios](../config/scenarios) | Model, inputs, case grid, generation rules and measurement protocol. |
 | [../config/solutions](../config/solutions) | Adapter, source, runtime, environment and engine options. |
-| [../config/hardware](../config/hardware) | Required GPU SKU and optional compute ceiling. |
+| [../config/hardware](../config/hardware) | Required GPU SKU and physical CPU core count; optional compute ceiling. |
 
 `plan` and `e2e` default to `config/runs/default.yml`, with SGLang as the baseline.
 `--config config/runs/readme.yml` selects the pinned SGLang beam-search branch.
 Model, input, source and mount paths are relative to the suite root; `output_dir`
 is relative to the run YAML. Both supplied runs write to the suite's `results/`.
-Resolved `${VARIABLE:-default}` values are saved with the run configuration.
+Resolved `${VARIABLE:-default}` values and their candidate scope are saved with the
+run configuration. Models require a Hugging Face ID and full commit SHA. A local
+model override must match the pinned snapshot; otherwise `e2e` downloads it into
+the controller's Hub cache. Both paths verify file hashes using Hub metadata.
 
 ## Commands through the harness
 
 | Command | Path |
 | --- | --- |
-| `plan` | Load → select → print cases. |
-| `e2e` | Load → select → verify hardware → freeze → launch → save → report. |
+| `plan` | Load → select → print cases. No downloads. |
+| `e2e` | Load → select → verify hardware → resolve model and freeze inputs → launch → save → report. |
 | `report` | Read saved JSON → rebuild run/diagnosis reports and leaderboards. |
 | `diagnose` | Verify saved identities → replay one case under Nsight → save trace and kernel tables. |
 
@@ -56,11 +60,21 @@ Resolved `${VARIABLE:-default}` values are saved with the run configuration.
 | Candidate `env` | Added to subprocess environment | Passed as `docker run --env KEY=VALUE` |
 | `runtime.mounts` | Paths already exist on host | Read-only mounts at identical paths |
 | GPU UUID | `CUDA_VISIBLE_DEVICES` | `--gpus device=UUID` and `CUDA_VISIBLE_DEVICES` |
-| CPU affinity | Inherited | `--cpuset-cpus` matches controller |
+| CPU affinity | `taskset` with the selected CPU set | `--cpuset-cpus` with the same set |
 
-Example: export `GR_DECODE_ATTEN_ROOT` before loading the SID-GR YAML.
-`config.py` expands it into the candidate's `env` and `runtime.mounts`.
-`runner.py` saves those values in `request.json`; `runtime.py` forwards them.
+`hardware.cpu_cores` selects physical cores from the controller's allowed affinity,
+one logical CPU per core; the supplied profile selects 10. Every worker and diagnosis
+replay uses that recorded set. Too few available cores fail before any jobs launch.
+
+`GR_DECODE_ATTEN_ROOT` defaults to the tracked `corelib/gr_decode_atten` directory.
+The SID-GR YAML forwards the path through `env` and exposes it through `runtime.mounts`.
+Workers start in the suite directory, so relative paths have the same meaning in
+local and Docker execution.
+
+Each solution owns `engine.prefix_cache`, enabled in the supplied candidates.
+Warmup and measured repeats use identical inputs, allowing warm prefix reuse.
+SID-GR's YAML also fixes its prefill, CUDA graph and fused/JIT optimization defaults.
+Docker image tags are resolved to immutable local IDs before workers launch.
 
 ## Run artifacts
 
@@ -74,7 +88,7 @@ Example: export `GR_DECODE_ATTEN_ROOT` before loading the SID-GR YAML.
 | `summary.json`, `report.md` | Derived metrics and readable run report. |
 | `diagnostics/<capture>/` | Profiled results, kernel tables and native traces. |
 | `cache/` | Compilation caches; excluded from published archives. |
-| `../leaderboards/<scenario>.md` | Latest non-smoke status per case/candidate. |
+| Suite-root `leaderboards/<scenario>.md` | Latest non-smoke status per case/candidate. |
 
 Every invocation gets a new run directory. Every finished job refreshes the report.
 Failed and unsupported jobs remain visible. Timeouts stop the worker process group

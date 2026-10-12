@@ -20,13 +20,12 @@ Smoke and profiled results never enter scenario rankings.
 
 ## Quick start
 
-The controller needs Python 3.10+ and PyYAML. Prepare model files and candidate
-runtimes first; the suite does not download models or install frameworks.
+The controller needs Python 3.10+ and the small dependencies in `requirements.txt`.
+Prepare candidate runtimes first. `e2e` downloads the scenario's pinned Hugging Face
+checkpoint when needed; `plan` and `report` do not download models or import GPU frameworks.
 
 ```bash
 python3 -m pip install -r requirements.txt
-export QWEN3_0_6B_MODEL=/absolute/path/to/Qwen3-0.6B
-export GR_DECODE_ATTEN_ROOT=/absolute/path/to/gr_decode_atten
 export SID_GR_PYTHON=/absolute/path/to/sid-gr-env/bin/python
 export SGLANG_PYTHON=/absolute/path/to/sglang-env/bin/python
 nvidia-smi -L
@@ -53,6 +52,7 @@ before running on a different GPU.
 | `env` | Environment variables forwarded to the worker. |
 | `source.path` | Engine checkout. Empty SGLang path uses the installed package. |
 | `source.expected_commit` | Require a clean checkout at this commit. |
+| `engine.prefix_cache` | Candidate-owned prefix reuse; supplied candidates enable it. |
 
 `${NAME:-default}` reads the controller's environment when loading YAML.
 These are all environment overrides in the supplied configurations; paths
@@ -61,28 +61,41 @@ resolve from this directory. Defaults apply when the variable is unset.
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
 | `BENCHMARK_GPU` | Empty | Required full GPU UUID for execution. |
-| `QWEN3_0_6B_MODEL` | `../sid-gr-inference/models/Qwen3-0.6B` | Local 0.6B checkpoint. |
-| `QWEN3_1_7B_MODEL` | `../sid-gr-inference/models/Qwen3-1.7B` | Local 1.7B checkpoint. |
+| `QWEN3_0_6B_MODEL`, `QWEN3_1_7B_MODEL` | Empty | Optional local copy, verified against the scenario's pinned Hugging Face revision. |
 | `SID_GR_SOURCE` | `../sid-gr-inference` | SID-GR checkout. |
 | `SGLANG_SOURCE` | Empty | Upstream SGLang checkout; empty uses the installed package. |
 | `SGLANG_BEAM_SOURCE` | `../sglang_beam_search` | Pinned README baseline checkout. |
 | `SID_GR_RUNTIME`, `SGLANG_RUNTIME` | `local` | Select `local` or `docker`. |
 | `SID_GR_PYTHON`, `SGLANG_PYTHON` | `python3` | Python executable inside the chosen runtime. |
-| `SID_GR_IMAGE`, `SGLANG_IMAGE` | Empty | Image name or ID; required for Docker. |
-| `GR_DECODE_ATTEN_ROOT` | Empty | External GR kernel checkout. Forwarded to workers and mounted in Docker. |
+| `SID_GR_IMAGE` | `sid-gr-benchmark:beam-af4e3f4-cu130` | Local image built from the [shared recipe](entrypoints/sglang/Dockerfile.beam_search). |
+| `SGLANG_IMAGE` | [Native candidate: pinned public digest](config/solutions/sglang.yml); beam candidate: `sid-gr-benchmark:beam-af4e3f4-cu130` | Runtime image for the selected SGLang candidate. |
+| `GR_DECODE_ATTEN_ROOT` | `../../corelib/gr_decode_atten` | [Tracked GR kernel](../../corelib/gr_decode_atten); forwarded to workers and mounted in Docker. |
 
 For Docker, set:
 
 ```bash
 export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
-export SID_GR_IMAGE=your-prepared-gr-image SGLANG_IMAGE=your-prepared-sglang-image
 export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
 ```
 
-Both runtimes use the selected GPU UUID and controller CPU affinity.
-The manifest records GPU identity, driver, CPU model, topology and affinity.
-Use the optional [SID-GR image recipe](entrypoints/sid_gr_inference/Dockerfile)
-for the external GR kernel's CUTLASS DSL and Quack dependencies.
+Build or pull the selected image before execution; the suite freezes its local image
+ID and never pulls implicitly. The native SGLang candidate uses the public image;
+the pinned beam-search comparison uses the shared recipe below for both engines.
+
+The supplied hardware profile assigns **10 physical CPU cores**, one allowed logical
+CPU per core. Local workers use `taskset`; Docker uses the same CPU set. The manifest
+records the assigned affinity, host topology, GPU UUID and driver. Fewer available
+cores or a different GPU SKU fail before execution.
+
+The scenario's model ID and immutable revision identify the checkpoint:
+
+| Scenario | Hugging Face snapshot |
+| --- | --- |
+| `qwen3_0_6B` | [Qwen/Qwen3-0.6B @ c1899de](https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca) |
+| `qwen3_1_7B` | [Qwen/Qwen3-1.7B @ 70d244c](https://huggingface.co/Qwen/Qwen3-1.7B/tree/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e) |
+
+`e2e` verifies local overrides against Hub file hashes too; Hub metadata must be
+reachable. Reports retain checkpoint hashes and source repository/commit links.
 
 ## Configuration and measurements
 
@@ -90,7 +103,7 @@ for the external GR kernel's CUTLASS DSL and Quack dependencies.
 | --- | --- |
 | `config/scenarios/*.yml` | Model, inputs, context/batch/beam grid, generation rules and repeat counts. |
 | `config/solutions/*.yml` | Adapter, source checkout, runtime and engine settings. |
-| `config/hardware/*.yml` | Required GPU SKU; optional sourced dense BF16 compute ceiling. |
+| `config/hardware/*.yml` | Required GPU SKU and physical CPU core count; optional dense BF16 compute ceiling. |
 | `config/runs/default.yml` | Selected scenarios, candidates, SGLang reference, GPU UUID and execution policy. |
 | `config/runs/readme.yml` | Qwen3-1.7B comparison against the pinned SGLang beam-search branch. |
 
@@ -108,8 +121,22 @@ Paths in scenario/candidate files resolve from this directory.
 | Structural checks | Request IDs, beam counts, lengths, unique sequences, finite scores and score order. |
 | Compute floor | Partial matrix-compute estimate. Not GPU utilization or a promised speedup. |
 
-Adapters require BF16 weights/KV, fixed-length output, all beams, no quantization,
-no prefix reuse and no catalog constraints. Unsupported settings are explicit.
+Adapters require BF16 weights/KV, fixed-length output, all beams, no quantization
+and no catalog constraints. Unsupported settings are explicit.
+Warmup and measured repeats reuse identical inputs. With `engine.prefix_cache: true`,
+measurements include warm prefix reuse; set it to `false` in each candidate YAML
+for a comparison without prefix reuse.
+
+The [SID-GR candidate](config/solutions/sid_gr_inference.yml) records its optimization
+defaults explicitly; edit that YAML to change them:
+
+| Setting | Default |
+| --- | --- |
+| Prefill backend | `GR_INFERENCE_PREFILL_BACKEND=auto` |
+| Prefill/decode CUDA graphs; flattened linear | Corresponding `GR_INFERENCE_DISABLE_*=0` |
+| TRT-LLM kernel JIT | `GR_INFERENCE_GR_TRTLLM_KERNELS_JIT=1` |
+| Fused QK norm/RoPE and packed GEMM | `GR_INFERENCE_TRTLLM_QK_NORM_ROPE_PHASE=all`, `GR_INFERENCE_TRTLLM_PACKED_GEMM_SCOPE=all` |
+
 Synthetic inputs use a fixed seed and exclude BOS/EOS/PAD. For real inputs, set
 `inputs.type: jsonl` and `inputs.path`; rows contain `request_id` and `input_ids`.
 JSONL uses the first `batch_size` rows. Each input must match the case's context
@@ -144,7 +171,7 @@ Nsight compares both engines at context 1000 / batch 1 / beam 256.
 
 | Example | Reports | Raw data |
 | --- | --- | --- |
-| README comparison + GPU diagnosis | [Run](results/20261012T074633875336Z-dcc97c/report.md) · [Diagnosis](results/20261012T074633875336Z-dcc97c/report.md#gpu-diagnosis) · [Leaderboard](results/leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T074633875336Z-dcc97c/raw_artifacts.tar.gz) |
+| README comparison + GPU diagnosis | [Run](results/20261012T074633875336Z-dcc97c/report.md) · [Diagnosis](results/20261012T074633875336Z-dcc97c/report.md#gpu-diagnosis) · [Leaderboard](leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T074633875336Z-dcc97c/raw_artifacts.tar.gz) |
 
 One archive contains frozen metadata, inputs, requests, logs, results and native
 Nsight/SQLite traces. Compilation caches are omitted. Extract it before rebuilding:
@@ -158,7 +185,7 @@ python3 bench.py report --run "$benchmark_run"
 The report shows output mismatches alongside performance. Measurements use RTX
 PRO 6000 Blackwell; the original README's H100 timings are not directly comparable.
 
-Leaderboards keep the latest non-smoke result per case/candidate. Partial runs
+Suite-root `leaderboards/` keeps the latest non-smoke result per case/candidate. Partial runs
 replace only executed rows; failures replace older successes. Hardware, checkpoint,
 scenario and JSONL input revisions get separate groups. Parity uses each row's source
 run. See [harness internals](harness/README.md) for the artifact layout.
@@ -169,15 +196,14 @@ run. See [harness internals](harness/README.md) for the artifact layout.
 The upstream `sglang` candidate requires native `SamplingParams.beam_width`.
 
 ```bash
-export QWEN3_1_7B_MODEL=/absolute/path/to/Qwen3-1.7B
 export SGLANG_BEAM_SOURCE=/absolute/path/to/sglang_beam_search
-# Check out source.expected_commit from config/solutions/sglang_beam_search.yml.
+git clone https://github.com/cswuyg/sglang.git "$SGLANG_BEAM_SOURCE"
+git -C "$SGLANG_BEAM_SOURCE" checkout af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
 docker build -f entrypoints/sglang/Dockerfile.beam_search \
-  -t sid-gr-benchmark:readme "$SGLANG_BEAM_SOURCE"
+  -t sid-gr-benchmark:beam-af4e3f4-cu130 "$SGLANG_BEAM_SOURCE"
 export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
-export SID_GR_IMAGE=sid-gr-benchmark:readme SGLANG_IMAGE=sid-gr-benchmark:readme
 export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
-# Set GR_DECODE_ATTEN_ROOT, BENCHMARK_GPU and the hardware profile as above.
+# Set BENCHMARK_GPU and the hardware profile as above.
 python3 bench.py e2e --config config/runs/readme.yml --case 'qwen3_1_7B/*_w256'
 ```
 

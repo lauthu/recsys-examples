@@ -1,12 +1,12 @@
 # SID-GR benchmark
 
-Run `$run_id`
+Run `$run_id` · $run_profile
 
 [Latency](#latency-comparison) · [Parity](#output-parity) · [GPU diagnosis](#gpu-diagnosis) · [Environment](#run-details) · [Artifacts](#artifacts)
 
 $summary
 
-One evaluation = one candidate on one case, including its warmups and timed repeats.
+Each solution runs every workload combination, with the warmups and repeats listed below.
 
 $attention
 
@@ -70,12 +70,18 @@ $diagnostics
 
 $environment
 
+$options
+
 </details>
 
 <details>
 <summary>Protocol and source versions</summary>
 
 $protocols
+
+$sources
+
+Shared image: [build recipe]($image_recipe) with a pinned public SGLang base and beam-search source commit. Local image IDs above identify the containers actually used.
 
 $versions
 

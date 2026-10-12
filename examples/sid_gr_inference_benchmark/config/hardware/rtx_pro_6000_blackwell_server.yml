@@ -1,6 +1,7 @@
 gpu_name: NVIDIA RTX PRO 6000 Blackwell Server Edition
+cpu_cores: 10
 source: https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/
 # Add dense_bf16_tflops only with an explicitly dense (not sparse) specification.
 # Hardware identity is required even when no compute ceiling is available.
-# The runner also records the host CPU model, sockets, physical cores, logical
-# CPUs and process affinity. These are observed per machine, not assumed by SKU.
+# Workers use exactly cpu_cores physical cores, one allowed logical CPU per core.
+# The runner records their selected affinity and the host CPU topology.

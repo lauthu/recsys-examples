@@ -13,10 +13,12 @@ def check_support(case, solution):
         raise Unsupported(
             "SID-GR currently requires at least one post-prefill decode step"
         )
-    if solution.get("engine"):
+    if set(solution["engine"]) - {"prefix_cache"}:
         raise Unsupported(
-            "SID-GR engine options are fixed; use explicit GR_INFERENCE environment flags"
+            "SID-GR accepts prefix_cache; use GR_INFERENCE environment flags for kernels"
         )
+    if type(solution["engine"].get("prefix_cache", False)) is not bool:
+        raise Unsupported("prefix_cache must be a boolean")
 
 
 class Adapter:
@@ -24,6 +26,7 @@ class Adapter:
         import torch
 
         self.torch, self.case = torch, request["case"]
+        self.prefix_cache = request["solution"]["engine"].get("prefix_cache", False)
         source = Path(request["solution"]["source"]["path"])
         sys.path[:0] = [str(source / "src"), str(source / "tools")]
         import run_qwen3_real_weight_serving as gr
@@ -77,7 +80,7 @@ class Adapter:
             sync_timing=False,
             beam_kv_pool=self.beam_pool,
             context_kv_pool=self.context_pool,
-            prefill_cache_enabled=False,
+            prefill_cache_enabled=self.prefix_cache,
         )
         with torch.no_grad():
             for row in workload:
