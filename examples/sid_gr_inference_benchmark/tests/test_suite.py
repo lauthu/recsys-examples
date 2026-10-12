@@ -465,7 +465,7 @@ class SuiteTests(unittest.TestCase):
         cfg = load(ROOT / "run.template.yml")
         baseline = cfg["baseline"]
         changed = copy.deepcopy(self.outputs)
-        changed[0]["beams"][1]["token_ids"] = [8, 9, 10]
+        changed[0]["beams"][0]["token_ids"] = [8, 9, 10]
         other_case = copy.deepcopy(self.case)
         other_case.update(name="other_scenario", id="other_scenario/test")
         hardware = {"name": cfg["hardware_config"]["gpu_name"], "uuid": "GPU-assigned"}
@@ -528,6 +528,14 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(candidate["parity"], "different")
             self.assertEqual(candidate["agreement"]["min_overlap"], 0.5)
             self.assertEqual(records[0]["parity"], "exact")
+            report = (root / "report.md").read_text()
+            # The overview must expose output mismatches and unsuccessful jobs
+            # even when the detailed tables are collapsed.
+            overview = report.split("<details>", 1)[0]
+            self.assertTrue("**Top-1 mismatches: 1.**" in overview)
+            self.assertTrue("Results with unavailable parity: 1." in overview)
+            self.assertTrue("broken" in overview)
+            self.assertTrue("failed" in overview)
             board = (
                 root.parent / "leaderboards" / f"{self.case['name']}.md"
             ).read_text()

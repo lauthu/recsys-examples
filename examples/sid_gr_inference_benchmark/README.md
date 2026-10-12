@@ -128,6 +128,13 @@ rotating their order between cases. Compilation caches are shared within each ru
 
 ## Run artifacts and scenario leaderboards
 
+Open the Markdown reports on GitHub to compare candidate latencies side by side.
+Run status and top-1 mismatches appear first; expand the detail sections for all
+measurements, parity checks, source versions and limitations. Leaderboards use the
+same layout, with expandable hardware and source-run records. Bold latency cells
+mark the lowest recorded median, without implying statistical significance or
+output equivalence.
+
 ```text
 results/<run-id>/
   manifest.json                 # Frozen definitions, hardware and run status

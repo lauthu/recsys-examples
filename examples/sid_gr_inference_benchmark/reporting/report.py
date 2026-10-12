@@ -15,16 +15,108 @@ def number(value):
     return "—" if value is None else f"{value:.3f}"
 
 
-def table(headers, rows):
+def table(headers, rows, right_align=()):
     def clean(value):
         return str(value).replace("|", "\\|").replace("\n", " ")
 
     return "\n".join(
         [
             "| " + " | ".join(headers) + " |",
-            "| " + " | ".join(["---"] * len(headers)) + " |",
+            "| "
+            + " | ".join(
+                "---:" if i in right_align else "---" for i in range(len(headers))
+            )
+            + " |",
             *["| " + " | ".join(clean(x) for x in row) + " |" for row in rows],
         ]
+    )
+
+
+def details(title, content):
+    return f"<details>\n<summary>{title}</summary>\n\n{content}\n\n</details>"
+
+
+def comparison(data, cases):
+    """One row per workload, with candidate latencies alongside each other."""
+    names = list(dict.fromkeys(r["solution"] for r in data))
+    records = {(r["case"], r["solution"]): r for r in data}
+    rows = []
+    for case_id in sorted(
+        {r["case"] for r in data},
+        key=lambda key: (
+            cases[key]["context_length"],
+            cases[key]["batch_size"],
+            cases[key]["beam_width"],
+            key,
+        ),
+    ):
+        case = cases[case_id]
+        candidates = [records.get((case_id, name), {}) for name in names]
+        best = min(
+            (r["median_ms"] for r in candidates if "median_ms" in r), default=None
+        )
+        values = []
+        for record in candidates:
+            value = (
+                number(record["median_ms"])
+                if "median_ms" in record
+                else record.get("status", "—")
+            )
+            if best is not None and record.get("median_ms") == best:
+                value = f"**{value}**"
+            values.append(value)
+        rows.append(
+            [case["context_length"], case["batch_size"], case["beam_width"], *values]
+        )
+    return table(
+        ["Context", "Batch", "Beam", *names], rows, right_align=range(3 + len(names))
+    )
+
+
+def parity_notice(data):
+    if not data:
+        return "No finished jobs to compare."
+    different = sum(r["parity"] == "different" for r in data)
+    missing = sum(r["parity"] == "unavailable" for r in data)
+    mismatches = [
+        r for r in data if (r.get("agreement") or {}).get("top1_exact") is False
+    ]
+    lines = []
+    if different:
+        lines.append(
+            f"> **Results with output differences: {different}.** **Top-1 mismatches: {len(mismatches)}.** Compared with the same-run reference."
+        )
+        lines.extend(f"> - `{r['case']}` · `{r['solution']}`" for r in mismatches)
+    if missing:
+        lines.append(
+            f"> Results with unavailable parity: {missing}. These are not counted as matches."
+        )
+    return (
+        "\n".join(lines)
+        or "All recorded results exactly match their same-run reference."
+    )
+
+
+def parity_table(data):
+    rows = []
+    for record in data:
+        agreement = record.get("agreement") or {}
+        top1 = agreement.get("top1_exact")
+        score = agreement.get("max_score_difference")
+        rows.append(
+            [
+                record["case"].split("/", 1)[-1],
+                record["solution"],
+                record["parity"],
+                "Match" if top1 is True else "**Mismatch**" if top1 is False else "—",
+                number(100 * agreement["min_overlap"]) if agreement else "—",
+                f"{score:.3g}" if score is not None else "—",
+            ]
+        )
+    return table(
+        ["Case", "Candidate", "Parity", "Top-1", "Overlap %", "Max score Δ"],
+        rows,
+        right_align=(4, 5),
     )
 
 
@@ -52,7 +144,7 @@ def render(directory):
         (j["case_id"], j["solution"]): read(directory / j["directory"] / "result.json")
         for j in jobs
     }
-    timing, validity, bounds, versions, data = [], [], [], {}, []
+    versions, data = {}, []
     for job in jobs:
         key = job["case_id"], job["solution"]
         result, case = records[key], cases[job["case_id"]]["case"]
@@ -66,10 +158,6 @@ def render(directory):
             "parity": "unavailable",
         }
         if result["status"] != "success" or result.get("profiled", False):
-            timing.append([*key, result["status"], "—", "—", "—", "—"])
-            validity.append(
-                [*key, result.get("reason", "Excluded profiled run"), "—", "—", "—"]
-            )
             data.append(row)
             continue
         median, iqr = stats(result["samples_ms"])
@@ -79,16 +167,6 @@ def render(directory):
             else None
         )
         delta = 100 * (median / base_ms - 1) if base_ms else None
-        timing.append(
-            [
-                *key,
-                "success",
-                number(median),
-                number(iqr),
-                number(delta),
-                number(case["batch_size"] * 1000 / median),
-            ]
-        )
         agreement = None
         if base_ms and baseline["workload_sha256"] == result["workload_sha256"]:
             checks = [
@@ -107,32 +185,12 @@ def render(directory):
                 "min_overlap": min(c["beam_overlap"] for c in checks),
                 "max_score_difference": max(errors, default=None),
             }
-        validity.append(
-            [
-                *key,
-                "structural pass",
-                str(agreement["top1_exact"]) if agreement else "—",
-                number(100 * agreement["min_overlap"]) if agreement else "—",
-                f"{agreement['max_score_difference']:.3g}"
-                if agreement and agreement["max_score_difference"] is not None
-                else "—",
-            ]
-        )
         bound = estimate(
             case,
             cases[key[0]]["model"]["config"],
             cfg["hardware_config"],
             result["environment"]["gpu"],
             median,
-        )
-        bounds.append(
-            [
-                *key,
-                number(bound.get("floor_ms")),
-                number(bound.get("bound_over_measured_pct")),
-                number(bound.get("gap_factor")),
-                bound.get("reason", "partial matrix-compute floor"),
-            ]
         )
         req = read(directory / job["directory"] / "request.json")
         source = req.get("source") or result.get("adapter", {}).get("source") or {}
@@ -165,23 +223,115 @@ def render(directory):
         data.append(row)
     write(directory / "summary.json", data)
     succeeded = sum(r["status"] == "success" for r in data)
-    message = f"{len(data)}/{sum(manifest['scenario_jobs'].values())} jobs finished; {succeeded} successful. Run status: {manifest['status']}. Mode: {manifest['mode']}."
-    if manifest.get("reason"):
-        message += " " + manifest["reason"]
-    limitations = "- Frameworks run serially, with case order rotating the solution order; clocks are not locked by this suite.\n- GPU memory is unavailable until a comparable process-tree collector is configured.\n- Historical reports use a different timing boundary and are not merged into this leaderboard.\n- Structural validity does not imply exact beam agreement.\n- Small sample counts are smoke evidence, not a regression conclusion."
-    sol_table = table(
-        ["Case", "Solution", "Floor ms", "Floor/measured %", "Gap ×", "Coverage"],
-        bounds,
+    message = table(
+        ["Status", "Jobs finished", "Successful", "Other outcomes", "Mode"],
+        [
+            [
+                manifest["status"],
+                f"{len(data)}/{sum(manifest['scenario_jobs'].values())}",
+                succeeded,
+                len(data) - succeeded,
+                manifest["mode"],
+            ]
+        ],
     )
+    if manifest.get("reason"):
+        message += "\n\n> " + manifest["reason"]
+    limitations = "- Frameworks run serially, with case order rotating the solution order; clocks are not locked by this suite.\n- GPU memory is unavailable until a comparable process-tree collector is configured.\n- Historical reports use a different timing boundary and are not merged into this leaderboard.\n- Structural validity does not imply exact beam agreement.\n- Small sample counts are smoke evidence, not a regression conclusion."
+    bounds, unavailable = [], set()
+    for row in data:
+        bound = row.get("speed_of_light", {})
+        if "floor_ms" in bound:
+            bounds.append(
+                [
+                    row["case"],
+                    row["solution"],
+                    number(bound["floor_ms"]),
+                    number(bound["bound_over_measured_pct"]),
+                    number(bound["gap_factor"]),
+                ]
+            )
+        elif bound:
+            unavailable.add(bound["reason"])
+    sol_table = (
+        table(["Case", "Candidate", "Floor ms", "Floor/measured %", "Gap ×"], bounds)
+        if bounds
+        else ""
+    )
+    sol_table += "\n\n" + "\n".join(f"- {reason}." for reason in sorted(unavailable))
     if "dense_bf16_tflops" in cfg["hardware_config"]:
         sol_table += f"\n\nConfigured dense BF16 ceiling: {cfg['hardware_config']['dense_bf16_tflops']} TFLOP/s. Source: {cfg['hardware_config']['source']}"
-    hardware = manifest["hardware"]
+    comparisons, measurements, validation = [], [], []
+    for scenario in manifest["scenario_jobs"]:
+        rows = sorted(
+            (r for r in data if r["scenario"] == scenario),
+            key=lambda r: (r["case"], r["solution"] != cfg["baseline"], r["solution"]),
+        )
+        if not rows:
+            continue
+        comparisons.append(
+            f"### {scenario}\n\n"
+            + comparison(rows, {key: value["case"] for key, value in cases.items()})
+        )
+        measurements.append(
+            f"### {scenario}\n\n"
+            + table(
+                [
+                    "Case",
+                    "Candidate",
+                    "Status",
+                    "Median ms",
+                    "IQR ms",
+                    "Δ latency %",
+                    "Requests/s",
+                ],
+                [
+                    [
+                        r["case"].split("/", 1)[-1],
+                        r["solution"],
+                        r["status"],
+                        *[
+                            number(r.get(key))
+                            for key in [
+                                "median_ms",
+                                "iqr_ms",
+                                "delta_pct",
+                                "requests_per_second",
+                            ]
+                        ],
+                    ]
+                    for r in rows
+                ],
+                right_align=(3, 4, 5, 6),
+            )
+        )
+        validation.append(f"### {scenario}\n\n" + parity_table(rows))
+    failures = [
+        [
+            job["case_id"],
+            job["solution"],
+            records[job["case_id"], job["solution"]].get("reason", job["status"]),
+        ]
+        for job in jobs
+        if job["status"] != "success"
+    ]
     rendered = Template((ROOT / "reporting/templates/e2e.md").read_text()).substitute(
         run_id=manifest["run_id"],
         summary=message,
-        hardware=hardware_text(hardware),
+        hardware=hardware_table(manifest["hardware"]),
         baseline=cfg["baseline"],
-        measurement="Offline batches on one GPU; protocol is recorded per scenario below.",
+        attention=(
+            "> **Smoke run:** small-sample validation only; excluded from scenario rankings.\n\n"
+            if manifest["mode"] == "smoke"
+            else ""
+        )
+        + parity_notice(data),
+        failures=(
+            "### Failed or unsupported jobs\n\n"
+            + table(["Case", "Candidate", "Reason"], failures)
+        )
+        if failures
+        else "",
         protocols=table(
             ["Scenario", "Warmups", "Measurements"],
             sorted(
@@ -203,35 +353,21 @@ def render(directory):
                 for name in manifest["scenario_jobs"]
             )
         ),
-        results=table(
-            [
-                "Case",
-                "Solution",
-                "Status",
-                "Median ms",
-                "IQR ms",
-                "Δ latency %",
-                "Requests/s",
-            ],
-            timing,
-        ),
-        validation=table(
-            [
-                "Case",
-                "Solution",
-                "Validity",
-                "Top-1 exact",
-                "Min overlap %",
-                "Max score Δ",
-            ],
-            validity,
-        ),
-        sol=sol_table,
+        results="\n\n".join(comparisons) or "No finished jobs yet.",
+        measurements="\n\n".join(measurements),
+        validation="\n\n".join(validation) or "No finished jobs to compare.",
+        sol=sol_table.strip() or "No successful measurements to estimate.",
         versions=table(
             ["Solution", "Source commit/tree", "Dirty", "Key packages"],
             versions.values(),
         ),
         limitations=limitations,
+        artifacts=(
+            "[Raw artifact archive](raw_artifacts.tar.gz) (extract into this run directory before regenerating) · "
+            if (directory / "raw_artifacts.tar.gz").is_file()
+            else ""
+        )
+        + "[Manifest](manifest.json) · [Summary JSON](summary.json)",
         reproduce="Use the frozen `jobs/*/*/*/request.json` and `command.json` for exact execution settings.\n\n"
         "```bash\npython bench.py report --run "
         + str(directory)
@@ -245,18 +381,28 @@ def render(directory):
     return data
 
 
-def hardware_text(hardware):
+def hardware_table(hardware):
     cpu = hardware.get("cpu")
-    text = f"{hardware['name']}; {hardware.get('memory_mib', 'unrecorded')} MiB; driver {hardware.get('driver', 'unrecorded')}"
+    rows = [
+        ["GPU", hardware["name"]],
+        [
+            "GPU memory / driver",
+            f"{hardware.get('memory_mib', 'unrecorded')} MiB / {hardware.get('driver', 'unrecorded')}",
+        ],
+    ]
     if cpu:
-        text += (
-            f"; {cpu['model']}; {cpu['sockets']} sockets, "
-            f"{cpu['physical_cores']} physical cores, {cpu['logical_cpus']} logical CPUs, "
-            f"{len(cpu['affinity'])} CPUs in process affinity"
+        rows.extend(
+            [
+                ["CPU", cpu["model"]],
+                [
+                    "CPU topology / affinity",
+                    f"{cpu['sockets']} sockets · {cpu['physical_cores']} physical cores · {cpu['logical_cpus']} logical CPUs · {len(cpu['affinity'])} allowed CPUs",
+                ],
+            ]
         )
     else:
-        text += "; CPU unrecorded"
-    return text
+        rows.append(["CPU", "unrecorded"])
+    return table(["Hardware", "Recorded configuration"], rows)
 
 
 def leaderboards(root):
@@ -285,7 +431,10 @@ def leaderboards(root):
             )
             hardware = {k: v for k, v in manifest["hardware"].items() if k != "uuid"}
             key = scenario, revision, digest(hardware)
-            group = groups.setdefault(key, {"hardware": hardware, "rows": {}})
+            group = groups.setdefault(
+                key, {"hardware": hardware, "rows": {}, "cases": {}}
+            )
+            group["cases"][record["case"]] = cases[record["case"]]["case"]
             group["rows"][(record["case"], record["solution"])] = (
                 record,
                 manifest,
@@ -295,7 +444,7 @@ def leaderboards(root):
     target.mkdir(exist_ok=True)
     boards = {}
     for (scenario, revision, _), group in sorted(groups.items()):
-        rows = []
+        rows, data = [], []
         for record, manifest, run_dir in sorted(
             group["rows"].values(),
             key=lambda item: (
@@ -304,53 +453,63 @@ def leaderboards(root):
                 item[0]["solution"],
             ),
         ):
-            agreement = record.get("agreement") or {}
+            data.append(record)
             rows.append(
                 [
-                    record["case"],
+                    record["case"].split("/", 1)[-1],
                     record["solution"],
                     record["status"],
-                    number(record.get("median_ms")),
                     number(record.get("requests_per_second")),
-                    record["parity"],
-                    agreement.get("top1_exact", "—"),
-                    number(agreement.get("min_overlap")),
-                    number(agreement.get("max_score_difference")),
                     manifest["config"]["baseline"],
                     f"[{manifest['run_id']}](../{run_dir}/report.md) ({manifest['status']})",
                 ]
             )
         section = (
-            f"## {hardware_text(group['hardware'])}\n\nScenario/checkpoint revision: `{revision[:12]}`.\n\n"
-            + table(
-                [
-                    "Case",
-                    "Candidate",
-                    "Status",
-                    "Median ms",
-                    "Requests/s",
-                    "Parity",
-                    "Top-1 exact",
-                    "Min overlap",
-                    "Max score Δ",
-                    "Reference",
-                    "Source run",
-                ],
-                rows,
+            f"## {group['hardware']['name']}\n\nScenario/checkpoint revision: `{revision[:12]}`.\n\n"
+            f"**CPU:** {group['hardware'].get('cpu', {}).get('model', 'unrecorded')} · "
+            f"**Driver:** {group['hardware'].get('driver', 'unrecorded')}\n\n"
+            + parity_notice(data)
+            + "\n\n"
+            + details("Hardware configuration", hardware_table(group["hardware"]))
+            + "\n\n### Latency comparison\n\n"
+            + comparison(data, group["cases"])
+            + "\n\n"
+            + details(
+                "Output parity, including reference repeat consistency",
+                parity_table(data),
+            )
+            + "\n\n"
+            + details(
+                "Throughput, status and source runs",
+                table(
+                    [
+                        "Case",
+                        "Candidate",
+                        "Status",
+                        "Requests/s",
+                        "Reference",
+                        "Source run",
+                    ],
+                    rows,
+                ),
             )
         )
         boards.setdefault(scenario, []).append(section)
     for scenario, sections in boards.items():
         text = (
             f"# {scenario} leaderboard\n\n"
-            "Latest non-smoke result for each case and candidate, grouped by scenario/checkpoint "
-            "revision and GPU/CPU/driver configuration. Each completed job refreshes this view; "
-            "unexecuted cases retain their last result. Failed and unsupported attempts replace "
-            "older successes. Source runs preserve raw evidence and execution status.\n\n"
-            "Parity compares with the reference from the same source run; results from different "
-            "runs are never used to recompute parity. The reference row checks repeat consistency. "
-            "Requests/s is batch size divided by median latency.\n\n"
+            "Latest non-smoke result per case and candidate, grouped by scenario/checkpoint revision and hardware.\n\n"
+            "**Median batch latency in milliseconds · lower is better.** Bold marks the lowest recorded median in each row, without implying statistical significance or output equivalence. A dash means no recorded result.\n\n"
             + "\n\n".join(sections)
+            + "\n\n"
+            + details(
+                "How this leaderboard is updated",
+                "Each completed job refreshes its row; unexecuted cases retain their last result. Failed and unsupported attempts replace older successes. "
+                "Source links identify the run behind every row.\n\n"
+                "Parity always uses the reference from that same source run. The reference row checks repeat consistency. "
+                "Latency cells may come from different runs; this table does not recompute cross-run parity. "
+                "Requests/s is batch size divided by median latency. Smoke and diagnostic runs do not update rankings.",
+            )
             + "\n"
         )
         (target / f"{scenario}.md").write_text(text)

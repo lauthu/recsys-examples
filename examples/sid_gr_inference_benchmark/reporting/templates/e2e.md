@@ -1,43 +1,84 @@
-# SID-GR benchmark — $run_id
+# SID-GR benchmark
+
+Run `$run_id`
+
+[Latency](#latency-comparison) · [Output parity](#output-parity) · [Run details](#run-details) · [Reproduce](#reproduce)
 
 $summary
 
-**Environment:** $hardware\
-**Baseline:** $baseline\
-**Measurement:** $measurement
+$attention
 
-## Scenario leaderboards
+**Reference:** `$baseline` · Offline batches on one GPU
 
-$leaderboards
+$hardware
 
-$protocols
+## Latency comparison
 
-## End-to-end results
+Median batch latency in **milliseconds**; lower is better. **Bold** marks the lowest recorded median in each row, without implying statistical significance or output equivalence. A dash means no recorded result.
 
 $results
 
-Latency is milliseconds per completed batch. Negative change means faster. IQR describes sample variation; this offline batch statistic is not online request-tail latency. Timings include input submission, engine execution and conversion to completed CPU beam IDs/scores. Setup, validation and report serialization are excluded.
+$failures
+
+<details>
+<summary>All measurements: latency, variation and throughput</summary>
+
+$measurements
+
+Δ latency compares each candidate with the reference; negative means faster. IQR describes sample variation, not online request-tail latency. Requests/s is batch size divided by median batch latency.
+
+</details>
 
 ## Output parity
 
+Successful jobs pass structural checks. Exact parity additionally requires ordered beams and scores to match the reference. Top-1 agreement alone does not establish exact parity or recommendation quality.
+
+<details>
+<summary>All parity checks, including reference repeat consistency</summary>
+
 $validation
 
-Structural validity and agreement with a reference are separate checks. Synthetic inputs do not establish recommendation quality. Score differences are reported only for shared beam sequences.
+Overlap is the minimum shared-beam percentage across measured outputs. Score differences use only shared sequences. Each result is checked against the first measured reference output from the same run; the reference's own row checks repeat consistency.
 
-## Speed-of-light estimate
+</details>
 
-$sol
+## Run details
 
-The current estimator supplies a partial matrix-compute floor, not a complete model of the physical latency limit. Memory traffic, reductions and host overhead remain unmodeled. A gap to this floor is not a promised speedup.
+<details>
+<summary>Measurement protocol and source versions</summary>
 
-## Versions and limitations
+$protocols
+
+The timer includes input submission, engine execution and conversion to completed CPU beam IDs/scores. Setup, warmup, validation and serialization are excluded.
 
 $versions
 
+</details>
+
+<details>
+<summary>Speed-of-light estimate</summary>
+
+$sol
+
+This is a partial matrix-compute floor. Memory traffic, reductions and host overhead remain unmodeled. A gap to this floor is not a promised speedup.
+
+</details>
+
+<details>
+<summary>Limitations</summary>
+
 $limitations
+
+</details>
 
 ## Reproduce
 
+$artifacts
+
 $reproduce
 
-Raw artifacts: [manifest](manifest.json), [comparison data](summary.json). Executed jobs contain their frozen requests, commands and worker logs; successful jobs also retain latency samples and measured beam outputs. Profiling results are separate from these unprofiled headline timings.
+Executed jobs retain frozen requests, commands and worker logs; successful jobs also retain raw latency samples and measured beam outputs. Profiling artifacts remain separate from unprofiled headline timings.
+
+**Scenario leaderboards**
+
+$leaderboards
