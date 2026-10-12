@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .cache/
+# Reviewed example reports and raw archives are added explicitly with git add -f.
 results/
 *.local.yml
 *.local.sh

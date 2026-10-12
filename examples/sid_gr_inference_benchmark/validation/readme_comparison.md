@@ -50,7 +50,11 @@ python3 bench.py e2e --config run.readme.yml --case 'qwen3_1_7B/*_w256'
 ```
 
 The saved invocation used a copy of this template with `continue_on_error: false`.
-Raw inputs, outputs, logs and frozen requests remain in `results/` under the run ID
-above. The checked-in JSON includes all latency samples, agreement metrics, output
-checksums, model/workload checksums and source/image/hardware identities. Live
-scenario rankings are generated at `results/leaderboards/qwen3_1_7B.md`.
+The generated [run report](../results/20261012T043440525028Z-9b035a/report.md) and
+[scenario leaderboard](../results/leaderboards/qwen3_1_7B.md) are committed alongside
+the manifest and summary. Raw inputs, outputs, logs and frozen requests are in the
+[artifact archive](../results/20261012T043440525028Z-9b035a/raw_artifacts.tar.gz);
+the [example instructions](../README.md#completed-example) show how to extract it
+and regenerate the reports without a GPU. The checked-in validation JSON includes
+all latency samples, agreement metrics, output checksums, model/workload checksums
+and source/image/hardware identities.

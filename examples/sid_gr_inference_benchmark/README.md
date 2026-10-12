@@ -161,6 +161,34 @@ a compute floor remains unavailable without a sourced dense ceiling. It is not
 an attainable speedup or GPU-utilization estimate. GPU memory is not measured
 across engine process trees. Synthetic inputs do not establish recommendation quality.
 
+### Completed example
+
+The first full README comparison is committed as an example of the suite's actual
+output: [run report](results/20261012T043440525028Z-9b035a/report.md) and
+[Qwen3-1.7B leaderboard](results/leaderboards/qwen3_1_7B.md). It contains sixteen
+successful jobs across eight cases, with five warmups and thirty measurements per
+job. The report links its frozen manifest and machine-readable summary. The
+[validation notes](validation/readme_comparison.md) explain the observed parity
+differences, including the top-1 mismatch at context 5000 / batch 4.
+
+The [raw artifact archive](results/20261012T043440525028Z-9b035a/raw_artifacts.tar.gz)
+contains the exact shared inputs and all sixteen jobs' frozen requests, commands,
+worker logs, latency samples and measured beam outputs. Extract it before
+regenerating the report and leaderboard; this requires only the controller's
+Python dependencies, with no GPU or model download:
+
+```bash
+benchmark_run=results/20261012T043440525028Z-9b035a
+tar -xzf "$benchmark_run/raw_artifacts.tar.gz" -C "$benchmark_run"
+python3 bench.py report --run "$benchmark_run"
+```
+
+The archive preserves original file contents and machine paths; compilation caches
+are omitted. To execute a new GPU run on your machine, follow the comparison setup
+below. Generated results remain ignored by default; this reviewed example was
+explicitly added to Git. The committed leaderboard reflects the published runs and
+continues to refresh locally as new jobs finish.
+
 ## Reproduce the SID-GR README comparison
 
 The [SID-GR README](../sid-gr-inference/README.md#5-baseline) uses
@@ -191,9 +219,10 @@ validate the harness and comparison workflow, not reproduction of those latencie
 The image recipe pins the public base and installs the beam branch's dependencies,
 including matching PyTorch/SGLang-kernel/FlashInfer versions. Both candidates use
 that same runtime, with the GR kernel's CUTLASS DSL and Quack dependencies added.
-See the [completed validation run](validation/readme_comparison.md) for all eight
-cases, raw latency samples and provenance. It also records a stable top-1 mismatch
-at context 5000 / batch 4; the engines do not have exact output parity.
+See the [committed example](#completed-example) for the generated run report,
+leaderboard and raw artifacts. The [validation notes](validation/readme_comparison.md)
+record a stable top-1 mismatch at context 5000 / batch 4; the engines do not have
+exact output parity.
 
 ## GPU kernel profiling
 
