@@ -1,3 +1,0 @@
-name: vllm_gr
-enabled: false
-reason: The intended upstream repository and adapter have not been selected yet.

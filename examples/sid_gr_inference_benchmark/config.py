@@ -5,8 +5,8 @@ from __future__ import annotations
 import copy
 import itertools
 import os
-from pathlib import Path
 import re
+from pathlib import Path
 
 import yaml
 
@@ -32,6 +32,7 @@ UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, map
 
 def expand(value):
     if isinstance(value, str):
+
         def replace(match):
             name, default = match.group(1), match.group(2)
             if name in os.environ:
@@ -39,6 +40,7 @@ def expand(value):
             if default is not None:
                 return default
             raise ValueError(f"Set environment variable {name}")
+
         return re.sub(r"\$\{([A-Za-z_][A-Za-z_0-9]*)(?::-([^}]*))?\}", replace, value)
     if isinstance(value, list):
         return [expand(x) for x in value]
@@ -47,12 +49,15 @@ def expand(value):
     return value
 
 
-def fields(value, allowed, required=(), label="configuration"):
+def fields(value, required=(), *, optional=(), label="configuration"):
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a mapping")
-    unknown, missing = set(value) - set(allowed), set(required) - set(value)
+    unknown = set(value) - set(required) - set(optional)
+    missing = set(required) - set(value)
     if unknown or missing:
-        raise ValueError(f"{label}: unknown keys {sorted(unknown)}, missing keys {sorted(missing)}")
+        raise ValueError(
+            f"{label}: unknown keys {sorted(unknown)}, missing keys {sorted(missing)}"
+        )
 
 
 def integer(value, name, minimum=1):
@@ -78,24 +83,47 @@ def resolve(path, base=ROOT):
 def scenario(name):
     path = ROOT / "scenarios" / f"{name}.yml"
     cfg = read_yaml(path)
-    fields(cfg, ["name", "model", "inputs", "generation", "prefix_cache"],
-           ["name", "model", "inputs", "generation", "prefix_cache"], str(path))
+    fields(
+        cfg, ["name", "model", "inputs", "generation", "prefix_cache"], label=str(path)
+    )
     if cfg["name"] != name:
         raise ValueError(f"Scenario name must match filename: {name}")
-    fields(cfg["model"], ["id", "revision", "path", "dtype", "quantization", "kv_cache_dtype"],
-           ["id", "revision", "dtype", "quantization", "kv_cache_dtype"], "model")
-    fields(cfg["inputs"], ["type", "seed", "context_lengths", "batch_sizes", "path"],
-           ["type", "context_lengths", "batch_sizes"], "inputs")
-    fields(cfg["generation"], ["beam_widths", "output_tokens", "return_beams", "ignore_eos",
-                             "length_penalty", "constraints", "score"],
-           ["beam_widths", "output_tokens", "return_beams", "ignore_eos", "length_penalty", "constraints", "score"], "generation")
+    fields(
+        cfg["model"],
+        ["id", "revision", "dtype", "quantization", "kv_cache_dtype"],
+        optional=["path"],
+        label="model",
+    )
+    fields(
+        cfg["inputs"],
+        ["type", "context_lengths", "batch_sizes"],
+        optional=["seed", "path"],
+        label="inputs",
+    )
+    fields(
+        cfg["generation"],
+        [
+            "beam_widths",
+            "output_tokens",
+            "return_beams",
+            "ignore_eos",
+            "length_penalty",
+            "constraints",
+            "score",
+        ],
+        label="generation",
+    )
     if cfg["inputs"]["type"] not in {"synthetic_tokens", "jsonl"}:
         raise ValueError("inputs.type must be synthetic_tokens or jsonl")
     if cfg["inputs"]["type"] == "jsonl" and not cfg["inputs"].get("path"):
         raise ValueError("jsonl inputs require path")
     integer(cfg["inputs"].get("seed", 42), "seed", 0)
     integer(cfg["generation"]["output_tokens"], "output_tokens")
-    for section, key in [("inputs", "context_lengths"), ("inputs", "batch_sizes"), ("generation", "beam_widths")]:
+    for section, key in [
+        ("inputs", "context_lengths"),
+        ("inputs", "batch_sizes"),
+        ("generation", "beam_widths"),
+    ]:
         values = cfg[section][key]
         if not isinstance(values, list) or not values:
             raise ValueError(f"{key} must be a nonempty list of unique integers")
@@ -115,16 +143,11 @@ def scenario(name):
 
 def solution(name):
     cfg = read_yaml(ROOT / "solutions" / f"{name}.yml")
-    fields(cfg, ["name", "enabled", "reason", "adapter", "source", "runtime", "engine", "env", "kernels"], ["name", "enabled"])
+    fields(cfg, ["name", "adapter", "source", "runtime", "engine"], optional=["env"])
     if cfg["name"] != name:
         raise ValueError(f"Solution name must match filename: {name}")
-    if type(cfg["enabled"]) is not bool:
-        raise ValueError("solution.enabled must be a boolean")
-    if not cfg["enabled"]:
-        return cfg
-    fields(cfg, list(cfg), ["adapter", "source", "runtime", "engine"])
-    fields(cfg["source"], ["path", "repository", "ref", "expected_commit"], ["ref"])
-    fields(cfg["runtime"], ["kind", "python", "image", "mounts"], ["kind", "python"])
+    fields(cfg["source"], [], optional=["path", "expected_commit"])
+    fields(cfg["runtime"], ["kind", "python"], optional=["image", "mounts"])
     if cfg["runtime"]["kind"] not in {"local", "docker"}:
         raise ValueError("runtime.kind must be local or docker")
     if cfg["runtime"]["kind"] == "docker" and not cfg["runtime"].get("image"):
@@ -133,40 +156,56 @@ def solution(name):
         raise ValueError("engine and env must be mappings")
     if cfg["source"].get("path"):
         cfg["source"]["path"] = resolve(cfg["source"]["path"])
-    cfg["runtime"]["mounts"] = [resolve(p) for p in cfg["runtime"].get("mounts", []) if p]
+    cfg["runtime"]["mounts"] = [
+        resolve(p) for p in cfg["runtime"].get("mounts", []) if p
+    ]
     cfg["env"] = {k: str(v) for k, v in cfg.get("env", {}).items() if v != ""}
     return cfg
 
 
 def load(path):
     cfg = read_yaml(path)
-    fields(cfg, ["scenarios", "solutions", "baseline", "measurement", "execution", "diagnose", "hardware", "output_dir"],
-           ["scenarios", "solutions", "baseline", "measurement", "execution", "output_dir"])
+    fields(
+        cfg,
+        [
+            "scenarios",
+            "solutions",
+            "baseline",
+            "measurement",
+            "execution",
+            "output_dir",
+        ],
+        optional=["hardware"],
+    )
     for key in ["scenarios", "solutions"]:
-        if not isinstance(cfg[key], list) or not cfg[key] or any(not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", x) for x in cfg[key]):
+        if (
+            not isinstance(cfg[key], list)
+            or not cfg[key]
+            or any(
+                not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", x)
+                for x in cfg[key]
+            )
+        ):
             raise ValueError(f"{key} must contain simple scenario/solution names")
         if len(set(cfg[key])) != len(cfg[key]):
             raise ValueError(f"{key} must be a nonempty list of unique names")
     if cfg["baseline"] not in cfg["solutions"]:
         raise ValueError("baseline must be one of solutions")
-    fields(cfg["measurement"], ["warmup_runs", "repeats"], ["warmup_runs", "repeats"])
+    fields(cfg["measurement"], ["warmup_runs", "repeats"])
     integer(cfg["measurement"]["warmup_runs"], "warmup_runs", 0)
     integer(cfg["measurement"]["repeats"], "repeats")
-    fields(cfg["execution"], ["gpu", "timeout_seconds", "continue_on_error"], ["gpu", "timeout_seconds", "continue_on_error"])
+    fields(cfg["execution"], ["gpu", "timeout_seconds", "continue_on_error"])
     integer(cfg["execution"]["timeout_seconds"], "timeout_seconds")
     if type(cfg["execution"]["continue_on_error"]) is not bool:
         raise ValueError("continue_on_error must be a boolean")
-    fields(cfg.get("diagnose", {}), ["timeline", "kernels", "counters"])
-    diagnosis = cfg.get("diagnose", {})
-    if type(diagnosis.get("timeline", True)) is not bool:
-        raise ValueError("diagnose.timeline must be a boolean")
-    for key in ["kernels", "counters"]:
-        if not isinstance(diagnosis.get(key, []), list) or any(x != "beam_logsumexp" for x in diagnosis.get(key, [])):
-            raise ValueError(f"diagnose.{key} supports only beam_logsumexp")
     if cfg.get("hardware"):
-        fields(cfg["hardware"], ["gpu_name", "dense_bf16_tflops", "source"], ["gpu_name", "dense_bf16_tflops", "source"])
+        fields(cfg["hardware"], ["gpu_name", "dense_bf16_tflops", "source"])
         peak = cfg["hardware"]["dense_bf16_tflops"]
-        if isinstance(peak, bool) or not isinstance(peak, (int, float)) or not 0 < peak < float("inf"):
+        if (
+            isinstance(peak, bool)
+            or not isinstance(peak, (int, float))
+            or not 0 < peak < float("inf")
+        ):
             raise ValueError("dense_bf16_tflops must be finite and positive")
     cfg["output_dir"] = resolve(cfg["output_dir"], Path(path).resolve().parent)
     cfg["solution_configs"] = {name: solution(name) for name in cfg["solutions"]}
@@ -176,7 +215,16 @@ def load(path):
 
 def cases(cfg):
     for name, spec in cfg["scenario_configs"].items():
-        for context, batch, width in itertools.product(spec["inputs"]["context_lengths"], spec["inputs"]["batch_sizes"], spec["generation"]["beam_widths"]):
+        for context, batch, width in itertools.product(
+            spec["inputs"]["context_lengths"],
+            spec["inputs"]["batch_sizes"],
+            spec["generation"]["beam_widths"],
+        ):
             case = copy.deepcopy(spec)
-            case.update(id=f"{name}/ctx{context}_b{batch}_w{width}", context_length=context, batch_size=batch, beam_width=width)
+            case.update(
+                id=f"{name}/ctx{context}_b{batch}_w{width}",
+                context_length=context,
+                batch_size=batch,
+                beam_width=width,
+            )
             yield case

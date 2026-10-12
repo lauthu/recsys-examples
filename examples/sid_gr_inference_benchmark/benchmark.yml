@@ -11,11 +11,6 @@ execution:
   timeout_seconds: 1800
   continue_on_error: true
 
-diagnose:
-  timeline: true
-  kernels: []
-  counters: []
-
 # Optional: a documented, dense BF16 Tensor Core ceiling for the exact GPU.
 # hardware:
 #   gpu_name: NVIDIA ...

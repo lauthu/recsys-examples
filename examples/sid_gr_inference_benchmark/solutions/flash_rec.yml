@@ -1,3 +1,0 @@
-name: flash_rec
-enabled: false
-reason: Adapter and matched precision/catalog semantics have not been validated yet.

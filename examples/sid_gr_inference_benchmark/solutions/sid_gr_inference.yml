@@ -1,10 +1,7 @@
 name: sid_gr_inference
-enabled: true
 adapter: entrypoints.sid_gr_inference.adapter
 source:
   path: ${SID_GR_SOURCE:-../sid-gr-inference}
-  repository: https://github.com/NVIDIA/recsys-examples
-  ref: workspace
 runtime:
   kind: ${SID_GR_RUNTIME:-local}
   python: ${SID_GR_PYTHON:-python3}
@@ -14,4 +11,3 @@ engine: {}
 env:
   GR_DECODE_ATTEN_ROOT: ${GR_DECODE_ATTEN_ROOT:-}
   GR_INFERENCE_FUSED_BEAM_LOGSUMEXP: ${GR_INFERENCE_FUSED_BEAM_LOGSUMEXP:-0}
-kernels: [beam_logsumexp]

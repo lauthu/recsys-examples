@@ -1,10 +1,7 @@
 name: sglang
-enabled: true
 adapter: entrypoints.sglang.adapter
 source:
   path: ${SGLANG_SOURCE:-}
-  repository: https://github.com/sgl-project/sglang
-  ref: main
 runtime:
   kind: ${SGLANG_RUNTIME:-local}
   python: ${SGLANG_PYTHON:-python3}
@@ -15,4 +12,3 @@ engine:
   mem_fraction_static: 0.70
   log_level: warning
 env: {}
-kernels: []
