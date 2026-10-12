@@ -4,9 +4,9 @@
 def estimate(case, model, hardware, observed_gpu, measured_ms):
     missing = {
         "status": "unavailable",
-        "reason": "Configure a sourced dense BF16 ceiling for the exact GPU in benchmark.yml",
+        "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
     }
-    if not hardware:
+    if "dense_bf16_tflops" not in hardware:
         return missing
     if hardware["gpu_name"] != observed_gpu:
         return {

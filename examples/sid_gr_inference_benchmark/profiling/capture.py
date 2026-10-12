@@ -6,9 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-from artifacts import read, write
+from harness.artifacts import read, write
 
 
 def capture(request_path, output_path):
@@ -30,7 +28,8 @@ def capture(request_path, output_path):
         "--output",
         report,
         sys.executable,
-        str(ROOT / "worker.py"),
+        "-m",
+        "harness.worker",
         "--request",
         str(request_path),
         "--output",

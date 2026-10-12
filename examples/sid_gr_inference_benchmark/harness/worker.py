@@ -11,8 +11,8 @@ import sys
 import time
 import traceback
 
-from artifacts import digest, read, write
-from validation import Unsupported, check
+from harness.artifacts import digest, read, write
+from scenarios.validation import Unsupported, check
 
 
 def environment(torch):
@@ -37,11 +37,10 @@ def environment(torch):
 
 
 def run(request, profile=False):
-    from pathlib import Path
+    from harness.artifacts import suite_hash
+    from harness.config import ROOT
 
-    from artifacts import suite_hash
-
-    if suite_hash(Path(__file__).parent) != request["suite_sha256"]:
+    if suite_hash(ROOT) != request["suite_sha256"]:
         raise ValueError("Benchmark implementation changed after request creation")
     case, solution = request["case"], request["solution"]
     adapter_module = importlib.import_module(solution["adapter"])

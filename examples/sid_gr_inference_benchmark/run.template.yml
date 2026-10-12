@@ -1,0 +1,15 @@
+# Reusable run template. Copy to run.local.yml and select candidates/hardware.
+# Every invocation creates a new results/<run-id>/; it never replaces a prior run.
+scenarios: [qwen3_0_6B, qwen3_1_7B]
+solutions: [sid_gr_inference, sglang]
+baseline: sid_gr_inference
+hardware: rtx_pro_6000_blackwell_server
+
+execution:
+  # UUIDs are unambiguous across CUDA_VISIBLE_DEVICES and Docker remapping.
+  # Set BENCHMARK_GPU to the selected full UUID shown by nvidia-smi -L.
+  gpu: ${BENCHMARK_GPU:-}
+  timeout_seconds: 1800
+  continue_on_error: true
+
+output_dir: results

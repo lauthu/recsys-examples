@@ -20,3 +20,8 @@ generation:
   score: cumulative_logprob
   constraints: none
 prefix_cache: false
+
+# Measurement protocol is part of the scenario, shared by all candidates.
+measurement:
+  warmup_runs: 5
+  repeats: 30

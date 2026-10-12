@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class UniqueLoader(yaml.SafeLoader):
@@ -84,7 +84,9 @@ def scenario(name):
     path = ROOT / "scenarios" / f"{name}.yml"
     cfg = read_yaml(path)
     fields(
-        cfg, ["name", "model", "inputs", "generation", "prefix_cache"], label=str(path)
+        cfg,
+        ["name", "model", "inputs", "generation", "prefix_cache", "measurement"],
+        label=str(path),
     )
     if cfg["name"] != name:
         raise ValueError(f"Scenario name must match filename: {name}")
@@ -119,6 +121,9 @@ def scenario(name):
         raise ValueError("jsonl inputs require path")
     integer(cfg["inputs"].get("seed", 42), "seed", 0)
     integer(cfg["generation"]["output_tokens"], "output_tokens")
+    fields(cfg["measurement"], ["warmup_runs", "repeats"])
+    integer(cfg["measurement"]["warmup_runs"], "warmup_runs", 0)
+    integer(cfg["measurement"]["repeats"], "repeats")
     for section, key in [
         ("inputs", "context_lengths"),
         ("inputs", "batch_sizes"),
@@ -171,11 +176,10 @@ def load(path):
             "scenarios",
             "solutions",
             "baseline",
-            "measurement",
+            "hardware",
             "execution",
             "output_dir",
         ],
-        optional=["hardware"],
     )
     for key in ["scenarios", "solutions"]:
         if (
@@ -191,22 +195,29 @@ def load(path):
             raise ValueError(f"{key} must be a nonempty list of unique names")
     if cfg["baseline"] not in cfg["solutions"]:
         raise ValueError("baseline must be one of solutions")
-    fields(cfg["measurement"], ["warmup_runs", "repeats"])
-    integer(cfg["measurement"]["warmup_runs"], "warmup_runs", 0)
-    integer(cfg["measurement"]["repeats"], "repeats")
     fields(cfg["execution"], ["gpu", "timeout_seconds", "continue_on_error"])
     integer(cfg["execution"]["timeout_seconds"], "timeout_seconds")
     if type(cfg["execution"]["continue_on_error"]) is not bool:
         raise ValueError("continue_on_error must be a boolean")
-    if cfg.get("hardware"):
-        fields(cfg["hardware"], ["gpu_name", "dense_bf16_tflops", "source"])
-        peak = cfg["hardware"]["dense_bf16_tflops"]
+    name = cfg["hardware"]
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise ValueError("hardware must name a profile in hardware/")
+    hardware = read_yaml(ROOT / "hardware" / f"{name}.yml")
+    fields(hardware, ["gpu_name", "source"], optional=["dense_bf16_tflops"])
+    if not all(
+        isinstance(hardware[k], str) and hardware[k].strip()
+        for k in ["gpu_name", "source"]
+    ):
+        raise ValueError("hardware requires a GPU name and specification source")
+    if "dense_bf16_tflops" in hardware:
+        peak = hardware["dense_bf16_tflops"]
         if (
             isinstance(peak, bool)
             or not isinstance(peak, (int, float))
             or not 0 < peak < float("inf")
         ):
             raise ValueError("dense_bf16_tflops must be finite and positive")
+    cfg["hardware_config"] = hardware
     cfg["output_dir"] = resolve(cfg["output_dir"], Path(path).resolve().parent)
     cfg["solution_configs"] = {name: solution(name) for name in cfg["solutions"]}
     cfg["scenario_configs"] = {name: scenario(name) for name in cfg["scenarios"]}

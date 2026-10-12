@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-from validation import Unsupported, supported
+from scenarios.validation import Unsupported, supported
 
 
 def check_support(case, solution):
@@ -71,7 +71,8 @@ class Adapter:
 
         from sglang.srt.beam_search.beam_group import BeamGroup
 
-        if inspect.signature(BeamGroup).parameters["length_penalty"].default != 1.0:
+        penalty = inspect.signature(BeamGroup).parameters.get("length_penalty")
+        if penalty is None or penalty.default != 1.0:
             raise Unsupported(
                 "SGLang beam length normalization changed; update the adapter"
             )
@@ -125,6 +126,6 @@ class Adapter:
         time.sleep(0.25)
 
     def provenance(self):
-        from artifacts import source_info
+        from harness.artifacts import source_info
 
         return {"module": self.module, "source": source_info(Path(self.module).parent)}

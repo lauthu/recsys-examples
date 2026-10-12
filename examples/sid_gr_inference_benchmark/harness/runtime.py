@@ -9,7 +9,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from config import ROOT
+from harness.config import ROOT
 
 
 def freeze(solution):
@@ -46,32 +46,19 @@ def command(request_path, output_path, request, *, profile=False):
         "CUTE_DSL_CACHE_DIR": str(cache / "cute"),
         "TORCHINDUCTOR_CACHE_DIR": str(cache / "inductor"),
         **solution.get("env", {}),
+        "CUDA_VISIBLE_DEVICES": execution["gpu"],
     }
     worker = [
         runtime["python"],
-        str(ROOT / "worker.py"),
+        "-m",
+        "profiling.capture" if profile else "harness.worker",
         "--request",
         str(request_path),
         "--output",
         str(output_path),
     ]
-    if profile:
-        worker = [
-            runtime["python"],
-            str(ROOT / "profiling/capture.py"),
-            "--request",
-            str(request_path),
-            "--output",
-            str(output_path),
-        ]
     container = None
     if runtime["kind"] == "docker":
-        # Session-visible ordinals can differ from the Docker host's ordinals.
-        gpu = gpu_info(execution["gpu"]).get("uuid")
-        if not gpu:
-            raise ValueError(
-                f"Cannot resolve GPU {execution['gpu']!r} to a UUID for Docker"
-            )
         container = "sid-bench-" + uuid.uuid4().hex[:12]
         cmd = [
             "docker",
@@ -80,7 +67,7 @@ def command(request_path, output_path, request, *, profile=False):
             "--name",
             container,
             "--gpus",
-            f"device={gpu}",
+            f"device={execution['gpu']}",
             "--shm-size",
             "4g",
             "--user",
@@ -111,7 +98,7 @@ def command(request_path, output_path, request, *, profile=False):
             cmd += ["--env", f"{key}={value}"]
         cmd += ["--workdir", str(ROOT), runtime["image"], *worker[1:]]
         return cmd, os.environ.copy(), container
-    env = {**os.environ, **env, "CUDA_VISIBLE_DEVICES": str(execution["gpu"])}
+    env = {**os.environ, **env}
     return worker, env, container
 
 
@@ -148,6 +135,10 @@ def execute(cmd, env, log, timeout, container=None):
 
 
 def gpu_info(gpu):
+    if not isinstance(gpu, str) or not gpu.startswith("GPU-"):
+        raise ValueError(
+            "Set execution.gpu (BENCHMARK_GPU) to a full GPU UUID from nvidia-smi -L"
+        )
     try:
         result = subprocess.check_output(
             [
@@ -160,11 +151,13 @@ def gpu_info(gpu):
             stderr=subprocess.DEVNULL,
         )
         name, identity, driver, memory = [p.strip() for p in result.strip().split(",")]
+        if identity != gpu:
+            raise ValueError("Use the full GPU UUID, not an abbreviation")
         return {
             "name": name,
             "uuid": identity,
             "driver": driver,
             "memory_mib": float(memory),
         }
-    except (OSError, ValueError, subprocess.CalledProcessError):
-        return {"name": None, "uuid": None}
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"Cannot identify selected GPU {gpu}: {exc}") from exc

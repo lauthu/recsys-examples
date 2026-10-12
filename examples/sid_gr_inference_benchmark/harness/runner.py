@@ -8,10 +8,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import runtime
-from artifacts import digest, model_info, read, source_info, suite_hash, write
-from config import ROOT, cases
-from workload import build
+from harness import runtime
+from harness.artifacts import digest, model_info, read, source_info, suite_hash, write
+from harness.config import ROOT, cases
+from reporting.report import render
+from scenarios.workload import build
 
 
 def select_cases(cfg, pattern=None, smoke=False):
@@ -22,7 +23,10 @@ def select_cases(cfg, pattern=None, smoke=False):
     ]
     if not selected:
         raise ValueError(f"No cases match {pattern!r}")
-    return selected[:1] if smoke else selected
+    if smoke:
+        selected = selected[:1]
+        selected[0]["measurement"] = {"warmup_runs": 2, "repeats": 3}
+    return selected
 
 
 def launch(request, directory, *, profile=False):
@@ -66,6 +70,11 @@ def launch(request, directory, *, profile=False):
 
 
 def e2e(cfg, selected):
+    hardware = runtime.gpu_info(cfg["execution"]["gpu"])
+    if hardware["name"] != cfg["hardware_config"]["gpu_name"]:
+        raise ValueError(
+            f"Selected GPU {hardware['name']!r} does not match hardware profile {cfg['hardware']!r}"
+        )
     run_id = (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         + "-"
@@ -74,12 +83,16 @@ def e2e(cfg, selected):
     directory = Path(cfg["output_dir"]) / run_id
     directory.mkdir(parents=True, exist_ok=False)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
-        "mode": "e2e",
+        "mode": "smoke" if cfg.get("smoke") else "e2e",
         "config": cfg,
         "suite_sha256": suite_hash(ROOT),
-        "hardware": runtime.gpu_info(cfg["execution"]["gpu"]),
+        "hardware": hardware,
+        "scenario_jobs": {
+            name: sum(c["name"] == name for c in selected) * len(cfg["solutions"])
+            for name in dict.fromkeys(c["name"] for c in selected)
+        },
         "cases": [],
         "jobs": [],
         "status": "running",
@@ -124,7 +137,7 @@ def e2e(cfg, selected):
                     "suite_sha256": manifest["suite_sha256"],
                     "workload_path": str(workload_path),
                     "workload_sha256": digest(workload),
-                    "measurement": cfg["measurement"],
+                    "measurement": case["measurement"],
                     "execution": cfg["execution"],
                 }
                 print(f"{case['id']} / {name}", flush=True)
@@ -161,6 +174,7 @@ def e2e(cfg, selected):
                     }
                 )
                 write(directory / "manifest.json", manifest)
+                render(directory)
                 print(
                     f"  {result['status']}: {result.get('reason', 'completed')}",
                     flush=True,
@@ -179,8 +193,6 @@ def e2e(cfg, selected):
         raise
     finally:
         write(directory / "manifest.json", manifest)
-        from report import render
-
         render(directory)
         print(f"Report: {directory / 'report.md'}", flush=True)
     return directory, manifest

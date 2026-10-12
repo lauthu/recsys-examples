@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from validation import Unsupported, supported
+from scenarios.validation import Unsupported, supported
 
 
 def check_support(case, solution):
@@ -17,17 +17,6 @@ def check_support(case, solution):
         raise Unsupported(
             "SID-GR engine options are fixed; use explicit GR_INFERENCE environment flags"
         )
-    fused = str(
-        solution.get("env", {}).get("GR_INFERENCE_FUSED_BEAM_LOGSUMEXP", "0")
-    ).lower()
-    if fused in {"1", "true", "yes", "on"}:
-        source = Path(solution["source"]["path"])
-        if not (
-            source / "src/gr_inference/gr_runtime/fused_beam_logsumexp.py"
-        ).is_file():
-            raise Unsupported(
-                "Selected SID-GR checkout does not include the optional fused beam normalizer"
-            )
 
 
 class Adapter:
@@ -137,10 +126,10 @@ class Adapter:
         self.engine = self.beam_pool = self.context_pool = None
 
     def provenance(self):
-        from artifacts import source_info
         from gr_inference.gr_kernels.attention.existing_kernel_backend import (
             ExistingGRDecodeAttentionBackend,
         )
+        from harness.artifacts import source_info
 
         return {
             "module": self.gr.__file__,

@@ -6,13 +6,19 @@ $summary
 **Baseline:** $baseline\
 **Measurement:** $measurement
 
+## Scenario leaderboards
+
+$leaderboards
+
+$protocols
+
 ## End-to-end results
 
 $results
 
 Latency is milliseconds per completed batch. Negative change means faster. IQR describes sample variation; this offline batch statistic is not online request-tail latency. Timings include input submission, engine execution and conversion to completed CPU beam IDs/scores. Setup, validation and report serialization are excluded.
 
-## Output agreement
+## Output parity
 
 $validation
 

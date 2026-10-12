@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
 
-from artifacts import model_info, read, source_info, suite_hash, write
-from config import ROOT
+from harness.artifacts import model_info, read, source_info, suite_hash, write
+from harness.config import ROOT
+from harness.runner import launch
+from harness.runtime import gpu_info
 from profiling.timeline import summarize
-from report import number, table
-from runner import launch
-from runtime import gpu_info
+from reporting.report import number, table
 
 
 def run(directory, case_id):
@@ -85,7 +85,9 @@ def run(directory, case_id):
                 f"**{job['solution']}:** {summary.get('reason', summary['status'])}"
             )
     write(output / "diagnosis.json", records)
-    report = Template((ROOT / "reports/diagnosis_template.md").read_text()).substitute(
+    report = Template(
+        (ROOT / "reporting/templates/diagnosis.md").read_text()
+    ).substitute(
         case_id=case_id,
         original=f"[{manifest['run_id']}]({directory / 'report.md'})",
         timelines="\n\n".join(timelines),
