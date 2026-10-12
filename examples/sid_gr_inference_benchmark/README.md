@@ -137,32 +137,26 @@ scores are multiplied by fixed output length to match SID-GR cumulative scores.
 `success` means execution and structural validation passed; it does not imply
 cross-engine parity. Mismatches remain visible beside performance results.
 
-## Published samples
+## Published example
 
-| Sample | Scope | Report | Data |
-| --- | --- | --- | --- |
-| README comparison | Qwen3-1.7B, 8 cases × 2 engines, 5 warmups / 30 repeats | [Run](results/20261012T043440525028Z-9b035a/report.md) · [Leaderboard](results/leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T043440525028Z-9b035a/raw_artifacts.tar.gz) |
-| GPU diagnosis | Qwen3-0.6B SID-GR smoke; 1 profiled repeat | [Run](results/20261012T035001Z-153317/report.md) · [Diagnosis](results/20261012T035001Z-153317/diagnostics/20261012T035247Z-f176c8/diagnosis.md) | [Archive](results/20261012T035001Z-153317/raw_artifacts.tar.gz) |
+Qwen3-1.7B: 8 cases × 2 engines, with 5 warmups and 30 measured repeats.
+Nsight compares both engines at context 1000 / batch 1 / beam 256.
 
-Each sample commits Markdown reports and one archive. The archive contains frozen
-metadata, inputs, requests, commands, logs and results; diagnosis samples include
-native traces and SQLite exports. Compilation caches are omitted.
-Extract an archive before rebuilding reports:
+| Example | Reports | Raw data |
+| --- | --- | --- |
+| README comparison + GPU diagnosis | [Run](results/20261012T074633875336Z-dcc97c/report.md) · [Diagnosis](results/20261012T074633875336Z-dcc97c/report.md#gpu-diagnosis) · [Leaderboard](results/leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T074633875336Z-dcc97c/raw_artifacts.tar.gz) |
+
+One archive contains frozen metadata, inputs, requests, logs, results and native
+Nsight/SQLite traces. Compilation caches are omitted. Extract it before rebuilding:
 
 ```bash
-benchmark_run=results/20261012T043440525028Z-9b035a
-# For the diagnosis sample, use results/20261012T035001Z-153317 instead.
+benchmark_run=results/20261012T074633875336Z-dcc97c
 tar -xzf "$benchmark_run/raw_artifacts.tar.gz" -C "$benchmark_run"
 python3 bench.py report --run "$benchmark_run"
 ```
 
-| Comparison finding | Result |
-| --- | --- |
-| Structural validity | All 16 jobs passed. |
-| Exact cross-engine parity | Different in all 8 cases. |
-| Top-1 | Mismatch at context 5000 / batch 4; cause not isolated. |
-| Hardware | RTX PRO 6000 Blackwell; original SID-GR README used H100. |
-| Interpretation | Workflow validation, not reproduction of H100 latencies or recommendation quality. |
+The report shows output mismatches alongside performance. Measurements use RTX
+PRO 6000 Blackwell; the original README's H100 timings are not directly comparable.
 
 Leaderboards keep the latest non-smoke result per case/candidate. Partial runs
 replace only executed rows; failures replace older successes. Hardware, checkpoint,

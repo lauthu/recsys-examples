@@ -16,7 +16,7 @@ Scenario/checkpoint revision: `c12dfcf838df`.
 
 | Top-1 mismatch case | Candidate |
 | --- | --- |
-| qwen3_1_7B/ctx5000_b4_w256 | sglang_beam_search |
+| qwen3_1_7B/ctx5000_b4_w256 | sid_gr_inference |
 
 <details>
 <summary>Hardware configuration</summary>
@@ -34,36 +34,36 @@ Scenario/checkpoint revision: `c12dfcf838df`.
 
 | Context | Batch | Beam | sid_gr_inference | sglang_beam_search |
 | ---: | ---: | ---: | ---: | ---: |
-| 1000 | 1 | 256 | **27.635** | 41.869 |
-| 1000 | 2 | 256 | **48.414** | 69.253 |
-| 1000 | 4 | 256 | **85.085** | 118.139 |
-| 1000 | 8 | 256 | **158.833** | 226.693 |
-| 5000 | 1 | 256 | **74.757** | 126.296 |
-| 5000 | 2 | 256 | **139.439** | 213.576 |
-| 5000 | 4 | 256 | **275.301** | 416.612 |
-| 5000 | 8 | 256 | **546.016** | 829.489 |
+| 1000 | 1 | 256 | **27.635** | 41.914 |
+| 1000 | 2 | 256 | **48.180** | 68.078 |
+| 1000 | 4 | 256 | **85.068** | 118.159 |
+| 1000 | 8 | 256 | **157.756** | 220.812 |
+| 5000 | 1 | 256 | **74.566** | 125.303 |
+| 5000 | 2 | 256 | **140.066** | 214.662 |
+| 5000 | 4 | 256 | **275.755** | 419.827 |
+| 5000 | 8 | 256 | **546.940** | 837.465 |
 
 <details>
 <summary>Output parity, including reference repeat consistency</summary>
 
-| Case | Candidate | Parity | Top-1 | Overlap % | Max score Δ |
-| --- | --- | --- | --- | ---: | ---: |
-| ctx1000_b1_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx1000_b1_w256 | sglang_beam_search | different | Match | 95.312 | 0.218 |
-| ctx1000_b2_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx1000_b2_w256 | sglang_beam_search | different | Match | 95.312 | 0.213 |
-| ctx1000_b4_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx1000_b4_w256 | sglang_beam_search | different | Match | 94.141 | 0.246 |
-| ctx1000_b8_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx1000_b8_w256 | sglang_beam_search | different | Match | 94.141 | 0.391 |
-| ctx5000_b1_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx5000_b1_w256 | sglang_beam_search | different | Match | 96.875 | 0.39 |
-| ctx5000_b2_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx5000_b2_w256 | sglang_beam_search | different | Match | 93.750 | 0.334 |
-| ctx5000_b4_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx5000_b4_w256 | sglang_beam_search | different | **Mismatch** | 94.922 | 0.274 |
-| ctx5000_b8_w256 | sid_gr_inference | exact | Match | 100.000 | 0 |
-| ctx5000_b8_w256 | sglang_beam_search | different | Match | 94.922 | 0.322 |
+| Case | Candidate | Parity | Top-1 % | Mean overlap % | Min overlap % | Rank match % | Max score Δ |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| ctx1000_b1_w256 | sid_gr_inference | different | 100.000 | 95.312 | 95.312 | 12.109 | 0.218 |
+| ctx1000_b1_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b2_w256 | sid_gr_inference | different | 100.000 | 96.484 | 95.312 | 6.055 | 0.213 |
+| ctx1000_b2_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b4_w256 | sid_gr_inference | different | 100.000 | 96.094 | 94.141 | 8.594 | 0.246 |
+| ctx1000_b4_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b8_w256 | sid_gr_inference | different | 100.000 | 95.605 | 94.141 | 9.424 | 0.391 |
+| ctx1000_b8_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b1_w256 | sid_gr_inference | different | 100.000 | 96.875 | 96.875 | 5.859 | 0.39 |
+| ctx5000_b1_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b2_w256 | sid_gr_inference | different | 100.000 | 95.117 | 93.750 | 8.984 | 0.334 |
+| ctx5000_b2_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b4_w256 | sid_gr_inference | different | 75.000 | 95.801 | 94.922 | 8.691 | 0.274 |
+| ctx5000_b4_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b8_w256 | sid_gr_inference | different | 100.000 | 95.947 | 94.922 | 8.545 | 0.322 |
+| ctx5000_b8_w256 | sglang_beam_search | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
 
 </details>
 
@@ -72,22 +72,22 @@ Scenario/checkpoint revision: `c12dfcf838df`.
 
 | Case | Candidate | Status | Requests/s | Reference | Source run |
 | --- | --- | --- | --- | --- | --- |
-| ctx1000_b1_w256 | sid_gr_inference | success | 36.186 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b1_w256 | sglang_beam_search | success | 23.884 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b2_w256 | sid_gr_inference | success | 41.310 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b2_w256 | sglang_beam_search | success | 28.880 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b4_w256 | sid_gr_inference | success | 47.012 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b4_w256 | sglang_beam_search | success | 33.859 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b8_w256 | sid_gr_inference | success | 50.367 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx1000_b8_w256 | sglang_beam_search | success | 35.290 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b1_w256 | sid_gr_inference | success | 13.377 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b1_w256 | sglang_beam_search | success | 7.918 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b2_w256 | sid_gr_inference | success | 14.343 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b2_w256 | sglang_beam_search | success | 9.364 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b4_w256 | sid_gr_inference | success | 14.530 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b4_w256 | sglang_beam_search | success | 9.601 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b8_w256 | sid_gr_inference | success | 14.652 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
-| ctx5000_b8_w256 | sglang_beam_search | success | 9.644 | sid_gr_inference | [20261012T043440525028Z-9b035a](../20261012T043440525028Z-9b035a/report.md) (completed) |
+| ctx1000_b1_w256 | sid_gr_inference | success | 36.185 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b1_w256 | sglang_beam_search | success | 23.859 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b2_w256 | sid_gr_inference | success | 41.511 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b2_w256 | sglang_beam_search | success | 29.378 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b4_w256 | sid_gr_inference | success | 47.021 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b4_w256 | sglang_beam_search | success | 33.853 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b8_w256 | sid_gr_inference | success | 50.711 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx1000_b8_w256 | sglang_beam_search | success | 36.230 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b1_w256 | sid_gr_inference | success | 13.411 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b1_w256 | sglang_beam_search | success | 7.981 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b2_w256 | sid_gr_inference | success | 14.279 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b2_w256 | sglang_beam_search | success | 9.317 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b4_w256 | sid_gr_inference | success | 14.506 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b4_w256 | sglang_beam_search | success | 9.528 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b8_w256 | sid_gr_inference | success | 14.627 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
+| ctx5000_b8_w256 | sglang_beam_search | success | 9.553 | sglang_beam_search | [20261012T074633875336Z-dcc97c](../20261012T074633875336Z-dcc97c/report.md) (completed) |
 
 </details>
 
