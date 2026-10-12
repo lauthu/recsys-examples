@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+.cache/
+results/
+*.local.yml
+*.local.sh

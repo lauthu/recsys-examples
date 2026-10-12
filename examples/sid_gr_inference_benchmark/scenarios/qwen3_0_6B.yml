@@ -1,0 +1,22 @@
+name: qwen3_0_6B
+model:
+  id: Qwen/Qwen3-0.6B
+  revision: main
+  path: ${QWEN3_0_6B_MODEL:-../sid-gr-inference/models/Qwen3-0.6B}
+  dtype: bfloat16
+  quantization: none
+  kv_cache_dtype: bfloat16
+inputs:
+  type: synthetic_tokens
+  seed: 42
+  context_lengths: [1000, 5000]
+  batch_sizes: [1, 2, 4, 8]
+generation:
+  beam_widths: [64, 128, 256]
+  output_tokens: 3
+  return_beams: all
+  ignore_eos: true
+  length_penalty: 0
+  score: cumulative_logprob
+  constraints: none
+prefix_cache: false

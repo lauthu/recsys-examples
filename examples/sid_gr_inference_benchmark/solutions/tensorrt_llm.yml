@@ -1,0 +1,3 @@
+name: tensorrt_llm
+enabled: false
+reason: Adapter and large-beam backend support have not been validated yet.
