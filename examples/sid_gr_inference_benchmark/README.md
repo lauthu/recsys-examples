@@ -3,6 +3,8 @@
 Compare latency, throughput and beam parity on identical token inputs.
 Use separate Nsight captures to inspect GPU kernels.
 
+[Leaderboards](leaderboards/README.md) · [Published example](#published-example)
+
 ## Commands
 
 Run from this directory. Use `python3 bench.py COMMAND --help` for options.
@@ -167,17 +169,18 @@ cross-engine parity. Mismatches remain visible beside performance results.
 ## Published example
 
 Qwen3-1.7B: 8 cases × 2 engines, with 5 warmups and 30 measured repeats.
+Both candidates use 10 CPU cores and enable prefix caching.
 Nsight compares both engines at context 1000 / batch 1 / beam 256.
 
 | Example | Reports | Raw data |
 | --- | --- | --- |
-| README comparison + GPU diagnosis | [Run](results/20261012T074633875336Z-dcc97c/report.md) · [Diagnosis](results/20261012T074633875336Z-dcc97c/report.md#gpu-diagnosis) · [Leaderboard](leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T074633875336Z-dcc97c/raw_artifacts.tar.gz) |
+| README comparison + GPU diagnosis | [Run](results/20261012T085705933753Z-b3fc71/report.md) · [Diagnosis](results/20261012T085705933753Z-b3fc71/report.md#gpu-diagnosis) · [Leaderboard](leaderboards/qwen3_1_7B.md) | [Archive](results/20261012T085705933753Z-b3fc71/raw_artifacts.tar.gz) |
 
 One archive contains frozen metadata, inputs, requests, logs, results and native
 Nsight/SQLite traces. Compilation caches are omitted. Extract it before rebuilding:
 
 ```bash
-benchmark_run=results/20261012T074633875336Z-dcc97c
+benchmark_run=results/20261012T085705933753Z-b3fc71
 tar -xzf "$benchmark_run/raw_artifacts.tar.gz" -C "$benchmark_run"
 python3 bench.py report --run "$benchmark_run"
 ```
