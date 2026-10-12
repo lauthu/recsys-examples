@@ -195,6 +195,34 @@ Disable SID-GR experimental JIT kernels:
 GR_INFERENCE_GR_TRTLLM_KERNELS_JIT=0
 ```
 
+Opt in to chunked Triton log-sum-exp for batched beam-score normalization:
+
+```bash
+GR_INFERENCE_FUSED_BEAM_LOGSUMEXP=1
+```
+
+`scripts/run_container.sh` forwards this variable when it is set on the host.
+
+This avoids full-vocabulary exponential temporaries in the `logprob` beam
+selection path. Triton reduces each chunk to an FP32 maximum and exponential
+sum, then merges those statistics in one kernel (a single-chunk vocabulary
+needs only one kernel). It applies to contiguous CUDA FP32 logits with vocabulary
+size at least 4096 and no gradient requirement; other inputs, or environments
+without Triton, use PyTorch. The option is disabled by default. Reduction
+order changes can produce small score differences and affect near-tied beams;
+validate outputs and performance for your workload before enabling it.
+
+Compare normalization and full beam-selection GPU time, eager latency, and
+temporary tensor memory on synthetic inputs:
+
+```bash
+python benchmarks/bench_beam_logsumexp.py --batch-sizes 1 4 --beam-width 256 \
+  --output-json benchmark_artifacts/beam_logsumexp.json
+```
+
+This microbenchmark requires CUDA and Triton. Use the real-weight serving
+benchmark to validate end-to-end latency and beam outputs.
+
 Decode graph cache size can be configured with:
 
 ```bash

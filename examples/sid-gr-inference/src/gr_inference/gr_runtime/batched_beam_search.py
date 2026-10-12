@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -162,11 +163,7 @@ def select_next_topk_batched(
     if score_mode == "logprob":
         candidate_scores = candidate_logits.float()
         local_logits, local_token_ids = torch.topk(candidate_scores, k=local_k, dim=-1)
-        local_values = local_logits - torch.logsumexp(
-            candidate_scores,
-            dim=-1,
-            keepdim=True,
-        )
+        local_values = local_logits - _beam_logsumexp(candidate_scores)
     else:
         local_values, local_token_ids = torch.topk(candidate_logits, k=local_k, dim=-1)
 
@@ -212,6 +209,33 @@ def select_next_topk_batched(
         scores_tensor=values,
         parent_beams_tensor=parent_beams_tensor,
     )
+
+
+def _beam_logsumexp(scores):
+    """Optionally avoid full-vocabulary exp temporaries during inference."""
+    import torch
+
+    enabled = os.environ.get("GR_INFERENCE_FUSED_BEAM_LOGSUMEXP", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if (
+        enabled
+        and scores.is_cuda
+        and scores.dtype == torch.float32
+        and scores.is_contiguous()
+        and not scores.requires_grad
+        and scores.shape[-1] >= 4096
+    ):
+        try:
+            from gr_inference.gr_runtime.fused_beam_logsumexp import fused_logsumexp
+        except ImportError:
+            pass
+        else:
+            return fused_logsumexp(scores)
+    return torch.logsumexp(scores, dim=-1, keepdim=True)
 
 
 def batched_item_mask_limited_beam_width(beam_width: int, item_mask: Any | None) -> int:
