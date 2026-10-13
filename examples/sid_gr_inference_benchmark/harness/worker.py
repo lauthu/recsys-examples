@@ -30,7 +30,7 @@ def environment(torch):
         "engine_env": {
             k: v
             for k, v in os.environ.items()
-            if k.startswith(("GR_INFERENCE_", "SGLANG_"))
+            if k.startswith(("GR_INFERENCE_", "SGLANG_", "VLLM_", "TLLM_", "FLASHREC_"))
             and not k.endswith("_CACHE_DIR")
         },
     }

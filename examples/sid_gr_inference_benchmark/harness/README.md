@@ -37,6 +37,7 @@ flowchart LR
 `--config config/runs/readme.yml` selects the old SGLang beam branch;
 `config/runs/four_engine.yml` selects SID-GR, public/native SGLang, and both pinned
 beam branches: 48 cases and 192 jobs, with native SGLang as reference.
+`config/runs/seven_engine.yml` adds vLLM-GR, TensorRT-LLM and FlashRec for 336 jobs.
 Model, input, source and mount paths are relative to the suite root; `output_dir`
 is relative to the run YAML. All supplied runs write to the suite's `results/`.
 Resolved `${VARIABLE:-default}` values and their candidate scope are saved with the
@@ -77,7 +78,8 @@ Each solution owns `engine.prefix_cache`, enabled in the supplied candidates.
 Warmup and measured repeats use identical inputs, allowing warm prefix reuse.
 SID-GR's YAML also fixes its prefill, CUDA graph and fused/JIT optimization defaults.
 Each candidate has independent `_SOURCE`, `_RUNTIME`, `_PYTHON` and `_IMAGE`
-variables, prefixed by `SID_GR`, `SGLANG`, `SGLANG_BEAM` or `SGLANG_BEAM_NEW`.
+variables, prefixed by `SID_GR`, `SGLANG`, `SGLANG_BEAM`, `SGLANG_BEAM_NEW`,
+`VLLM_GR`, `TENSORRT_LLM` or `FLASH_REC`.
 Docker image tags are resolved to immutable local IDs before workers launch.
 Public SGLang uses its pinned image; the old and new beam branches use separate
 recipes for their dependency versions. The new adapter explicitly requests beam

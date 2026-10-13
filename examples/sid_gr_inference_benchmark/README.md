@@ -3,8 +3,9 @@
 Compare latency, throughput and beam parity on identical token inputs.
 Use separate Nsight captures to inspect GPU kernels.
 
-Four independent [entrypoints](entrypoints/README.md) cover SID-GR and the three
-SGLang solutions. Each workload has one measurement row per selected candidate.
+Seven independent [entrypoints](entrypoints/README.md) cover SID-GR, three
+SGLang solutions, vLLM-GR, TensorRT-LLM and FlashRec. Each workload has one
+measurement row per selected candidate. The default profile retains four engines.
 
 [Leaderboards](leaderboards/README.md) · [Published example](#published-example)
 
@@ -50,6 +51,8 @@ even when CUDA or Docker remaps device numbers. Remove `--smoke` for the full ru
 | [Hardware](config/hardware/) | Required GPU type and CPU core allocation; optional dense BF16 compute ceiling. |
 | [Default run](config/runs/default.yml) | Scenarios, candidates, baseline, hardware profile, GPU selection and execution policy. |
 | [Four-engine run](config/runs/four_engine.yml) | Explicit four-engine profile, currently equivalent to the default. |
+| [Seven-engine run](config/runs/seven_engine.yml) | Adds vLLM-GR, TensorRT-LLM and FlashRec; 48 cases / 336 jobs. |
+| [SID-GR versus new solutions](config/runs/sid_gr_new_solutions.yml) | SID-GR, vLLM-GR, TensorRT-LLM and FlashRec; four-engine workload settings, 48 cases / 192 jobs, SID-GR reference. |
 | [SID-GR README workload grid](config/runs/readme.yml) | Qwen3-1.7B with SID-GR and the old SGLang beam branch. |
 
 A scenario defines reusable cases. Each `e2e` invocation creates a new run.
@@ -78,6 +81,12 @@ Each solution YAML lists its environment overrides, defaults and engine options:
 [old beam branch](config/solutions/sglang_beam_search.yml),
 [new beam branch](config/solutions/sglang_beam_search_new.yml).
 Build or pull images before execution; the suite never pulls implicitly.
+
+The [seven-engine profile](config/runs/seven_engine.yml) also provides runnable
+[vLLM-GR](config/solutions/vllm_gr.yml), [TensorRT-LLM](config/solutions/tensorrt_llm.yml)
+and [FlashRec](config/solutions/flash_rec.yml) adapters. They use native beam search,
+pass token IDs directly and return every beam with its cumulative log-probability.
+Their source, runtime and engine settings are independent; see setup below.
 
 Workers receive the CPU allocation from the hardware profile. Local workers use
 `taskset`; Docker uses the same CPU set. The manifest records CPU topology,
@@ -228,6 +237,115 @@ The optional [profiling image recipe](entrypoints/Dockerfile.profile) can add it
 ```bash
 python3 bench.py diagnose --run results/RUN_ID --case qwen3_1_7B/ctx1000_b1_w256
 ```
+
+### Prepare vLLM-GR, TensorRT-LLM and FlashRec
+
+Run these commands from the benchmark directory. The vLLM-GR checkout requires
+access to the private `vllm-project/je` repository. If the checkouts already exist,
+use them at the pinned commits; do not clone over them.
+
+```bash
+export VLLM_GR_SOURCE=/absolute/path/to/je
+export FLASH_REC_SOURCE=/absolute/path/to/FlashRec
+git clone --branch vllm-gr https://github.com/vllm-project/je.git "$VLLM_GR_SOURCE"
+git -C "$VLLM_GR_SOURCE" checkout 4c7cd23e93c34d855b8d7aa2b43598f0c37bed1d
+git clone https://github.com/sohu-mptc/FlashRec.git "$FLASH_REC_SOURCE"
+git -C "$FLASH_REC_SOURCE" checkout 1089682a087ae5493f3b357ed1ec501cb684717b
+docker build -f entrypoints/vllm_gr/Dockerfile \
+  -t sid-gr-benchmark:vllm-gr-4c7cd23 "$VLLM_GR_SOURCE"
+docker build -f entrypoints/flash_rec/Dockerfile \
+  -t sid-gr-benchmark:flashrec-1089682 "$FLASH_REC_SOURCE"
+docker pull nvcr.io/nvidia/tensorrt-llm/release@sha256:33cd085b772947bd22b7273886539331420404e5d2a4a039945241945ff927b9
+export VLLM_GR_RUNTIME=docker TENSORRT_LLM_RUNTIME=docker FLASH_REC_RUNTIME=docker
+# Select BENCHMARK_GPU and the matching hardware profile as above.
+python3 bench.py plan --config config/runs/seven_engine.yml \
+  --solutions vllm_gr tensorrt_llm flash_rec --smoke
+python3 bench.py e2e --config config/runs/seven_engine.yml \
+  --solutions vllm_gr tensorrt_llm flash_rec --smoke
+```
+
+Remove `--smoke` to run the scenario grid. Prepare the four original runtimes and
+omit `--solutions` to compare all seven, with public SGLang as reference. A run
+without its reference still validates outputs and records timings; parity is
+unavailable for that run.
+
+vLLM-GR uses the pinned legacy `CUSTOM` beam API and vLLM 0.22.1. Prefix caching is
+required to preserve prompt KV; beam widths above 256 and batches above one are
+unsupported. Its shared beam KV pool holds only one active session. Its image
+includes a UUID-to-NVML device mapping fix for vLLM 0.22.1, needed by the harness's
+GPU selection. Local installations need the same fix shown in its Dockerfile.
+
+TensorRT-LLM uses release 1.2.1's **PyTorch backend** with native beam search.
+The matching Python package and compiled bindings must be installed together;
+`TENSORRT_LLM_SOURCE` only records an optional checkout, without overriding the
+installed package. Its YAML supplies library paths that the release image normally
+sets in shell startup; override `TENSORRT_LLM_LD_LIBRARY_PATH` for local environments.
+This release supports the required cumulative beam scores only at batch size one.
+Long contexts with wide beams can also exceed its KV capacity on the selected GPU;
+the adapter reports that native limit without shortening the workload.
+
+FlashRec uses the pinned `sohu-mptc/FlashRec` source. The adapter explicitly selects
+BF16 compute and KV cache and disables FP8, SID catalogs, boundary tokens and
+restricted LM heads. Fresh internal request IDs keep repeated benchmark calls
+independent while the output retains the workload's original request IDs.
+The pool reserves enough slots for both prefill requests and expanded beams.
+
+The seven-engine grid retains unsupported rows in its reports. vLLM-GR and
+TensorRT-LLM each support 12 batch-one cases in the supplied grid, subject to runtime
+capacity; their 36 larger-batch cases are explicitly marked unsupported. They do
+not silently serialize a requested batch or omit its scores.
+
+To compare SID-GR with these three candidates using the four-engine run's model,
+input, generation and measurement settings, prepare SID-GR's runtime above and run:
+
+```bash
+export SID_GR_RUNTIME=docker
+export VLLM_GR_RUNTIME=docker TENSORRT_LLM_RUNTIME=docker FLASH_REC_RUNTIME=docker
+python3 bench.py e2e --config config/runs/sid_gr_new_solutions.yml
+```
+
+This profile uses SID-GR as the reference, with five warmups and 30 timed repeats
+per supported job. The report records the actual hardware and runtime identities.
+
+### Saved comparison with SID-GR
+
+[Full report](results/20261013T063653115757Z-b34f36/report.md) ·
+[Raw archive](results/20261013T063653115757Z-b34f36/raw_artifacts.tar.gz) ·
+[Protocol audit](results/20261013T063653115757Z-b34f36/protocol_audit.json)
+
+The completed run contains 192 jobs: 116 successful and 76 unsupported, with no
+failed or timed-out jobs. Its 3,480 timed samples use the same 48 token workloads,
+checkpoint hashes, BF16 precision, generation rules, five warmups and 30 timed
+repeats as the published four-engine run. All four candidates enable prefix
+caching. This comparison uses the same RTX PRO 6000 Blackwell Server GPU model
+and ten physical CPU cores, but a different GPU device and CPU host: Xeon Platinum
+8480+ here versus Xeon Gold 6444Y in the earlier run. The GPU drivers are also
+different: 595.58.03 here versus 615.71.09 earlier. SID-GR was measured again
+alongside the new candidates. The published leaderboards include the two archived
+comparisons; local regeneration also includes other non-smoke runs in `results/`.
+
+Representative median batch latency at **context 1000 / batch 1 / beam 256**;
+lower is better. Successful workload counts cover the full 48-case grid.
+
+| Candidate | Successful workloads | Qwen3-0.6B ms | Qwen3-1.7B ms |
+| --- | ---: | ---: | ---: |
+| `sid_gr_inference` | 48 / 48 | 10.299 | 15.081 |
+| `vllm_gr` | 12 / 48 | 25.835 | 32.917 |
+| `tensorrt_llm` | 8 / 48 | 125.313 | 129.292 |
+| `flash_rec` | 48 / 48 | 35.094 | 43.354 |
+
+SID-GR has the lowest median in all 48 workloads. Both vLLM-GR and TensorRT-LLM
+record 36 unsupported larger-batch cases. TensorRT-LLM also exceeds its KV capacity
+in four context-5000 cases with beams 128/256 at the configured 0.70 memory
+fraction. These limits remain explicit in the report; the workloads were not
+shortened. The CLI exits with status 1 when any row is unsupported, even when the
+run manifest is `completed`.
+
+All successful jobs passed structural output checks. Against SID-GR, top-1
+mismatches occur in one vLLM-GR case, one TensorRT-LLM case and six FlashRec cases;
+the report retains the complete beam and score comparisons. The archive includes
+every request, raw sample, output, log and input, plus the frozen suite source and
+protocol audit. This run contains unprofiled end-to-end measurements.
 
 ## Development
 

@@ -8,6 +8,263 @@ Parity counts are workload cases; each reference row checks repeat consistency.
 
 ## [NVIDIA RTX PRO 6000 Blackwell Server Edition](../config/hardware/rtx_pro_6000_blackwell_server.yml)
 
+**CPU:** Intel(R) Xeon(R) Platinum 8480+ · **Worker cores:** 10 · **Driver:** 595.58.03
+
+| Solution | Exact beam/score match | Different beams or scores | Top-1 mismatches | Not compared |
+| --- | --- | --- | --- | --- |
+| sid_gr_inference | 24 of 24 cases | 0 of 24 cases | 0 cases | 0 cases |
+| vllm_gr | 0 of 24 cases | 6 of 24 cases | 0 cases | 18 cases |
+| flash_rec | 0 of 24 cases | 24 of 24 cases | 3 cases | 0 cases |
+| tensorrt_llm | 0 of 24 cases | 4 of 24 cases | 1 cases | 20 cases |
+
+| Top-1 mismatch case | Candidate |
+| --- | --- |
+| qwen3_1_7B/ctx5000_b1_w64 | tensorrt_llm |
+| qwen3_1_7B/ctx5000_b2_w128 | flash_rec |
+| qwen3_1_7B/ctx5000_b2_w64 | flash_rec |
+| qwen3_1_7B/ctx5000_b4_w128 | flash_rec |
+
+
+
+### Latency comparison
+
+| Context | Batch | Beam | sid_gr_inference | vllm_gr | flash_rec | tensorrt_llm | Fastest |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1000 | 1 | 64 | **9.309** | 20.526 | 29.176 | 48.218 | **sid_gr_inference** |
+| 1000 | 1 | 128 | **10.685** | 23.970 | 33.686 | 71.584 | **sid_gr_inference** |
+| 1000 | 1 | 256 | **15.081** | 32.917 | 43.354 | 129.292 | **sid_gr_inference** |
+| 1000 | 2 | 64 | **11.088** | unsupported | 42.768 | unsupported | **sid_gr_inference** |
+| 1000 | 2 | 128 | **15.695** | unsupported | 53.253 | unsupported | **sid_gr_inference** |
+| 1000 | 2 | 256 | **26.839** | unsupported | 71.290 | unsupported | **sid_gr_inference** |
+| 1000 | 4 | 64 | **17.066** | unsupported | 75.748 | unsupported | **sid_gr_inference** |
+| 1000 | 4 | 128 | **27.983** | unsupported | 92.828 | unsupported | **sid_gr_inference** |
+| 1000 | 4 | 256 | **47.156** | unsupported | 128.364 | unsupported | **sid_gr_inference** |
+| 1000 | 8 | 64 | **30.642** | unsupported | 134.454 | unsupported | **sid_gr_inference** |
+| 1000 | 8 | 128 | **49.482** | unsupported | 167.969 | unsupported | **sid_gr_inference** |
+| 1000 | 8 | 256 | **85.905** | unsupported | 240.457 | unsupported | **sid_gr_inference** |
+| 5000 | 1 | 64 | **10.979** | 30.557 | 93.877 | 143.953 | **sid_gr_inference** |
+| 5000 | 1 | 128 | **12.452** | 33.777 | 106.095 | unsupported | **sid_gr_inference** |
+| 5000 | 1 | 256 | **18.043** | 41.814 | 140.299 | unsupported | **sid_gr_inference** |
+| 5000 | 2 | 64 | **14.666** | unsupported | 179.976 | unsupported | **sid_gr_inference** |
+| 5000 | 2 | 128 | **19.453** | unsupported | 213.387 | unsupported | **sid_gr_inference** |
+| 5000 | 2 | 256 | **31.737** | unsupported | 256.567 | unsupported | **sid_gr_inference** |
+| 5000 | 4 | 64 | **24.479** | unsupported | 389.847 | unsupported | **sid_gr_inference** |
+| 5000 | 4 | 128 | **35.445** | unsupported | 432.661 | unsupported | **sid_gr_inference** |
+| 5000 | 4 | 256 | **57.116** | unsupported | 529.208 | unsupported | **sid_gr_inference** |
+| 5000 | 8 | 64 | **45.904** | unsupported | 759.759 | unsupported | **sid_gr_inference** |
+| 5000 | 8 | 128 | **64.281** | unsupported | 856.089 | unsupported | **sid_gr_inference** |
+| 5000 | 8 | 256 | **108.794** | unsupported | 1062.190 | unsupported | **sid_gr_inference** |
+
+<details>
+<summary>Output parity, including reference repeat consistency</summary>
+
+| Case | Candidate | Parity | Top-1 % | Mean overlap % | Min overlap % | Rank match % | Max score Δ |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| ctx1000_b1_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b1_w128 | vllm_gr | different | 100.000 | 93.750 | 93.750 | 7.812 | 0.389 |
+| ctx1000_b1_w128 | flash_rec | different | 100.000 | 93.750 | 93.750 | 17.188 | 0.246 |
+| ctx1000_b1_w128 | tensorrt_llm | different | 100.000 | 94.531 | 94.531 | 14.844 | 0.176 |
+| ctx1000_b1_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b1_w256 | vllm_gr | different | 100.000 | 95.703 | 95.703 | 6.250 | 0.248 |
+| ctx1000_b1_w256 | flash_rec | different | 100.000 | 93.359 | 93.359 | 7.812 | 0.236 |
+| ctx1000_b1_w256 | tensorrt_llm | different | 100.000 | 93.750 | 93.750 | 8.594 | 0.461 |
+| ctx1000_b1_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b1_w64 | vllm_gr | different | 100.000 | 93.750 | 93.750 | 37.500 | 0.32 |
+| ctx1000_b1_w64 | flash_rec | different | 100.000 | 92.188 | 92.188 | 28.125 | 0.238 |
+| ctx1000_b1_w64 | tensorrt_llm | different | 100.000 | 93.750 | 93.750 | 26.562 | 0.183 |
+| ctx1000_b2_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b2_w128 | flash_rec | different | 100.000 | 96.484 | 95.312 | 14.453 | 0.223 |
+| ctx1000_b2_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b2_w128 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b2_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b2_w256 | flash_rec | different | 100.000 | 96.094 | 94.922 | 9.375 | 0.261 |
+| ctx1000_b2_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b2_w256 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b2_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b2_w64 | flash_rec | different | 100.000 | 95.312 | 93.750 | 25.000 | 0.184 |
+| ctx1000_b2_w64 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b2_w64 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b4_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b4_w128 | flash_rec | different | 100.000 | 95.117 | 92.969 | 15.625 | 0.276 |
+| ctx1000_b4_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b4_w128 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b4_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b4_w256 | flash_rec | different | 100.000 | 94.531 | 91.797 | 7.324 | 0.32 |
+| ctx1000_b4_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b4_w256 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b4_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b4_w64 | flash_rec | different | 100.000 | 91.797 | 90.625 | 26.172 | 0.227 |
+| ctx1000_b4_w64 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b4_w64 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b8_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b8_w128 | flash_rec | different | 100.000 | 95.410 | 93.750 | 16.211 | 0.349 |
+| ctx1000_b8_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b8_w128 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b8_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b8_w256 | flash_rec | different | 100.000 | 95.654 | 94.531 | 7.666 | 0.54 |
+| ctx1000_b8_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b8_w256 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx1000_b8_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx1000_b8_w64 | flash_rec | different | 100.000 | 97.656 | 96.875 | 26.562 | 0.29 |
+| ctx1000_b8_w64 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx1000_b8_w64 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b1_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b1_w128 | vllm_gr | different | 100.000 | 95.312 | 95.312 | 17.969 | 0.198 |
+| ctx5000_b1_w128 | flash_rec | different | 100.000 | 96.094 | 96.094 | 13.281 | 0.278 |
+| ctx5000_b1_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b1_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b1_w256 | vllm_gr | different | 100.000 | 95.312 | 95.312 | 8.984 | 0.225 |
+| ctx5000_b1_w256 | flash_rec | different | 100.000 | 96.094 | 96.094 | 4.297 | 0.287 |
+| ctx5000_b1_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b1_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b1_w64 | vllm_gr | different | 100.000 | 95.312 | 95.312 | 28.125 | 0.206 |
+| ctx5000_b1_w64 | flash_rec | different | 100.000 | 93.750 | 93.750 | 32.812 | 0.297 |
+| ctx5000_b1_w64 | tensorrt_llm | different | 0.000 | 96.875 | 96.875 | 14.062 | 0.352 |
+| ctx5000_b2_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b2_w128 | flash_rec | different | 50.000 | 94.531 | 93.750 | 10.547 | 0.269 |
+| ctx5000_b2_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b2_w128 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b2_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b2_w256 | flash_rec | different | 100.000 | 95.508 | 94.141 | 8.594 | 0.247 |
+| ctx5000_b2_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b2_w256 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b2_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b2_w64 | flash_rec | different | 50.000 | 92.188 | 90.625 | 25.000 | 0.479 |
+| ctx5000_b2_w64 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b2_w64 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b4_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b4_w128 | flash_rec | different | 75.000 | 94.141 | 91.406 | 15.820 | 0.191 |
+| ctx5000_b4_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b4_w128 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b4_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b4_w256 | flash_rec | different | 100.000 | 95.605 | 94.141 | 8.398 | 0.24 |
+| ctx5000_b4_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b4_w256 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b4_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b4_w64 | flash_rec | different | 100.000 | 94.531 | 90.625 | 32.422 | 0.251 |
+| ctx5000_b4_w64 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b4_w64 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b8_w128 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b8_w128 | flash_rec | different | 100.000 | 94.531 | 92.188 | 14.062 | 0.246 |
+| ctx5000_b8_w128 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b8_w128 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b8_w256 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b8_w256 | flash_rec | different | 100.000 | 96.191 | 94.922 | 9.424 | 0.304 |
+| ctx5000_b8_w256 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b8_w256 | vllm_gr | unavailable | — | — | — | — | — |
+| ctx5000_b8_w64 | sid_gr_inference | exact | 100.000 | 100.000 | 100.000 | 100.000 | 0 |
+| ctx5000_b8_w64 | flash_rec | different | 100.000 | 95.508 | 93.750 | 27.344 | 0.246 |
+| ctx5000_b8_w64 | tensorrt_llm | unavailable | — | — | — | — | — |
+| ctx5000_b8_w64 | vllm_gr | unavailable | — | — | — | — | — |
+
+</details>
+
+<details>
+<summary>Throughput, status and source runs</summary>
+
+| Case | Candidate | Status | Requests/s | Reference | Source run |
+| --- | --- | --- | --- | --- | --- |
+| ctx1000_b1_w128 | sid_gr_inference | success | 93.590 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w128 | vllm_gr | success | 41.719 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w128 | flash_rec | success | 29.686 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w128 | tensorrt_llm | success | 13.970 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w256 | sid_gr_inference | success | 66.309 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w256 | vllm_gr | success | 30.380 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w256 | flash_rec | success | 23.066 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w256 | tensorrt_llm | success | 7.734 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w64 | sid_gr_inference | success | 107.422 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w64 | vllm_gr | success | 48.718 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w64 | flash_rec | success | 34.275 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b1_w64 | tensorrt_llm | success | 20.739 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w128 | sid_gr_inference | success | 127.429 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w128 | flash_rec | success | 37.557 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w128 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w256 | sid_gr_inference | success | 74.518 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w256 | flash_rec | success | 28.055 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w256 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w64 | sid_gr_inference | success | 180.368 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w64 | flash_rec | success | 46.763 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w64 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b2_w64 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w128 | sid_gr_inference | success | 142.946 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w128 | flash_rec | success | 43.090 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w128 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w256 | sid_gr_inference | success | 84.826 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w256 | flash_rec | success | 31.161 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w256 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w64 | sid_gr_inference | success | 234.390 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w64 | flash_rec | success | 52.807 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w64 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b4_w64 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w128 | sid_gr_inference | success | 161.674 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w128 | flash_rec | success | 47.628 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w128 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w256 | sid_gr_inference | success | 93.126 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w256 | flash_rec | success | 33.270 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w256 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w64 | sid_gr_inference | success | 261.080 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w64 | flash_rec | success | 59.500 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w64 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx1000_b8_w64 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w128 | sid_gr_inference | success | 80.308 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w128 | vllm_gr | success | 29.606 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w128 | flash_rec | success | 9.425 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w256 | sid_gr_inference | success | 55.423 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w256 | vllm_gr | success | 23.915 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w256 | flash_rec | success | 7.128 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w64 | sid_gr_inference | success | 91.085 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w64 | vllm_gr | success | 32.726 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w64 | flash_rec | success | 10.652 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b1_w64 | tensorrt_llm | success | 6.947 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w128 | sid_gr_inference | success | 102.809 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w128 | flash_rec | success | 9.373 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w128 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w256 | sid_gr_inference | success | 63.018 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w256 | flash_rec | success | 7.795 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w256 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w64 | sid_gr_inference | success | 136.369 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w64 | flash_rec | success | 11.113 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w64 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b2_w64 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w128 | sid_gr_inference | success | 112.850 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w128 | flash_rec | success | 9.245 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w128 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w256 | sid_gr_inference | success | 70.033 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w256 | flash_rec | success | 7.558 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w256 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w64 | sid_gr_inference | success | 163.407 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w64 | flash_rec | success | 10.260 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w64 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b4_w64 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w128 | sid_gr_inference | success | 124.453 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w128 | flash_rec | success | 9.345 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w128 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w128 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w256 | sid_gr_inference | success | 73.533 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w256 | flash_rec | success | 7.532 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w256 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w256 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w64 | sid_gr_inference | success | 174.275 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w64 | flash_rec | success | 10.530 | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w64 | tensorrt_llm | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+| ctx5000_b8_w64 | vllm_gr | unsupported | — | sid_gr_inference | [20261013T063653115757Z-b34f36](../results/20261013T063653115757Z-b34f36/report.md) (completed) |
+
+</details>
+
+## [NVIDIA RTX PRO 6000 Blackwell Server Edition](../config/hardware/rtx_pro_6000_blackwell_server.yml)
+
 **CPU:** Intel(R) Xeon(R) Gold 6444Y · **Worker cores:** 10 · **Driver:** 615.71.09
 
 | Solution | Exact beam/score match | Different beams or scores | Top-1 mismatches | Not compared |
