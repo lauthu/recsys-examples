@@ -1,0 +1,30 @@
+# In-process BF16, full-vocabulary beam search; no SID catalog or boundary tokens.
+name: flash_rec
+adapter: entrypoints.flash_rec.adapter
+source:
+  # Upstream: https://github.com/sohu-mptc/FlashRec
+  # FLASH_REC_SOURCE: clean checkout at expected_commit (v0.1.2). The default
+  # expects FlashRec beside recsys-examples; prepare this checkout separately.
+  path: ${FLASH_REC_SOURCE:-../../../FlashRec}
+  expected_commit: 1089682a087ae5493f3b357ed1ec501cb684717b
+runtime:
+  # FLASH_REC_RUNTIME: local Python subprocess or docker container.
+  kind: ${FLASH_REC_RUNTIME:-local}
+  # FLASH_REC_PYTHON: interpreter in the prepared FlashRec runtime.
+  python: ${FLASH_REC_PYTHON:-python3}
+  # Build with the pinned FlashRec checkout as the Docker context.
+  image: ${FLASH_REC_IMAGE:-sid-gr-benchmark:flashrec-1089682}
+  build_recipe: entrypoints/flash_rec/Dockerfile
+engine:
+  prefix_cache: true
+  mem_fraction_static: 0.70
+  enable_cuda_graph: true
+  enable_fused_expand: true
+  enable_graph_expand: true
+  enable_prefill_batch: true
+  flashinfer_variant: fa2
+  host_worker_threads: 4
+# Precision and full-vocabulary settings are enforced by the adapter, including
+# disabling upstream's FP8 quantization and restricted/per-codebook LM heads.
+# The harness supplies GPU visibility and per-run cache directories.
+env: {}

@@ -1,0 +1,4086 @@
+[
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.038960002711974084,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 6.1776294896844774,
+    "parity": "exact",
+    "requests_per_second": 161.87438914389716,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3117504119873047,
+      "mean_ordered_match": 0.28125,
+      "mean_overlap": 0.96875,
+      "min_overlap": 0.96875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w64",
+    "delta_pct": 153.81145832819522,
+    "iqr_ms": 0.49029100773623213,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 15.679531497880816,
+    "parity": "different",
+    "requests_per_second": 63.77741580704475,
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.38353919982910156,
+      "mean_ordered_match": 0.21875,
+      "mean_overlap": 0.890625,
+      "min_overlap": 0.890625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w64",
+    "delta_pct": 618.172157767128,
+    "iqr_ms": 0.9595420051482506,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 44.36601500492543,
+    "parity": "different",
+    "requests_per_second": 22.539775093367794,
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2462453842163086,
+      "mean_ordered_match": 0.21875,
+      "mean_overlap": 0.90625,
+      "min_overlap": 0.90625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w64",
+    "delta_pct": 279.69052763740507,
+    "iqr_ms": 0.5634975168504752,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 23.455874004866928,
+    "parity": "different",
+    "requests_per_second": 42.63324401352544,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.32967567443847656,
+      "mean_ordered_match": 0.1796875,
+      "mean_overlap": 0.9296875,
+      "min_overlap": 0.9296875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w128",
+    "delta_pct": 156.92425541564202,
+    "iqr_ms": 0.33376474311808124,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 18.52760449401103,
+    "parity": "different",
+    "requests_per_second": 53.97351828852164,
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2683877944946289,
+      "mean_ordered_match": 0.1328125,
+      "mean_overlap": 0.921875,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w128",
+    "delta_pct": 865.6004543279503,
+    "iqr_ms": 1.7235077320947312,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 69.63244201324414,
+    "parity": "different",
+    "requests_per_second": 14.36112207309632,
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.39333534240722656,
+      "mean_ordered_match": 0.140625,
+      "mean_overlap": 0.9140625,
+      "min_overlap": 0.9140625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w128",
+    "delta_pct": 267.34398517738754,
+    "iqr_ms": 0.38997425872366875,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 26.490313495742157,
+    "parity": "different",
+    "requests_per_second": 37.74964762726315,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.12937948486069217,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 7.2113099886337295,
+    "parity": "exact",
+    "requests_per_second": 138.6710599844096,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.48471641540527344,
+      "mean_ordered_match": 0.05859375,
+      "mean_overlap": 0.92578125,
+      "min_overlap": 0.92578125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w256",
+    "delta_pct": 1116.7485267959516,
+    "iqr_ms": 1.7388035194016993,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 125.31323498114944,
+    "parity": "different",
+    "requests_per_second": 7.9800030711075935,
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.33861637115478516,
+      "mean_ordered_match": 0.0546875,
+      "mean_overlap": 0.921875,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w256",
+    "delta_pct": 240.74847845076053,
+    "iqr_ms": 0.3967560187447816,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 35.093770988169126,
+    "parity": "different",
+    "requests_per_second": 28.4950853625027,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.11336023453623056,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 10.299025001586415,
+    "parity": "exact",
+    "requests_per_second": 97.09656980597333,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.42373180389404297,
+      "mean_ordered_match": 0.08984375,
+      "mean_overlap": 0.94140625,
+      "min_overlap": 0.94140625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b1_w256",
+    "delta_pct": 150.85037652385216,
+    "iqr_ms": 0.4624322391464375,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 25.835142994765192,
+    "parity": "different",
+    "requests_per_second": 38.70696594180352,
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.30934619903564453,
+      "mean_ordered_match": 0.1796875,
+      "mean_overlap": 0.8828125,
+      "min_overlap": 0.875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b2_w64",
+    "delta_pct": 266.8583601031464,
+    "iqr_ms": 0.12105650966987014,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 27.90669350360986,
+    "parity": "different",
+    "requests_per_second": 71.66739405158447,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b2_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.035180004488211125,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 7.606939499964938,
+    "parity": "exact",
+    "requests_per_second": 262.9178265463027,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b2_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.12382625573081896,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 10.987298504915088,
+    "parity": "exact",
+    "requests_per_second": 182.0283665821325,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.33347225189208984,
+      "mean_ordered_match": 0.11328125,
+      "mean_overlap": 0.9453125,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b2_w128",
+    "delta_pct": 237.0686250472166,
+    "iqr_ms": 0.34994174347957596,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 37.03473600035068,
+    "parity": "different",
+    "requests_per_second": 54.00335511993557,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.25856590270996094,
+      "mean_ordered_match": 0.06640625,
+      "mean_overlap": 0.94921875,
+      "min_overlap": 0.9296875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b2_w256",
+    "delta_pct": 182.07894031564788,
+    "iqr_ms": 0.6148515167296864,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 50.51499848195817,
+    "parity": "different",
+    "requests_per_second": 39.592201526331145,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b2_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.1539599907118827,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 17.908107009134255,
+    "parity": "exact",
+    "requests_per_second": 111.68126251311067,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2896089553833008,
+      "mean_ordered_match": 0.1796875,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b4_w64",
+    "delta_pct": 280.14294611825517,
+    "iqr_ms": 0.21364774875110015,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 46.99642051127739,
+    "parity": "different",
+    "requests_per_second": 85.11286511789018,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b4_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.04481224459595978,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 12.362828507320955,
+    "parity": "exact",
+    "requests_per_second": 323.5505529848045,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3073911666870117,
+      "mean_ordered_match": 0.13671875,
+      "mean_overlap": 0.962890625,
+      "min_overlap": 0.953125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b4_w128",
+    "delta_pct": 214.05801220969337,
+    "iqr_ms": 0.2990557477460243,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 59.69326700142119,
+    "parity": "different",
+    "requests_per_second": 67.00923237967135,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b4_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.1568305233377032,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 19.00708298489917,
+    "parity": "exact",
+    "requests_per_second": 210.44786320857006,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b4_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.13880675396649167,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 32.354495007894,
+    "parity": "exact",
+    "requests_per_second": 123.63042597401261,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.34806060791015625,
+      "mean_ordered_match": 0.095703125,
+      "mean_overlap": 0.94921875,
+      "min_overlap": 0.92578125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b4_w256",
+    "delta_pct": 172.95130081326167,
+    "iqr_ms": 0.38543049595318735,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 88.31201499560848,
+    "parity": "different",
+    "requests_per_second": 45.293950095000206,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.4556732177734375,
+      "mean_ordered_match": 0.19921875,
+      "mean_overlap": 0.91796875,
+      "min_overlap": 0.796875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b8_w64",
+    "delta_pct": 266.6909831727773,
+    "iqr_ms": 0.3286434948677197,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 79.86574349342845,
+    "parity": "different",
+    "requests_per_second": 100.16810274430438,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b8_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.18871750944526866,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 21.780121998745017,
+    "parity": "exact",
+    "requests_per_second": 367.3074007786074,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.4384012222290039,
+      "mean_ordered_match": 0.1171875,
+      "mean_overlap": 0.955078125,
+      "min_overlap": 0.9296875,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0.625
+    },
+    "case": "qwen3_0_6B/ctx1000_b8_w128",
+    "delta_pct": 210.3491614144064,
+    "iqr_ms": 0.36477274989010766,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 107.07081451255362,
+    "parity": "different",
+    "requests_per_second": 74.7169061561779,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b8_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.1421804990968667,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 34.50011400855146,
+    "parity": "exact",
+    "requests_per_second": 231.8832916904871,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.478240966796875,
+      "mean_ordered_match": 0.072265625,
+      "mean_overlap": 0.95556640625,
+      "min_overlap": 0.92578125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b8_w256",
+    "delta_pct": 182.60382152684818,
+    "iqr_ms": 1.269363783649169,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 167.9156579921255,
+    "parity": "different",
+    "requests_per_second": 47.642966091793326,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx1000_b8_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.25608172290958464,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 59.41733451618347,
+    "parity": "exact",
+    "requests_per_second": 134.6408428641484,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx1000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.08469373278785497,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 7.672545994864777,
+    "parity": "exact",
+    "requests_per_second": 130.33483287937256,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.20044803619384766,
+      "mean_ordered_match": 0.390625,
+      "mean_overlap": 0.96875,
+      "min_overlap": 0.96875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w64",
+    "delta_pct": 215.61847309737126,
+    "iqr_ms": 0.6468947613029741,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 24.215972516685724,
+    "parity": "different",
+    "requests_per_second": 41.29505842934708,
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.17307567596435547,
+      "mean_ordered_match": 0.15625,
+      "mean_overlap": 0.90625,
+      "min_overlap": 0.90625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w64",
+    "delta_pct": 1718.6680937630313,
+    "iqr_ms": 2.4171199984266423,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 139.53814598789904,
+    "parity": "different",
+    "requests_per_second": 7.16649911692765,
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.20488548278808594,
+      "mean_ordered_match": 0.203125,
+      "mean_overlap": 0.875,
+      "min_overlap": 0.875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w64",
+    "delta_pct": 662.1782070208047,
+    "iqr_ms": 0.18546048522694036,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 58.47847349650692,
+    "parity": "different",
+    "requests_per_second": 17.10030957049063,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.41326332092285156,
+      "mean_ordered_match": 0.1171875,
+      "mean_overlap": 0.9609375,
+      "min_overlap": 0.9609375,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w128",
+    "delta_pct": 199.97951589921348,
+    "iqr_ms": 0.2700252443901263,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 26.616249495418742,
+    "parity": "different",
+    "requests_per_second": 37.57103344602036,
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b1_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.31661224365234375,
+      "mean_ordered_match": 0.15625,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.953125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w128",
+    "delta_pct": 695.4033610263762,
+    "iqr_ms": 0.11099448602180928,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 70.57366648223251,
+    "parity": "different",
+    "requests_per_second": 14.169591149862649,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.027033238438889384,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 8.872688995325007,
+    "parity": "exact",
+    "requests_per_second": 112.70540424970345,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b1_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2611665725708008,
+      "mean_ordered_match": 0.0625,
+      "mean_overlap": 0.95703125,
+      "min_overlap": 0.95703125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w256",
+    "delta_pct": 704.2290303487877,
+    "iqr_ms": 0.44475724280346185,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 103.59371850790922,
+    "parity": "different",
+    "requests_per_second": 9.653094940535913,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.07277399708982557,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 12.881121496320702,
+    "parity": "exact",
+    "requests_per_second": 77.63299183891984,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3844575881958008,
+      "mean_ordered_match": 0.07421875,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b1_w256",
+    "delta_pct": 165.05763109036292,
+    "iqr_ms": 0.29293848638189957,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 34.14239549601916,
+    "parity": "different",
+    "requests_per_second": 29.289098947863664,
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.29601478576660156,
+      "mean_ordered_match": 0.25,
+      "mean_overlap": 0.96875,
+      "min_overlap": 0.96875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b2_w64",
+    "delta_pct": 885.1358231756482,
+    "iqr_ms": 0.35741549800150096,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 110.0935139838839,
+    "parity": "different",
+    "requests_per_second": 18.166374454109725,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b2_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.043741994886659086,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 11.175465493579395,
+    "parity": "exact",
+    "requests_per_second": 178.9634625196645,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b2_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.050468253903090954,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 14.612021986977197,
+    "parity": "exact",
+    "requests_per_second": 136.87359639771128,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.18869304656982422,
+      "mean_ordered_match": 0.11328125,
+      "mean_overlap": 0.96484375,
+      "min_overlap": 0.9609375,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0.5
+    },
+    "case": "qwen3_0_6B/ctx5000_b2_w128",
+    "delta_pct": 871.8730995031368,
+    "iqr_ms": 0.6855185274616815,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 142.01031098491512,
+    "parity": "different",
+    "requests_per_second": 14.08348440425884,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3131999969482422,
+      "mean_ordered_match": 0.0546875,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.94921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b2_w256",
+    "delta_pct": 684.1581353697409,
+    "iqr_ms": 0.7238352482090704,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 180.03121599031147,
+    "parity": "different",
+    "requests_per_second": 11.109184532240407,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b2_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.11546697351150215,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 22.95853449322749,
+    "parity": "exact",
+    "requests_per_second": 87.11357428280004,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3521108627319336,
+      "mean_ordered_match": 0.26171875,
+      "mean_overlap": 0.95703125,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b4_w64",
+    "delta_pct": 1071.7660449333155,
+    "iqr_ms": 0.850757016451098,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 233.2020600006217,
+    "parity": "different",
+    "requests_per_second": 17.15250714333028,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b4_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.22044497745810077,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 19.901759485946968,
+    "parity": "exact",
+    "requests_per_second": 200.9872545603056,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.25467777252197266,
+      "mean_ordered_match": 0.115234375,
+      "mean_overlap": 0.951171875,
+      "min_overlap": 0.9296875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b4_w128",
+    "delta_pct": 926.9908270798103,
+    "iqr_ms": 0.6354439829010516,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 271.51567047985736,
+    "parity": "different",
+    "requests_per_second": 14.7321146986864,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b4_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.23456950293621048,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 26.437983993673697,
+    "parity": "exact",
+    "requests_per_second": 151.29746659038577,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b4_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.1223530198330991,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 41.80026950780302,
+    "parity": "exact",
+    "requests_per_second": 95.69316291736598,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.37127685546875,
+      "mean_ordered_match": 0.0703125,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.9453125,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0.75
+    },
+    "case": "qwen3_0_6B/ctx5000_b4_w256",
+    "delta_pct": 762.9661919677783,
+    "iqr_ms": 1.1535072408150882,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 360.72219400375616,
+    "parity": "different",
+    "requests_per_second": 11.088865798921008,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.32439327239990234,
+      "mean_ordered_match": 0.232421875,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.890625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b8_w64",
+    "delta_pct": 1200.4050735636383,
+    "iqr_ms": 0.8927867529564537,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 473.83112598618027,
+    "parity": "different",
+    "requests_per_second": 16.88365234206528,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b8_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.3070980019401759,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 36.43719450337812,
+    "parity": "exact",
+    "requests_per_second": 219.55587165906292,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.27259349822998047,
+      "mean_ordered_match": 0.1376953125,
+      "mean_overlap": 0.951171875,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b8_w128",
+    "delta_pct": 1045.0522403150085,
+    "iqr_ms": 2.105944266077131,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 562.3945605038898,
+    "parity": "different",
+    "requests_per_second": 14.22488864905134,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b8_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.1998147417907603,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 49.11518799781334,
+    "parity": "exact",
+    "requests_per_second": 162.88240615827775,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.4625730514526367,
+      "mean_ordered_match": 0.08349609375,
+      "mean_overlap": 0.96142578125,
+      "min_overlap": 0.94921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b8_w256",
+    "delta_pct": 806.4767979943772,
+    "iqr_ms": 5.866731742571574,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 752.7581940230448,
+    "parity": "different",
+    "requests_per_second": 10.627582753028245,
+    "scenario": "qwen3_0_6B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_0_6B/ctx5000_b8_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.9500340092927217,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 83.0421910068253,
+    "parity": "exact",
+    "requests_per_second": 96.33657184385312,
+    "scenario": "qwen3_0_6B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_0_6B/ctx5000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_0_6B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.04324477049522102,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 9.309112501796335,
+    "parity": "exact",
+    "requests_per_second": 107.42162583243406,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.32010459899902344,
+      "mean_ordered_match": 0.375,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w64",
+    "delta_pct": 120.49489654290126,
+    "iqr_ms": 0.210284000786487,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 20.526117979898117,
+    "parity": "different",
+    "requests_per_second": 48.71841821134088,
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.18289470672607422,
+      "mean_ordered_match": 0.265625,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w64",
+    "delta_pct": 417.96086877995214,
+    "iqr_ms": 1.9962627266068012,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 48.21755999000743,
+    "parity": "different",
+    "requests_per_second": 20.739332313937894,
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2380056381225586,
+      "mean_ordered_match": 0.28125,
+      "mean_overlap": 0.921875,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w64",
+    "delta_pct": 213.41188000312764,
+    "iqr_ms": 0.032435229513794184,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 29.175864503486082,
+    "parity": "different",
+    "requests_per_second": 34.274905543262136,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3891582489013672,
+      "mean_ordered_match": 0.078125,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w128",
+    "delta_pct": 124.33298226245401,
+    "iqr_ms": 0.765517761465162,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 23.969733505509794,
+    "parity": "different",
+    "requests_per_second": 41.71927901368346,
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.17602062225341797,
+      "mean_ordered_match": 0.1484375,
+      "mean_overlap": 0.9453125,
+      "min_overlap": 0.9453125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w128",
+    "delta_pct": 569.9559532368643,
+    "iqr_ms": 1.2528492516139522,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 71.58405998779926,
+    "parity": "different",
+    "requests_per_second": 13.969590439134624,
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2459421157836914,
+      "mean_ordered_match": 0.171875,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w128",
+    "delta_pct": 215.26435393156956,
+    "iqr_ms": 0.6272184909903444,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 33.68565099663101,
+    "parity": "different",
+    "requests_per_second": 29.686230499152668,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.04164747952017933,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 10.684890497941524,
+    "parity": "exact",
+    "requests_per_second": 93.59010278979022,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.4613485336303711,
+      "mean_ordered_match": 0.0859375,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w256",
+    "delta_pct": 757.3156306069665,
+    "iqr_ms": 3.213855728972703,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 129.29179599450435,
+    "parity": "different",
+    "requests_per_second": 7.734442795136868,
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2360525131225586,
+      "mean_ordered_match": 0.078125,
+      "mean_overlap": 0.93359375,
+      "min_overlap": 0.93359375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w256",
+    "delta_pct": 187.4751963638533,
+    "iqr_ms": 0.2199262598878704,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 43.354142995667644,
+    "parity": "different",
+    "requests_per_second": 23.065846327533897,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.08100752165773883,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 15.081003002705984,
+    "parity": "exact",
+    "requests_per_second": 66.30858702306273,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.24752140045166016,
+      "mean_ordered_match": 0.0625,
+      "mean_overlap": 0.95703125,
+      "min_overlap": 0.95703125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b1_w256",
+    "delta_pct": 118.26563523543179,
+    "iqr_ms": 0.7764522670186125,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 32.91664700373076,
+    "parity": "different",
+    "requests_per_second": 30.379764982948004,
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.18419170379638672,
+      "mean_ordered_match": 0.25,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b2_w64",
+    "delta_pct": 285.7038599888979,
+    "iqr_ms": 0.12386074376991019,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 42.76844850392081,
+    "parity": "different",
+    "requests_per_second": 46.76344524905198,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b2_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.03883976023644209,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 11.088415994890966,
+    "parity": "exact",
+    "requests_per_second": 180.3684133893884,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b2_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.06496750575024635,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 15.695061505539343,
+    "parity": "exact",
+    "requests_per_second": 127.42861818630843,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.22347354888916016,
+      "mean_ordered_match": 0.14453125,
+      "mean_overlap": 0.96484375,
+      "min_overlap": 0.953125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b2_w128",
+    "delta_pct": 239.29631612204201,
+    "iqr_ms": 0.3189242343069054,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 53.25276550138369,
+    "parity": "different",
+    "requests_per_second": 37.556734963333184,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.26136016845703125,
+      "mean_ordered_match": 0.09375,
+      "mean_overlap": 0.9609375,
+      "min_overlap": 0.94921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b2_w256",
+    "delta_pct": 165.61904769665867,
+    "iqr_ms": 0.6628259943681769,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 71.28950150217861,
+    "parity": "different",
+    "requests_per_second": 28.05462175856118,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b2_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.23802422947483137,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 26.839001991902478,
+    "parity": "exact",
+    "requests_per_second": 74.5184191499898,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.22730541229248047,
+      "mean_ordered_match": 0.26171875,
+      "mean_overlap": 0.91796875,
+      "min_overlap": 0.90625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b4_w64",
+    "delta_pct": 343.86352208034623,
+    "iqr_ms": 0.3726659924723208,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 75.74788000783883,
+    "parity": "different",
+    "requests_per_second": 52.806758414704895,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b4_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.06184426456457004,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 17.065578998881392,
+    "parity": "exact",
+    "requests_per_second": 234.38993779596873,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2763710021972656,
+      "mean_ordered_match": 0.15625,
+      "mean_overlap": 0.951171875,
+      "min_overlap": 0.9296875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b4_w128",
+    "delta_pct": 231.73638130618755,
+    "iqr_ms": 0.5098529800307006,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 92.82821748638526,
+    "parity": "different",
+    "requests_per_second": 43.090345891718364,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b4_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.2615362755022943,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 27.982525498373434,
+    "parity": "exact",
+    "requests_per_second": 142.94635415350598,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b4_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.22030799300409853,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 47.15551951085217,
+    "parity": "exact",
+    "requests_per_second": 84.82570103123255,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.31967926025390625,
+      "mean_ordered_match": 0.0732421875,
+      "mean_overlap": 0.9453125,
+      "min_overlap": 0.91796875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b4_w256",
+    "delta_pct": 172.21475521186633,
+    "iqr_ms": 0.5577442425419576,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 128.3642820053501,
+    "parity": "different",
+    "requests_per_second": 31.16131635304347,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.29021167755126953,
+      "mean_ordered_match": 0.265625,
+      "mean_overlap": 0.9765625,
+      "min_overlap": 0.96875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b8_w64",
+    "delta_pct": 338.78910994730626,
+    "iqr_ms": 0.7465655435225926,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 134.45379200857133,
+    "parity": "different",
+    "requests_per_second": 59.49999535520728,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b8_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.284667985397391,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 30.64200750668533,
+    "parity": "exact",
+    "requests_per_second": 261.0795000378026,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3493824005126953,
+      "mean_ordered_match": 0.162109375,
+      "mean_overlap": 0.9541015625,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b8_w128",
+    "delta_pct": 239.45353917449438,
+    "iqr_ms": 0.34240000968566164,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 167.96948650153354,
+    "parity": "different",
+    "requests_per_second": 47.62769814103683,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b8_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.22358374553732574,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 49.482319998787716,
+    "parity": "exact",
+    "requests_per_second": 161.6739069670944,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.5403881072998047,
+      "mean_ordered_match": 0.07666015625,
+      "mean_overlap": 0.95654296875,
+      "min_overlap": 0.9453125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b8_w256",
+    "delta_pct": 179.90882556117464,
+    "iqr_ms": 1.656700245803222,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 240.45684801239986,
+    "parity": "different",
+    "requests_per_second": 33.270002772337165,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx1000_b8_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.7109722500899807,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 85.90541849844158,
+    "parity": "exact",
+    "requests_per_second": 93.1256740242192,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx1000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.043175976315978914,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 10.978780497680418,
+    "parity": "exact",
+    "requests_per_second": 91.08479764316981,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2057781219482422,
+      "mean_ordered_match": 0.28125,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.953125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w64",
+    "delta_pct": 178.32580310234664,
+    "iqr_ms": 0.711571512511,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 30.556778991012834,
+    "parity": "different",
+    "requests_per_second": 32.72596238936419,
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3521308898925781,
+      "mean_ordered_match": 0.140625,
+      "mean_overlap": 0.96875,
+      "min_overlap": 0.96875,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w64",
+    "delta_pct": 1211.1918944633132,
+    "iqr_ms": 2.2428207375924103,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 143.95287999650463,
+    "parity": "different",
+    "requests_per_second": 6.946717564971825,
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2971363067626953,
+      "mean_ordered_match": 0.328125,
+      "mean_overlap": 0.9375,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w64",
+    "delta_pct": 755.0780344924293,
+    "iqr_ms": 0.4096082484466024,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 93.87714049080387,
+    "parity": "different",
+    "requests_per_second": 10.652220495552474,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.1975107192993164,
+      "mean_ordered_match": 0.1796875,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.953125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w128",
+    "delta_pct": 171.2584367887568,
+    "iqr_ms": 0.18364522838965058,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 33.777464006561786,
+    "parity": "different",
+    "requests_per_second": 29.60553817201122,
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b1_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2777547836303711,
+      "mean_ordered_match": 0.1328125,
+      "mean_overlap": 0.9609375,
+      "min_overlap": 0.9609375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w128",
+    "delta_pct": 752.0249828593793,
+    "iqr_ms": 0.45962200238136575,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 106.09529248904437,
+    "parity": "different",
+    "requests_per_second": 9.42548888399796,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.03743924753507599,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 12.452133989427239,
+    "parity": "exact",
+    "requests_per_second": 80.30752004829633,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b1_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2872486114501953,
+      "mean_ordered_match": 0.04296875,
+      "mean_overlap": 0.9609375,
+      "min_overlap": 0.9609375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w256",
+    "delta_pct": 677.5736556611566,
+    "iqr_ms": 0.43966848897980526,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 140.2990959904855,
+    "parity": "different",
+    "requests_per_second": 7.127629675303223,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.14316575834527612,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 18.04319050279446,
+    "parity": "exact",
+    "requests_per_second": 55.422570628244706,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.22495079040527344,
+      "mean_ordered_match": 0.08984375,
+      "mean_overlap": 0.953125,
+      "min_overlap": 0.953125,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b1_w256",
+    "delta_pct": 131.7457796685542,
+    "iqr_ms": 1.0400437313364819,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 41.81433250778355,
+    "parity": "different",
+    "requests_per_second": 23.91524484610282,
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.47881507873535156,
+      "mean_ordered_match": 0.25,
+      "mean_overlap": 0.921875,
+      "min_overlap": 0.90625,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0.5
+    },
+    "case": "qwen3_1_7B/ctx5000_b2_w64",
+    "delta_pct": 1127.1516084097118,
+    "iqr_ms": 0.19762373267440125,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 179.97569298313465,
+    "parity": "different",
+    "requests_per_second": 11.112611746895277,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b2_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.049303249397780746,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 14.666133487480693,
+    "parity": "exact",
+    "requests_per_second": 136.36859378835194,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b2_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b2_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.14751450362382457,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 19.453493499895558,
+    "parity": "exact",
+    "requests_per_second": 102.80929746683996,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b2_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2693452835083008,
+      "mean_ordered_match": 0.10546875,
+      "mean_overlap": 0.9453125,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0.5
+    },
+    "case": "qwen3_1_7B/ctx5000_b2_w128",
+    "delta_pct": 996.906779280089,
+    "iqr_ms": 0.6321537512121722,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 213.38668900716584,
+    "parity": "different",
+    "requests_per_second": 9.372655854521634,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b2_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.2474212646484375,
+      "mean_ordered_match": 0.0859375,
+      "mean_overlap": 0.955078125,
+      "min_overlap": 0.94140625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b2_w256",
+    "delta_pct": 708.4115086254994,
+    "iqr_ms": 0.3775834775296971,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 256.5672944765538,
+    "parity": "different",
+    "requests_per_second": 7.795225825958766,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b2_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.12872197112301365,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 31.737214492750354,
+    "parity": "exact",
+    "requests_per_second": 63.01750270039781,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.25093841552734375,
+      "mean_ordered_match": 0.32421875,
+      "mean_overlap": 0.9453125,
+      "min_overlap": 0.90625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b4_w64",
+    "delta_pct": 1492.5913400402299,
+    "iqr_ms": 0.5124399758642539,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 389.84743200126104,
+    "parity": "different",
+    "requests_per_second": 10.260424134298418,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b4_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.1948242643265985,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 24.478811494191177,
+    "parity": "exact",
+    "requests_per_second": 163.4066262142343,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b4_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.1913766860961914,
+      "mean_ordered_match": 0.158203125,
+      "mean_overlap": 0.94140625,
+      "min_overlap": 0.9140625,
+      "ordered_exact": false,
+      "top1_exact": false,
+      "top1_match_rate": 0.75
+    },
+    "case": "qwen3_1_7B/ctx5000_b4_w128",
+    "delta_pct": 1120.6442253640344,
+    "iqr_ms": 1.2889839927083813,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 432.6613860030193,
+    "parity": "different",
+    "requests_per_second": 9.245105131642338,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b4_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.19882099877577275,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 35.445330999209546,
+    "parity": "exact",
+    "requests_per_second": 112.8498419182262,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b4_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b4_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.46052677498664707,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 57.11602949304506,
+    "parity": "exact",
+    "requests_per_second": 70.03287930732431,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b4_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.24032020568847656,
+      "mean_ordered_match": 0.083984375,
+      "mean_overlap": 0.9560546875,
+      "min_overlap": 0.94140625,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b4_w256",
+    "delta_pct": 826.548726702215,
+    "iqr_ms": 2.6565092484815978,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 529.2078440106707,
+    "parity": "different",
+    "requests_per_second": 7.558466952578553,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b8_w64",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.24552345275878906,
+      "mean_ordered_match": 0.2734375,
+      "mean_overlap": 0.955078125,
+      "min_overlap": 0.9375,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b8_w64",
+    "delta_pct": 1555.0910196323007,
+    "iqr_ms": 2.7713657400454395,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 759.7589979995973,
+    "parity": "different",
+    "requests_per_second": 10.52965482615349,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b8_w64",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.47058727068360895,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 45.90436350554228,
+    "parity": "exact",
+    "requests_per_second": 174.27537142594554,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.24552345275878906,
+      "mean_ordered_match": 0.140625,
+      "mean_overlap": 0.9453125,
+      "min_overlap": 0.921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b8_w128",
+    "delta_pct": 1231.7887434708537,
+    "iqr_ms": 4.764580997289158,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 856.0894660040503,
+    "parity": "different",
+    "requests_per_second": 9.344817706193046,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b8_w128",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.36057478428119794,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 64.28117598989047,
+    "parity": "exact",
+    "requests_per_second": 124.45323030895022,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b8_w128",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.3039970397949219,
+      "mean_ordered_match": 0.09423828125,
+      "mean_overlap": 0.9619140625,
+      "min_overlap": 0.94921875,
+      "ordered_exact": false,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b8_w256",
+    "delta_pct": 876.3314167145154,
+    "iqr_ms": 8.83784075267613,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 1062.190480006393,
+    "parity": "different",
+    "requests_per_second": 7.531605818903452,
+    "scenario": "qwen3_1_7B",
+    "solution": "flash_rec",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "agreement": {
+      "max_score_difference": 0.0,
+      "mean_ordered_match": 1.0,
+      "mean_overlap": 1.0,
+      "min_overlap": 1.0,
+      "ordered_exact": true,
+      "top1_exact": true,
+      "top1_match_rate": 1
+    },
+    "case": "qwen3_1_7B/ctx5000_b8_w256",
+    "delta_pct": 0.0,
+    "iqr_ms": 0.4025437301606871,
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "median_ms": 108.79404901061207,
+    "parity": "exact",
+    "requests_per_second": 73.53343379305295,
+    "scenario": "qwen3_1_7B",
+    "solution": "sid_gr_inference",
+    "speed_of_light": {
+      "reason": "No sourced dense BF16 ceiling in the selected hardware profile",
+      "status": "unavailable"
+    },
+    "status": "success"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "vllm_gr",
+    "status": "unsupported"
+  },
+  {
+    "case": "qwen3_1_7B/ctx5000_b8_w256",
+    "measurement": {
+      "repeats": 30,
+      "warmup_runs": 5
+    },
+    "parity": "unavailable",
+    "scenario": "qwen3_1_7B",
+    "solution": "tensorrt_llm",
+    "status": "unsupported"
+  }
+]

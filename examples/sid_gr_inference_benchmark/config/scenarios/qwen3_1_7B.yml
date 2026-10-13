@@ -1,0 +1,31 @@
+name: qwen3_1_7B
+model:
+  id: Qwen/Qwen3-1.7B
+  # Immutable checkpoint: https://huggingface.co/Qwen/Qwen3-1.7B/tree/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+  revision: 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+  # QWEN3_1_7B_MODEL optionally selects a local checkpoint directory. Empty means
+  # e2e downloads this snapshot; plan/report do not fetch checkpoints. Either way,
+  # e2e verifies model files against Hub hashes, so Hub metadata must be reachable.
+  # Reports retain checkpoint hashes. Relative paths use the benchmark directory.
+  path: ${QWEN3_1_7B_MODEL:-}
+  dtype: bfloat16
+  quantization: none
+  kv_cache_dtype: bfloat16
+inputs:
+  type: synthetic_tokens
+  seed: 42
+  context_lengths: [1000, 5000]
+  batch_sizes: [1, 2, 4, 8]
+generation:
+  beam_widths: [64, 128, 256]
+  output_tokens: 3
+  return_beams: all
+  ignore_eos: true
+  length_penalty: 0
+  score: cumulative_logprob
+  constraints: none
+
+# Measurement protocol is part of the scenario, shared by all candidates.
+measurement:
+  warmup_runs: 5
+  repeats: 30

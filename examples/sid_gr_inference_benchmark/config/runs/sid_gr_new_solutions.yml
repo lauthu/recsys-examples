@@ -1,0 +1,12 @@
+# Same scenarios, hardware allocation and measurement protocol as four_engine.yml.
+# 48 workloads / 192 jobs; SID-GR is the reference for the three new candidates.
+# vLLM-GR and TensorRT-LLM retain explicit unsupported rows for larger batches.
+scenarios: [qwen3_0_6B, qwen3_1_7B]
+solutions: [sid_gr_inference, vllm_gr, tensorrt_llm, flash_rec]
+baseline: sid_gr_inference
+hardware: rtx_pro_6000_blackwell_server
+execution:
+  gpu: ${BENCHMARK_GPU:-}
+  timeout_seconds: 1800
+  continue_on_error: true
+output_dir: ../../results

@@ -1,0 +1,128 @@
+{
+  "baseline": "sid_gr_inference",
+  "checks": [
+    "48 identical token workloads and checkpoint file hashes",
+    "same precision, generation rules, five warmups and 30 timed repeats",
+    "192 unique case/candidate rows with matching saved status",
+    "one frozen suite identity for every worker and the saved source snapshot",
+    "all successful raw outputs structurally valid; report medians match samples"
+  ],
+  "current_hardware": {
+    "cpu": {
+      "affinity": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "logical_cpus": 224,
+      "model": "Intel(R) Xeon(R) Platinum 8480+",
+      "physical_cores": 112,
+      "sockets": 2
+    },
+    "driver": "595.58.03",
+    "memory_mib": 97887.0,
+    "name": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "uuid": "GPU-44b1e15f-891e-a997-ea3a-1887655925aa"
+  },
+  "jobs_by_solution": {
+    "flash_rec": {
+      "success": 48
+    },
+    "sid_gr_inference": {
+      "success": 48
+    },
+    "tensorrt_llm": {
+      "success": 8,
+      "unsupported": 40
+    },
+    "vllm_gr": {
+      "success": 12,
+      "unsupported": 36
+    }
+  },
+  "previous_hardware": {
+    "cpu": {
+      "affinity": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "logical_cpus": 32,
+      "model": "Intel(R) Xeon(R) Gold 6444Y",
+      "physical_cores": 16,
+      "sockets": 1
+    },
+    "driver": "615.71.09",
+    "memory_mib": 97887.0,
+    "name": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "uuid": "GPU-7330c4aa-0e83-7249-af71-60feb195d4eb"
+  },
+  "reference_run": "/home/scratch.xinyliu_gpu/recsys-examples/examples/sid_gr_inference_benchmark/results/20261012T113832092061Z-c0ad33",
+  "status": "passed",
+  "suite_sha256": "0f156d510599c3f9e2fd7ea14fa6384305777cf50d0baa5cf2da59dd8410b3d5",
+  "timed_samples": 3480,
+  "workload_sha256": {
+    "qwen3_0_6B/ctx1000_b1_w128": "79aa2b82e35975a312eeff8ca6f5b220365a65269e5a8253fc2832740f6e5979",
+    "qwen3_0_6B/ctx1000_b1_w256": "79aa2b82e35975a312eeff8ca6f5b220365a65269e5a8253fc2832740f6e5979",
+    "qwen3_0_6B/ctx1000_b1_w64": "79aa2b82e35975a312eeff8ca6f5b220365a65269e5a8253fc2832740f6e5979",
+    "qwen3_0_6B/ctx1000_b2_w128": "0171c4e3311dd8ac237045d47c57d379e5047189ec054738c52db9cc4778a5b0",
+    "qwen3_0_6B/ctx1000_b2_w256": "0171c4e3311dd8ac237045d47c57d379e5047189ec054738c52db9cc4778a5b0",
+    "qwen3_0_6B/ctx1000_b2_w64": "0171c4e3311dd8ac237045d47c57d379e5047189ec054738c52db9cc4778a5b0",
+    "qwen3_0_6B/ctx1000_b4_w128": "d8ec2914620f6fdab1cddfd8da4f6dfc8e6783e565f89be2e8c1f746aecbd82b",
+    "qwen3_0_6B/ctx1000_b4_w256": "d8ec2914620f6fdab1cddfd8da4f6dfc8e6783e565f89be2e8c1f746aecbd82b",
+    "qwen3_0_6B/ctx1000_b4_w64": "d8ec2914620f6fdab1cddfd8da4f6dfc8e6783e565f89be2e8c1f746aecbd82b",
+    "qwen3_0_6B/ctx1000_b8_w128": "2446cf4dc1056cdcaa1f53533d43316198f6545df2f14b2657c3583fa541184b",
+    "qwen3_0_6B/ctx1000_b8_w256": "2446cf4dc1056cdcaa1f53533d43316198f6545df2f14b2657c3583fa541184b",
+    "qwen3_0_6B/ctx1000_b8_w64": "2446cf4dc1056cdcaa1f53533d43316198f6545df2f14b2657c3583fa541184b",
+    "qwen3_0_6B/ctx5000_b1_w128": "3aad5de77950e8087ff86843e5291177113eb05e52c41e13da1976c3488bbbe5",
+    "qwen3_0_6B/ctx5000_b1_w256": "3aad5de77950e8087ff86843e5291177113eb05e52c41e13da1976c3488bbbe5",
+    "qwen3_0_6B/ctx5000_b1_w64": "3aad5de77950e8087ff86843e5291177113eb05e52c41e13da1976c3488bbbe5",
+    "qwen3_0_6B/ctx5000_b2_w128": "2841b4adc3253b40cb2c2db93f10eba2023c290c20ef0faab652ed8f4a792b15",
+    "qwen3_0_6B/ctx5000_b2_w256": "2841b4adc3253b40cb2c2db93f10eba2023c290c20ef0faab652ed8f4a792b15",
+    "qwen3_0_6B/ctx5000_b2_w64": "2841b4adc3253b40cb2c2db93f10eba2023c290c20ef0faab652ed8f4a792b15",
+    "qwen3_0_6B/ctx5000_b4_w128": "aa4c906446161320d116d092fe22ab8e63c915cbf8b25301f5d5c139e7b95975",
+    "qwen3_0_6B/ctx5000_b4_w256": "aa4c906446161320d116d092fe22ab8e63c915cbf8b25301f5d5c139e7b95975",
+    "qwen3_0_6B/ctx5000_b4_w64": "aa4c906446161320d116d092fe22ab8e63c915cbf8b25301f5d5c139e7b95975",
+    "qwen3_0_6B/ctx5000_b8_w128": "947acaea00022d80acdd50a0e3883d4714728afeb8c2725b9391fd3acaf2e68f",
+    "qwen3_0_6B/ctx5000_b8_w256": "947acaea00022d80acdd50a0e3883d4714728afeb8c2725b9391fd3acaf2e68f",
+    "qwen3_0_6B/ctx5000_b8_w64": "947acaea00022d80acdd50a0e3883d4714728afeb8c2725b9391fd3acaf2e68f",
+    "qwen3_1_7B/ctx1000_b1_w128": "79aa2b82e35975a312eeff8ca6f5b220365a65269e5a8253fc2832740f6e5979",
+    "qwen3_1_7B/ctx1000_b1_w256": "79aa2b82e35975a312eeff8ca6f5b220365a65269e5a8253fc2832740f6e5979",
+    "qwen3_1_7B/ctx1000_b1_w64": "79aa2b82e35975a312eeff8ca6f5b220365a65269e5a8253fc2832740f6e5979",
+    "qwen3_1_7B/ctx1000_b2_w128": "0171c4e3311dd8ac237045d47c57d379e5047189ec054738c52db9cc4778a5b0",
+    "qwen3_1_7B/ctx1000_b2_w256": "0171c4e3311dd8ac237045d47c57d379e5047189ec054738c52db9cc4778a5b0",
+    "qwen3_1_7B/ctx1000_b2_w64": "0171c4e3311dd8ac237045d47c57d379e5047189ec054738c52db9cc4778a5b0",
+    "qwen3_1_7B/ctx1000_b4_w128": "d8ec2914620f6fdab1cddfd8da4f6dfc8e6783e565f89be2e8c1f746aecbd82b",
+    "qwen3_1_7B/ctx1000_b4_w256": "d8ec2914620f6fdab1cddfd8da4f6dfc8e6783e565f89be2e8c1f746aecbd82b",
+    "qwen3_1_7B/ctx1000_b4_w64": "d8ec2914620f6fdab1cddfd8da4f6dfc8e6783e565f89be2e8c1f746aecbd82b",
+    "qwen3_1_7B/ctx1000_b8_w128": "2446cf4dc1056cdcaa1f53533d43316198f6545df2f14b2657c3583fa541184b",
+    "qwen3_1_7B/ctx1000_b8_w256": "2446cf4dc1056cdcaa1f53533d43316198f6545df2f14b2657c3583fa541184b",
+    "qwen3_1_7B/ctx1000_b8_w64": "2446cf4dc1056cdcaa1f53533d43316198f6545df2f14b2657c3583fa541184b",
+    "qwen3_1_7B/ctx5000_b1_w128": "3aad5de77950e8087ff86843e5291177113eb05e52c41e13da1976c3488bbbe5",
+    "qwen3_1_7B/ctx5000_b1_w256": "3aad5de77950e8087ff86843e5291177113eb05e52c41e13da1976c3488bbbe5",
+    "qwen3_1_7B/ctx5000_b1_w64": "3aad5de77950e8087ff86843e5291177113eb05e52c41e13da1976c3488bbbe5",
+    "qwen3_1_7B/ctx5000_b2_w128": "2841b4adc3253b40cb2c2db93f10eba2023c290c20ef0faab652ed8f4a792b15",
+    "qwen3_1_7B/ctx5000_b2_w256": "2841b4adc3253b40cb2c2db93f10eba2023c290c20ef0faab652ed8f4a792b15",
+    "qwen3_1_7B/ctx5000_b2_w64": "2841b4adc3253b40cb2c2db93f10eba2023c290c20ef0faab652ed8f4a792b15",
+    "qwen3_1_7B/ctx5000_b4_w128": "aa4c906446161320d116d092fe22ab8e63c915cbf8b25301f5d5c139e7b95975",
+    "qwen3_1_7B/ctx5000_b4_w256": "aa4c906446161320d116d092fe22ab8e63c915cbf8b25301f5d5c139e7b95975",
+    "qwen3_1_7B/ctx5000_b4_w64": "aa4c906446161320d116d092fe22ab8e63c915cbf8b25301f5d5c139e7b95975",
+    "qwen3_1_7B/ctx5000_b8_w128": "947acaea00022d80acdd50a0e3883d4714728afeb8c2725b9391fd3acaf2e68f",
+    "qwen3_1_7B/ctx5000_b8_w256": "947acaea00022d80acdd50a0e3883d4714728afeb8c2725b9391fd3acaf2e68f",
+    "qwen3_1_7B/ctx5000_b8_w64": "947acaea00022d80acdd50a0e3883d4714728afeb8c2725b9391fd3acaf2e68f"
+  }
+}

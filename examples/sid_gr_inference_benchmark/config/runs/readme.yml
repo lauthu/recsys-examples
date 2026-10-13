@@ -1,0 +1,11 @@
+# Original README model/workload grid: use --case 'qwen3_1_7B/*_w256'.
+# Retains this suite's inputs, timing and solution settings (including prefix cache).
+scenarios: [qwen3_1_7B]
+solutions: [sid_gr_inference, sglang_beam_search]
+baseline: sglang_beam_search
+hardware: rtx_pro_6000_blackwell_server
+execution:
+  gpu: ${BENCHMARK_GPU:-}
+  timeout_seconds: 1800
+  continue_on_error: true
+output_dir: ../../results
