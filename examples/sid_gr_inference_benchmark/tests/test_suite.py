@@ -469,6 +469,8 @@ class SuiteTests(unittest.TestCase):
         from harness.reporting.report import render
 
         cfg = load(ROOT / "config/runs/default.yml")
+        # Historical manifests must survive the live run profile's rename.
+        cfg["run_profile"] = "config/runs/comparison.yml"
         baseline = cfg["baseline"]
         solution = cfg["solution_configs"][baseline]
         cfg["solutions"] = [baseline, "candidate", "broken"]
@@ -546,6 +548,13 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(candidate["agreement"]["mean_ordered_match"], 0.5)
             self.assertEqual(records[0]["parity"], "exact")
             report = (root / "report.md").read_text()
+            profile = ROOT / "config/runs/four_engine.yml"
+            self.assertTrue(profile.is_file())
+            self.assertIn(f"[Run profile]({os.path.relpath(profile, root)})", report)
+            self.assertEqual(
+                read(root / "manifest.json")["config"]["run_profile"],
+                "config/runs/comparison.yml",
+            )
             # The overview must expose output mismatches and unsuccessful jobs
             # even when the detailed tables are collapsed.
             overview = report.split("<details>", 1)[0]

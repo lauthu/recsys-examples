@@ -1,20 +1,32 @@
 name: sglang_beam_search
 adapter: entrypoints.sglang_beam_search.adapter
+# ${NAME:-default} reads the controller environment; paths are relative to the
+# benchmark directory. Prepare this pinned checkout and its matching runtime.
 source:
+  # SGLANG_BEAM_SOURCE: checkout override; it must be clean at expected_commit.
   path: ${SGLANG_BEAM_SOURCE:-../sglang_beam_search}
+  # https://github.com/cswuyg/sglang/tree/af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
   expected_commit: af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d
 runtime:
-  kind: ${SGLANG_BEAM_RUNTIME:-local} # local: Python subprocess; docker: container
+  # SGLANG_BEAM_RUNTIME: local Python subprocess or docker container.
+  kind: ${SGLANG_BEAM_RUNTIME:-local}
+  # SGLANG_BEAM_PYTHON: interpreter in the selected runtime; a local venv is allowed.
   python: ${SGLANG_BEAM_PYTHON:-python3}
-  # Build with entrypoints/sglang_beam_search/Dockerfile at source.expected_commit.
+  # SGLANG_BEAM_IMAGE: Docker-only image override; execution freezes its local ID.
+  # Build first with build_recipe and the source checkout at expected_commit.
   image: ${SGLANG_BEAM_IMAGE:-sid-gr-benchmark:beam-af4e3f4-cu130}
   build_recipe: entrypoints/sglang_beam_search/Dockerfile
 engine:
+  # Enables SGLang radix caching. Identical warmups/repeats include warm prefix
+  # reuse; set false to disable reuse for this candidate.
   prefix_cache: true
-  page_size: 1
-  disable_overlap_schedule: true
-  disable_cuda_graph: false
-  disable_piecewise_cuda_graph: false
-  mem_fraction_static: 0.70
+  page_size: 1 # Required by the beam-search adapter.
+  disable_overlap_schedule: true # Use the non-overlapped scheduler.
+  disable_cuda_graph: false # Permit CUDA graph replay for supported shapes.
+  disable_piecewise_cuda_graph: false # Permit piecewise graph capture where supported.
+  mem_fraction_static: 0.70 # Fraction of GPU memory for weights and KV cache.
   log_level: warning
+# No additional backend environment settings are required by this candidate.
+# The harness supplies CUDA_VISIBLE_DEVICES and per-run cache directories;
+# select the GPU with BENCHMARK_GPU in the run config, not with worker env values.
 env: {}

@@ -1,8 +1,13 @@
 name: qwen3_0_6B
 model:
   id: Qwen/Qwen3-0.6B
+  # Immutable checkpoint: https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca
   revision: c1899de289a04d12100db370d81485cdf75e47ca
-  path: ${QWEN3_0_6B_MODEL:-}  # Optional local copy, verified against the pinned snapshot.
+  # QWEN3_0_6B_MODEL optionally selects a local checkpoint directory. Empty means
+  # e2e downloads this snapshot; plan/report do not fetch checkpoints. Either way,
+  # e2e verifies model files against Hub hashes, so Hub metadata must be reachable.
+  # Reports retain checkpoint hashes. Relative paths use the benchmark directory.
+  path: ${QWEN3_0_6B_MODEL:-}
   dtype: bfloat16
   quantization: none
   kv_cache_dtype: bfloat16

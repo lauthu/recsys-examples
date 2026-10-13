@@ -35,7 +35,7 @@ flowchart LR
 
 `plan` and `e2e` default to `config/runs/default.yml`, with SGLang as the baseline.
 `--config config/runs/readme.yml` selects the old SGLang beam branch;
-`config/runs/comparison.yml` selects SID-GR, public/native SGLang, and both pinned
+`config/runs/four_engine.yml` selects SID-GR, public/native SGLang, and both pinned
 beam branches: 48 cases and 192 jobs, with native SGLang as reference.
 Model, input, source and mount paths are relative to the suite root; `output_dir`
 is relative to the run YAML. All supplied runs write to the suite's `results/`.

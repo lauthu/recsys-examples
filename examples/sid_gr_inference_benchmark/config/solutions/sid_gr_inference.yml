@@ -1,25 +1,43 @@
 name: sid_gr_inference
 adapter: entrypoints.sid_gr_inference.adapter
+# ${NAME:-default} reads the controller environment; paths are relative to the
+# benchmark directory. Prepare the SID-GR checkout and its matching runtime.
 source:
+  # SID_GR_SOURCE: checkout override; defaults to the SID-GR example in this repo.
   path: ${SID_GR_SOURCE:-../sid-gr-inference}
 runtime:
+  # SID_GR_RUNTIME: local Python subprocess or docker container.
   kind: ${SID_GR_RUNTIME:-local}
+  # SID_GR_PYTHON: interpreter in the selected runtime; use an absolute local venv path.
   python: ${SID_GR_PYTHON:-python3}
-  # Build with entrypoints/sglang_beam_search/Dockerfile; both engines share it.
+  # SID_GR_IMAGE: Docker-only image override; execution freezes its local ID.
+  # Build first with the old SGLang beam branch's recipe; both engines share it.
   image: ${SID_GR_IMAGE:-sid-gr-benchmark:beam-af4e3f4-cu130}
   build_recipe: entrypoints/sglang_beam_search/Dockerfile
+  # GR_DECODE_ATTEN_ROOT: tracked GR decode kernel checkout; mount it read-only
+  # at the same path in Docker and forward that path through env below.
   mounts: ["${GR_DECODE_ATTEN_ROOT:-../../corelib/gr_decode_atten}"]
 engine:
+  # Enables SID-GR's shared prompt-prefill cache. Identical warmups/repeats include
+  # warm prefix reuse; set false to disable reuse for this candidate.
   prefix_cache: true
 env:
-  # Current serving defaults: native prefill, CUDA graphs and fused/JIT kernels.
+  # Explicit worker values override inherited local settings; edit this YAML to
+  # change them. No separate exports of these optimization flags are needed.
+  # auto prefers FlashAttention prefill, falling back to PyTorch SDPA.
   GR_INFERENCE_PREFILL_BACKEND: auto
+  # "0" permits prefill/decode CUDA graphs and flattened linear operations;
+  # change the corresponding value to "1" to disable that optimization.
   GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "0"
   GR_INFERENCE_DISABLE_DECODE_CUDA_GRAPH: "0"
   GR_INFERENCE_DISABLE_FLATTEN_LINEAR: "0"
+  # "1" enables JIT compilation of the TRT-LLM-derived fused kernels.
   GR_INFERENCE_GR_TRTLLM_KERNELS_JIT: "1"
+  # Enable fused QK normalization/RoPE in both prefill and decode phases.
   GR_INFERENCE_TRTLLM_QK_NORM_ROPE_PHASE: all
+  # Enable packed GEMM in both attention and MLP scopes where supported.
   GR_INFERENCE_TRTLLM_PACKED_GEMM_SCOPE: all
-  # Expanded from the controller's environment; forwarded to the worker environment.
-  # runtime.mounts above exposes this same path inside Docker.
+  # Optional controller override; defaults to this repo's tracked GR kernel.
   GR_DECODE_ATTEN_ROOT: ${GR_DECODE_ATTEN_ROOT:-../../corelib/gr_decode_atten}
+# The harness supplies CUDA_VISIBLE_DEVICES and per-run cache directories;
+# select the GPU with BENCHMARK_GPU in the run config, not with worker env values.

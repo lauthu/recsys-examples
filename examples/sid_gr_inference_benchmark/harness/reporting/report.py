@@ -413,12 +413,16 @@ def render(directory):
         [records[j["case_id"], j["solution"]] for j in jobs],
         directory,
     )
+    profile = cfg.get("run_profile")
+    # Keep frozen metadata intact while linking to the renamed live profile.
+    if profile == "config/runs/comparison.yml":
+        profile = "config/runs/four_engine.yml"
     rendered = Template(
         (ROOT / "harness/reporting/templates/e2e.md").read_text()
     ).substitute(
         run_id=manifest["run_id"],
-        run_profile=f"[Run profile]({os.path.relpath(ROOT / cfg['run_profile'], directory)})"
-        if cfg.get("run_profile")
+        run_profile=f"[Run profile]({os.path.relpath(ROOT / profile, directory)})"
+        if profile
         else "Run profile not recorded",
         summary=message,
         hardware=f"Hardware profile: [{cfg['hardware']}]({os.path.relpath(ROOT / 'config/hardware' / (cfg['hardware'] + '.yml'), directory)}).",

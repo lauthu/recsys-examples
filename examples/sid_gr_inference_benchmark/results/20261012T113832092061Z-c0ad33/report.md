@@ -1,6 +1,6 @@
 # SID-GR benchmark
 
-Run `20261012T113832092061Z-c0ad33` · [Run profile](../../config/runs/comparison.yml)
+Run `20261012T113832092061Z-c0ad33` · [Run profile](../../config/runs/four_engine.yml)
 
 [Latency](#latency-comparison) · [Parity](#output-parity) · [GPU diagnosis](#gpu-diagnosis) · [Environment](#run-details) · [Artifacts](#artifacts)
 

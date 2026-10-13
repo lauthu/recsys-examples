@@ -1,16 +1,27 @@
 name: sglang
 adapter: entrypoints.sglang.adapter
+# ${NAME:-default} reads the controller environment; paths are relative to the
+# benchmark directory. All overrides below are optional with a prepared runtime.
 source:
+  # SGLANG_SOURCE: optional checkout; empty uses the runtime's installed package.
   path: ${SGLANG_SOURCE:-}
 runtime:
+  # SGLANG_RUNTIME: local Python subprocess or docker container.
   kind: ${SGLANG_RUNTIME:-local}
+  # SGLANG_PYTHON: interpreter in the selected runtime; use an absolute local venv path.
   python: ${SGLANG_PYTHON:-python3}
+  # SGLANG_IMAGE: Docker-only image override. Pull it first; execution freezes its ID.
   image: ${SGLANG_IMAGE:-lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306}
 engine:
+  # Enables SGLang radix caching. Identical warmups/repeats include warm prefix
+  # reuse; set false to disable reuse for this candidate.
   prefix_cache: true
-  page_size: 1
-  disable_overlap_schedule: true
-  disable_cuda_graph: false
-  mem_fraction_static: 0.70
+  page_size: 1 # Required by the beam-search adapter.
+  disable_overlap_schedule: true # Use the non-overlapped scheduler.
+  disable_cuda_graph: false # Permit CUDA graph replay for supported shapes.
+  mem_fraction_static: 0.70 # Fraction of GPU memory for weights and KV cache.
   log_level: warning
+# No additional backend environment settings are required by this candidate.
+# The harness supplies CUDA_VISIBLE_DEVICES and per-run cache directories;
+# select the GPU with BENCHMARK_GPU in the run config, not with worker env values.
 env: {}

@@ -15,7 +15,7 @@ class ConfigTests(unittest.TestCase):
         for name, baseline in [
             ("default", "sglang"),
             ("readme", "sglang_beam_search"),
-            ("comparison", "sglang"),
+            ("four_engine", "sglang"),
         ]:
             with self.subTest(name=name):
                 cfg = load(ROOT / "config/runs" / f"{name}.yml")
@@ -65,7 +65,7 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertNotIn("SGLANG_IMAGE", cfg["environment"]["sid_gr_inference"])
 
-    def test_comparison_keeps_four_candidates_and_runtime_overrides_separate(self):
+    def test_four_engine_keeps_four_candidates_and_runtime_overrides_separate(self):
         names = {
             "sid_gr_inference": "SID_GR",
             "sglang": "SGLANG",
@@ -83,7 +83,7 @@ class ConfigTests(unittest.TestCase):
                 }
             )
         with patch.dict(os.environ, environment, clear=True):
-            cfg = load(ROOT / "config/runs/comparison.yml")
+            cfg = load(ROOT / "config/runs/four_engine.yml")
         self.assertEqual(cfg["solutions"], list(names))
         self.assertEqual(cfg["baseline"], "sglang")
         self.assertEqual(len(list(cases(cfg))), 48)

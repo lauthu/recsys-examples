@@ -23,115 +23,77 @@ Run from this directory. Use `python3 bench.py COMMAND --help` for options.
 `--smoke` selects one case with two warmups and three measurements.
 Smoke and profiled results never enter scenario rankings.
 
-The default compares Qwen3-0.6B and Qwen3-1.7B across all four candidates:
-48 workloads and 192 jobs, with five warmups and 30 measured repeats per job.
-
 ## Quick start
 
-The controller needs Python 3.10+ and the small dependencies in `requirements.txt`.
-Prepare candidate runtimes first. `e2e` downloads the scenario's pinned Hugging Face
-checkpoint when needed; `plan` and `report` do not download models or import GPU frameworks.
-For the two beam branches, use the pinned source checkouts listed under
-[Compare all four candidates](#compare-all-four-candidates).
+The controller needs Python 3.10+ and `requirements.txt`.
+Prepare each candidate's runtime using its [solution YAML](#configuration).
+Docker setup for the supplied example is [below](#compare-all-four-candidates).
+`plan` and `report` need no GPU frameworks; `e2e` downloads pinned checkpoints when needed.
 
 ```bash
 python3 -m pip install -r requirements.txt
-export SID_GR_RUNTIME=local SGLANG_RUNTIME=local
-export SGLANG_BEAM_RUNTIME=local SGLANG_BEAM_NEW_RUNTIME=local
-export SID_GR_PYTHON=/absolute/path/to/sid-gr-env/bin/python
-export SGLANG_PYTHON=/absolute/path/to/sglang-env/bin/python
-export SGLANG_BEAM_PYTHON=/absolute/path/to/sglang-beam-env/bin/python
-export SGLANG_BEAM_NEW_PYTHON=/absolute/path/to/sglang-beam-new-env/bin/python
-export SGLANG_BEAM_SOURCE=/absolute/path/to/sglang_beam_search
-export SGLANG_BEAM_NEW_SOURCE=/absolute/path/to/sglang_beam_search_new
-nvidia-smi -L
-export BENCHMARK_GPU=GPU-...  # Use the full UUID from nvidia-smi.
-# The default hardware profile is RTX PRO 6000 Blackwell Server Edition.
+nvidia-smi --query-gpu=name,uuid --format=csv
+export BENCHMARK_GPU=GPU-...  # Select one device using its full UUID.
 python3 bench.py plan --config config/runs/default.yml --smoke
 python3 bench.py e2e --config config/runs/default.yml --smoke
 ```
 
-Remove `--smoke` to run the full matrix for both models.
+The hardware YAML defines the required GPU type. The UUID selects the actual device,
+even when CUDA or Docker remaps device numbers. Remove `--smoke` for the full run.
 
-Use the checked-in config directly, or copy `config/runs/default.yml` to
-`config/runs/local.yml` to change scenarios, candidates, hardware or execution
-policy. This optional, Git-ignored copy is your local run configuration;
-pass its path with `--config`. Select a matching `config/hardware/` profile
-before running on a different GPU.
-
-### Runtime settings
-
-| Candidate setting | Meaning |
-| --- | --- |
-| `runtime.kind: local` | Start `runtime.python` as a subprocess. Default. |
-| `runtime.kind: docker` | Start `runtime.python` inside `runtime.image`. |
-| `runtime.image` | Prepared local image. Tags are frozen to image IDs. |
-| `runtime.build_recipe` | Optional Dockerfile link shown beside the recorded image identity. |
-| `runtime.mounts` | Extra directories mounted read-only at the same paths in Docker. |
-| `env` | Environment variables forwarded to the worker. |
-| `source.path` | Engine checkout. Empty SGLang path uses the installed package. |
-| `source.expected_commit` | Require a clean checkout at this commit. |
-| `engine.prefix_cache` | Candidate-owned prefix reuse; supplied candidates enable it. |
-
-`${NAME:-default}` reads the controller's environment when loading YAML.
-Paths resolve from this directory; defaults apply when a variable is unset.
-Each candidate has independent source and runtime settings.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `BENCHMARK_GPU` | Empty | Required full GPU UUID. |
-| `QWEN3_0_6B_MODEL`, `QWEN3_1_7B_MODEL` | Empty | Optional local copy, verified against the pinned Hugging Face revision. |
-| `GR_DECODE_ATTEN_ROOT` | `../../corelib/gr_decode_atten` | [Tracked GR kernel](../../corelib/gr_decode_atten), used only by SID-GR. |
-
-For each prefix below, `_RUNTIME` defaults to `local`, `_PYTHON` to `python3`, and
-`_IMAGE` to the listed image. For example, `SGLANG_BEAM_NEW_RUNTIME=docker` selects
-Docker for the new beam branch without changing the other candidates.
-
-| Candidate | Variable prefix | `_SOURCE` default | `_IMAGE` default |
-| --- | --- | --- | --- |
-| `sid_gr_inference` | `SID_GR` | `../sid-gr-inference` | `sid-gr-benchmark:beam-af4e3f4-cu130` |
-| `sglang` | `SGLANG` | Empty: installed package | [Pinned public digest](config/solutions/sglang.yml) |
-| `sglang_beam_search` | `SGLANG_BEAM` | `../sglang_beam_search` | `sid-gr-benchmark:beam-af4e3f4-cu130` |
-| `sglang_beam_search_new` | `SGLANG_BEAM_NEW` | `../sglang_beam_search_new` | `sid-gr-benchmark:beam-df191d6-cu130` |
-
-Build or pull images before execution; the suite freezes local image IDs and never
-pulls implicitly. SID-GR shares the old branch's image. The new branch has its own
-[recipe](entrypoints/sglang_beam_search_new/Dockerfile) with matching dependencies.
-
-The supplied hardware profile assigns **10 physical CPU cores**, one allowed logical
-CPU per core. Local workers use `taskset`; Docker uses the same CPU set. The manifest
-records the assigned affinity, host topology, GPU UUID and driver. Fewer available
-cores or a different GPU SKU fail before execution.
-
-The scenario's model ID and immutable revision identify the checkpoint:
-
-| Scenario | Hugging Face snapshot |
-| --- | --- |
-| `qwen3_0_6B` | [Qwen/Qwen3-0.6B @ c1899de](https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca) |
-| `qwen3_1_7B` | [Qwen/Qwen3-1.7B @ 70d244c](https://huggingface.co/Qwen/Qwen3-1.7B/tree/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e) |
-
-`e2e` verifies local overrides against Hub file hashes too; Hub metadata must be
-reachable. Reports retain checkpoint hashes and source repository/commit links.
-
-## Configuration and measurements
+## Configuration
 
 | File | Defines |
 | --- | --- |
-| `config/scenarios/*.yml` | Model, inputs, context/batch/beam grid, generation rules and repeat counts. |
-| `config/solutions/*.yml` | Adapter, source checkout, runtime and engine settings. |
-| `config/hardware/*.yml` | Required GPU SKU and physical CPU core count; optional dense BF16 compute ceiling. |
-| `config/runs/default.yml` | Both models, all four candidates, public SGLang reference, GPU UUID and execution policy. |
-| `config/runs/readme.yml` | Qwen3-1.7B comparison against the pinned old SGLang beam branch. |
-| `config/runs/comparison.yml` | Equivalent to the default; retained for existing comparison commands. |
+| [Scenarios](config/scenarios/) | Model snapshot, inputs, context/batch/beam grid, generation rules and repeat counts. |
+| [Solutions](config/solutions/) | Adapter, source, runtime, backend environment variables and engine settings. |
+| [Hardware](config/hardware/) | Required GPU type and CPU core allocation; optional dense BF16 compute ceiling. |
+| [Default run](config/runs/default.yml) | Scenarios, candidates, baseline, hardware profile, GPU selection and execution policy. |
+| [Four-engine run](config/runs/four_engine.yml) | Explicit four-engine profile, currently equivalent to the default. |
+| [SID-GR README workload grid](config/runs/readme.yml) | Qwen3-1.7B with SID-GR and the old SGLang beam branch. |
 
 A scenario defines reusable cases. Each `e2e` invocation creates a new run.
-Paths in scenario/candidate files resolve from this directory.
-`output_dir` resolves beside the run config (`../../results` in supplied configs).
+Copy `config/runs/default.yml` to the Git-ignored `config/runs/local.yml` for a custom
+run; pass it with `--config`. Select a matching hardware profile for your machine.
+
+Paths in scenario and solution files resolve from this directory.
+`output_dir` resolves beside the run config. `${NAME:-default}` reads the controller's
+environment; defaults apply when a variable is unset.
+
+### Runtime settings
+
+| Solution field | Meaning |
+| --- | --- |
+| `runtime.kind: local` | Run `runtime.python` in an existing local environment. |
+| `runtime.kind: docker` | Run `runtime.python` inside a prepared `runtime.image`. |
+| `runtime.image` | Local image tag or digest; frozen to an image ID before execution. |
+| `runtime.build_recipe` | Optional Dockerfile link recorded with the image identity. |
+| `runtime.mounts` | Extra directories mounted read-only at the same paths in Docker. |
+| `source.path` | Engine checkout; an empty SGLang path uses the installed package. |
+| `source.expected_commit` | Require a clean checkout at this commit. |
+| `env` | Backend environment variables passed to the worker. |
+
+Each solution YAML lists its environment overrides, defaults and engine options:
+[SID-GR](config/solutions/sid_gr_inference.yml), [public SGLang](config/solutions/sglang.yml),
+[old beam branch](config/solutions/sglang_beam_search.yml),
+[new beam branch](config/solutions/sglang_beam_search_new.yml).
+Build or pull images before execution; the suite never pulls implicitly.
+
+Workers receive the CPU allocation from the hardware profile. Local workers use
+`taskset`; Docker uses the same CPU set. The manifest records CPU topology,
+affinity, GPU identity and driver. A mismatched GPU type or insufficient cores fails
+before execution.
+
+Model IDs, immutable revisions and optional local-path overrides live in the
+[scenario YAMLs](config/scenarios/). `e2e` verifies local copies against Hub file hashes;
+Hub metadata must be reachable. Reports retain checkpoint hashes and source identities.
+
+## Measurements
 
 | Measurement | Definition |
 | --- | --- |
 | Latency | Median completed-batch wall time; IQR is the 75th minus 25th percentile, in ms. |
-| Δ latency % | `100 × (candidate median / SGLang median − 1)`; negative means faster. |
+| Δ latency % | `100 × (candidate median / baseline median − 1)`; negative means faster. The run YAML selects `baseline`. |
 | Throughput | Batch size / median latency. Offline requests/s. |
 | Timing scope | CPU token IDs through completed CPU beam IDs/scores, including synchronization. |
 | Excluded work | Setup, warmup, validation and serialization. |
@@ -140,19 +102,8 @@ Paths in scenario/candidate files resolve from this directory.
 
 Adapters require BF16 weights/KV, fixed-length output, all beams, no quantization
 and no catalog constraints. Unsupported settings are explicit.
-Warmup and measured repeats reuse identical inputs. With `engine.prefix_cache: true`,
-measurements include warm prefix reuse; set it to `false` in each candidate YAML
-for a comparison without prefix reuse.
-
-The [SID-GR candidate](config/solutions/sid_gr_inference.yml) records its optimization
-defaults explicitly; edit that YAML to change them:
-
-| Setting | Default |
-| --- | --- |
-| Prefill backend | `GR_INFERENCE_PREFILL_BACKEND=auto` |
-| Prefill/decode CUDA graphs; flattened linear | Corresponding `GR_INFERENCE_DISABLE_*=0` |
-| TRT-LLM kernel JIT | `GR_INFERENCE_GR_TRTLLM_KERNELS_JIT=1` |
-| Fused QK norm/RoPE and packed GEMM | `GR_INFERENCE_TRTLLM_QK_NORM_ROPE_PHASE=all`, `GR_INFERENCE_TRTLLM_PACKED_GEMM_SCOPE=all` |
+Warmup and measured repeats reuse identical inputs. Each solution controls its
+own optimizations; see its YAML for the configured behavior.
 
 Synthetic inputs use a fixed seed and exclude BOS/EOS/PAD. For real inputs, set
 `inputs.type: jsonl` and `inputs.path`; rows contain `request_id` and `input_ids`.
@@ -174,19 +125,26 @@ consistency. Failed jobs or a missing reference leave parity unavailable.
 | Rank match % | Average fraction of beams with identical token IDs at the same rank. |
 | Max score Δ | Largest absolute cumulative-score difference among shared sequences. |
 
-These cover the existing [offline accuracy benchmark](../sid-gr-inference/scripts/run_offline_accuracy_benchmark.sh)'s
-top-1, mean overlap and ordered-match metrics; structural checks enforce its
-output-length and token-budget requirements. SGLang's verified mean-logprob
-scores are multiplied by fixed output length to match SID-GR cumulative scores.
-`success` means execution and structural validation passed; it does not imply
-cross-engine parity. Mismatches remain visible beside performance results.
+Top-1, mean overlap and rank match use the definitions from the existing
+[offline accuracy benchmark](../sid-gr-inference/scripts/run_offline_accuracy_benchmark.sh).
+Structural checks enforce its output-length and token-budget requirements.
+SGLang's verified mean-logprob scores are multiplied by fixed output length to
+match SID-GR cumulative scores. `success` means execution and structural validation
+passed; cross-engine mismatches remain visible beside performance results.
 
 ## Published example
 
-Qwen3-0.6B and Qwen3-1.7B: 24 workloads per model × four engines. All 192 jobs
-passed execution and structural checks, with 5 warmups and 30 measured repeats
-per job (5,760 timing samples). All candidates use 10 CPU cores and enable prefix
-caching. The saved `comparison.yml` profile is equivalent to the current default.
+The saved run uses the [four-engine profile](config/runs/four_engine.yml), equivalent
+to the current default. Frozen metadata retains its original name, `comparison.yml`.
+
+| Setting | Recorded value / configuration |
+| --- | --- |
+| Models and grid | [Qwen3-0.6B](config/scenarios/qwen3_0_6B.yml) and [Qwen3-1.7B](config/scenarios/qwen3_1_7B.yml); contexts 1000/5000, batches 1/2/4/8, beams 64/128/256 |
+| Hardware | [RTX PRO 6000 Blackwell Server Edition](config/hardware/rtx_pro_6000_blackwell_server.yml), 10 physical CPU cores |
+| Measurement count | 48 workloads × four engines; five warmups and 30 timed repeats per job |
+| Result | 192 successful jobs, 5,760 timing samples |
+| Reference | Public SGLang |
+| Candidate settings | All four solution YAMLs enable prefix caching for this run |
 
 Representative median batch latency at **context 1000 / batch 1 / beam 256**;
 lower is better. The linked reports contain all 48 workloads.
@@ -206,8 +164,15 @@ Top-1 outputs agree for the representative workload above. Other workloads
 have top-1 mismatches; all parity differences remain visible in the reports.
 Nsight compares all four engines on Qwen3-1.7B at context 1000 / batch 1 / beam 256.
 
+This run does not reproduce the original SID-GR README's H100 latency numbers.
+That protocol disables prefix reuse, uses different input tokens and repeat counts,
+and has narrower timing boundaries. The suite also times SID-GR input transfer and
+both adapters' output conversion; the headline parity definitions are shared.
+
 One archive contains frozen metadata, inputs, requests, logs, results and native
-Nsight/SQLite traces. Compilation caches are omitted. Extract it before rebuilding:
+Nsight/SQLite traces. Model weights, runtime images and compilation caches are omitted.
+Saved reports can be regenerated; identical timings or bit-for-bit outputs on a fresh
+run are not guaranteed. Extract the archive before rebuilding:
 
 ```bash
 benchmark_run=results/20261012T113832092061Z-c0ad33
@@ -215,25 +180,16 @@ tar -xzf "$benchmark_run/raw_artifacts.tar.gz" -C "$benchmark_run"
 python3 bench.py report --run "$benchmark_run"
 ```
 
-Measurements use RTX PRO 6000 Blackwell; the original README's H100 timings
-are not directly comparable.
-
 Suite-root `leaderboards/` keeps the latest non-smoke result per case/candidate. Partial runs
 replace only executed rows; failures replace older successes. Hardware, checkpoint,
 scenario and JSONL input revisions get separate groups. Parity uses each row's source
 run. See [harness internals](harness/README.md) for the artifact layout.
 
-## Compare all four candidates
+### Compare all four candidates
 
-| SGLang candidate | Pinned source | Beam implementation |
-| --- | --- | --- |
-| Public/native | [Upstream e6072935](https://github.com/sgl-project/sglang/tree/e6072935bfa1036d4e20e8ed042ce1ff09872f57) in the public image | Native `beam_width` API |
-| Old branch | [feature/beam_search @ af4e3f42](https://github.com/cswuyg/sglang/tree/af4e3f42a5a1a79ffc82d01a42f7e96f74294b8d) | Server beam mode; `n` sets width |
-| New branch | [feature/beam_search_update_0801 @ df191d67](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891) | Request `use_beam_search`; FlashInfer cascade enabled |
-
-The new candidate sets `enable_beam_cascade_attention: true` and
-`decode_attention_backend: flashinfer`. Each version uses its matching dependencies;
-performance differences include runtime changes as well as beam implementation changes.
+The [solution YAMLs](config/solutions/) define source/runtime settings, backend
+environment variables and engine options. These commands prepare Docker runtimes
+for the example; each branch uses its matching dependencies.
 
 ```bash
 export SGLANG_BEAM_SOURCE=/absolute/path/to/sglang_beam_search
@@ -251,21 +207,19 @@ export SID_GR_RUNTIME=docker SGLANG_RUNTIME=docker
 export SGLANG_BEAM_RUNTIME=docker SGLANG_BEAM_NEW_RUNTIME=docker
 export SID_GR_PYTHON=python3 SGLANG_PYTHON=python3
 export SGLANG_BEAM_PYTHON=python3 SGLANG_BEAM_NEW_PYTHON=python3
-# Set BENCHMARK_GPU and the hardware profile as above.
-python3 bench.py plan --config config/runs/default.yml
-python3 bench.py e2e --config config/runs/default.yml
+# Select BENCHMARK_GPU and the matching hardware profile as above.
+python3 bench.py plan --config config/runs/four_engine.yml
+python3 bench.py e2e --config config/runs/four_engine.yml
 ```
 
-This profile defines **48 cases × 4 candidates = 192 jobs**: two models, context
-lengths 1000/5000, batches 1/2/4/8, and beam widths 64/128/256. Each job uses five
-warmups and 30 measured repeats. Add `--smoke` for one case, or select cases and
-candidates with `--case` and `--solutions`.
-
-For the original two-candidate README matrix instead:
+For the original README's model/workload grid with two candidates:
 
 ```bash
 python3 bench.py e2e --config config/runs/readme.yml --case 'qwen3_1_7B/*_w256'
 ```
+
+This selects the workload grid only; it still uses this suite's inputs, timing
+and configured solution settings.
 
 For profiling, install `nsys` in each runtime **before** the source `e2e` run.
 The optional [profiling image recipe](entrypoints/Dockerfile.profile) can add it.
