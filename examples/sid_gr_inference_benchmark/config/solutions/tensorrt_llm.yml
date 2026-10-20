@@ -1,0 +1,28 @@
+# TensorRT-LLM 1.2.1 PyTorch backend with native beam search.
+# Cumulative beam scores require batch_size=1 in this release.
+name: tensorrt_llm
+adapter: entrypoints.tensorrt_llm.adapter
+source:
+  # Upstream: https://github.com/NVIDIA/TensorRT-LLM
+  # TENSORRT_LLM_SOURCE: optional source-provenance checkout. Install the matching
+  # Python package and compiled bindings together; the checkout is not imported.
+  # Release source: https://github.com/NVIDIA/TensorRT-LLM/tree/376f7e1bd8ed543f75014309e3fd4b237e9b0e73
+  path: ${TENSORRT_LLM_SOURCE:-}
+runtime:
+  # TENSORRT_LLM_RUNTIME: local Python subprocess or docker container.
+  kind: ${TENSORRT_LLM_RUNTIME:-local}
+  # TENSORRT_LLM_PYTHON: interpreter in the prepared TensorRT-LLM runtime.
+  python: ${TENSORRT_LLM_PYTHON:-python3}
+  # Pinned release:1.2.1 image; pull before execution.
+  image: ${TENSORRT_LLM_IMAGE:-nvcr.io/nvidia/tensorrt-llm/release@sha256:33cd085b772947bd22b7273886539331420404e5d2a4a039945241945ff927b9}
+engine:
+  prefix_cache: true
+  free_gpu_memory_fraction: 0.70
+  enable_chunked_prefill: false
+  enable_cuda_graph: true
+  disable_overlap_scheduler: true
+# The harness supplies GPU visibility and per-run cache directories.
+env:
+  # The release image normally sets these paths in its shell startup script;
+  # workers invoke Python directly. Override for a different local installation.
+  LD_LIBRARY_PATH: ${TENSORRT_LLM_LD_LIBRARY_PATH:-/usr/local/tensorrt/lib:/usr/local/cuda/lib64:/usr/local/lib/python3.12/dist-packages/torch/lib:/opt/nvidia/nvda_nixl/lib/x86_64-linux-gnu:/opt/nvidia/nvda_nixl/lib64:/usr/local/ucx/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64}

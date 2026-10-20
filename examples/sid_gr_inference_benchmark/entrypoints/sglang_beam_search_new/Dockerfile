@@ -1,0 +1,19 @@
+# Build with https://github.com/cswuyg/sglang at
+# df191d672f1955d273bf56fe21684b60dcf6a891 as the build context:
+# docker build -f entrypoints/sglang_beam_search_new/Dockerfile \
+#   -t sid-gr-benchmark:beam-df191d6-cu130 "$SGLANG_BEAM_NEW_SOURCE"
+FROM lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306
+COPY python/pyproject.toml /tmp/beam-pyproject.toml
+# Quack 0.6.1 matches this branch's CUTLASS 4.6.0; the public image has 4.8.0.
+RUN python3 -c "import tomllib; print(chr(10).join(tomllib.load(open('/tmp/beam-pyproject.toml', 'rb'))['project']['dependencies'] + ['torchvision==0.26.0', 'quack-kernels==0.6.1']))" > /tmp/beam-requirements.txt \
+    && uv pip install --python /opt/sglang/bin/python \
+        --extra-index-url https://download.pytorch.org/whl/cu130 \
+        --index-strategy unsafe-best-match -r /tmp/beam-requirements.txt
+# Replace public-image artifacts from FlashInfer 0.7 with this branch's 0.6.15.
+RUN uv pip uninstall --python /opt/sglang/bin/python flashinfer-jit-cache flashinfer-cubin \
+    && rm -rf /opt/sglang/lib/python3.12/site-packages/flashinfer_jit_cache \
+        /opt/sglang/lib/python3.12/site-packages/flashinfer_cubin \
+    && uv pip install --python /opt/sglang/bin/python --no-deps \
+        --index-url https://flashinfer.ai/whl flashinfer-cubin==0.6.15.post1 \
+    && uv pip install --python /opt/sglang/bin/python --no-deps \
+        --index-url https://flashinfer.ai/whl/cu130 flashinfer-jit-cache==0.6.15.post1+cu130

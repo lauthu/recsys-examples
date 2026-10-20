@@ -1,0 +1,11 @@
+# All implemented adapters; 48 workloads / 336 jobs. Prepare each runtime first.
+# vllm_gr and tensorrt_llm explicitly report larger-batch cases as unsupported.
+scenarios: [qwen3_0_6B, qwen3_1_7B]
+solutions: [sid_gr_inference, sglang, sglang_beam_search, sglang_beam_search_new, vllm_gr, tensorrt_llm, flash_rec]
+baseline: sglang
+hardware: rtx_pro_6000_blackwell_server
+execution:
+  gpu: ${BENCHMARK_GPU:-}
+  timeout_seconds: 1800
+  continue_on_error: true
+output_dir: ../../results

@@ -1,0 +1,9 @@
+gpu_name: NVIDIA RTX PRO 6000 Blackwell Server Edition
+# Require exactly 10 physical cores per worker, selecting one allowed logical
+# CPU per core. Local workers use taskset; Docker uses the same CPU set.
+# Fewer available cores or a different GPU SKU fail before execution. The run
+# manifest records CPU affinity/topology, the selected GPU UUID and its driver.
+cpu_cores: 10
+source: https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/
+# Add dense_bf16_tflops only with an explicitly dense (not sparse) specification.
+# Hardware identity is required even when no compute ceiling is available.

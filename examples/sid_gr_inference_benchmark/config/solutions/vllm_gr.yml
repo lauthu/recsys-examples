@@ -1,0 +1,32 @@
+# Legacy CUSTOM beam API; the V1 API requires a catalog and is not used here.
+# The pinned CUSTOM KV pool supports batch_size=1 only; larger batches are unsupported.
+name: vllm_gr
+adapter: entrypoints.vllm_gr.adapter
+source:
+  # Private repository: https://github.com/vllm-project/je/tree/vllm-gr
+  # VLLM_GR_SOURCE: clean checkout at expected_commit. The default uses the je
+  # checkout beside recsys-examples; paths resolve from the benchmark directory.
+  path: ${VLLM_GR_SOURCE:-../../../je}
+  expected_commit: 4c7cd23e93c34d855b8d7aa2b43598f0c37bed1d
+runtime:
+  # VLLM_GR_RUNTIME: local Python subprocess or docker container.
+  kind: ${VLLM_GR_RUNTIME:-local}
+  # VLLM_GR_PYTHON: interpreter in a prepared runtime. This source targets
+  # Python 3.11-3.13 and vLLM 0.22.1; install vllm-gr from the pinned checkout.
+  python: ${VLLM_GR_PYTHON:-python3}
+  # Build with the pinned je checkout as the Docker context.
+  image: ${VLLM_GR_IMAGE:-sid-gr-benchmark:vllm-gr-4c7cd23}
+  build_recipe: entrypoints/vllm_gr/Dockerfile
+engine:
+  # Required by CUSTOM attention to inherit the complete prompt KV.
+  prefix_cache: true
+  gpu_memory_utilization: 0.70
+  enforce_eager: false
+  beam_graph_enabled: true
+  enable_chunked_prefill: false
+env:
+  # The pinned legacy beam implementation requires ModelRunner V1.
+  VLLM_USE_V2_MODEL_RUNNER: "0"
+  VLLM_WORKER_MULTIPROC_METHOD: spawn
+  VLLM_NO_USAGE_STATS: "1"
+# The harness supplies GPU visibility and per-run cache directories.
