@@ -1,0 +1,34 @@
+{
+  "engine": "sglang-beam-search-new",
+  "workload": {"context_length": 2048, "beam_width": 256, "output_tokens": 3, "seed": 42},
+  "runs": {"clean": 3, "requests": 200, "warmups": 10, "profile_requests": 3},
+  "cpus": {"server": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "client": [10]},
+  "gpu": "0",
+  "env": {
+    "OMP_NUM_THREADS": "10",
+    "MKL_NUM_THREADS": "10",
+    "PYTHONUNBUFFERED": "1"
+  },
+  "server_settings": {
+    "dtype": "bfloat16",
+    "kv_cache_dtype": "auto",
+    "tp_size": 1,
+    "skip_tokenizer_init": true,
+    "disable_radix_cache": true,
+    "random_seed": 42,
+    "enable_beam_search": true,
+    "enable_beam_cascade_attention": true,
+    "prefill_attention_backend": "flashinfer",
+    "decode_attention_backend": "flashinfer",
+    "disable_overlap_schedule": true,
+    "page_size": 1,
+    "disable_cuda_graph": false,
+    "cuda_graph_bs_decode": [256],
+    "cuda_graph_bs_prefill": [2048],
+    "cuda_graph_backend_prefill": "breakable",
+    "max_running_requests": 512,
+    "mem_fraction_static": 0.7,
+    "skip_server_warmup": true,
+    "log_level": "warning"
+  }
+}
