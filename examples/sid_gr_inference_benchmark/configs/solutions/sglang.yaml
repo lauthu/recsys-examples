@@ -23,7 +23,7 @@ server_settings:
   random_seed: 42
   prefill_attention_backend: flashinfer
   decode_attention_backend: flashinfer
-  disable_overlap_schedule: true    # required: phase markers need it
+  disable_overlap_schedule: true    # false runs SGLang's overlap scheduler
   page_size: 1                      # required by SGLang beam search
   disable_cuda_graph: false
   cuda_graph_bs_decode: [256]       # must equal workload.beam_width

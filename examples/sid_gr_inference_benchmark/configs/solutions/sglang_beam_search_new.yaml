@@ -27,7 +27,7 @@ server_settings:
   enable_beam_cascade_attention: true  # beams share the context's attention
   prefill_attention_backend: flashinfer
   decode_attention_backend: flashinfer
-  disable_overlap_schedule: true    # required: phase markers need it
+  disable_overlap_schedule: true    # required: the branch has no overlap for beam search
   page_size: 1
   disable_cuda_graph: false
   cuda_graph_bs_decode: [256]       # must equal workload.beam_width

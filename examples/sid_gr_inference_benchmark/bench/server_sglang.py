@@ -113,6 +113,12 @@ def patches():
                 (f"{scheduler}.process_batch_result", "result", "result_processing"),
             )
         ),
+        Patch(
+            f"{batch}.copy",
+            keep_phase,
+            "gives the copy the overlap scheduler processes its batch's phase",
+            profile_only=True,
+        ),
         *(
             Patch(
                 f"{coordinator}.{method}",
@@ -287,6 +293,17 @@ def batch_phase(batch, advance=False, preparation=None):
     return rid, label
 
 
+def keep_phase(original):
+    # The overlap scheduler processes a copy of each batch after launching the next.
+    def wrapped(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        if id(self) in _batch_phase:
+            _batch_phase[id(result)] = _batch_phase[id(self)]
+        return result
+
+    return wrapped
+
+
 def batch_scope(mode, label):
     """NVTX phase and section around a batch step; mode says how to find it."""
 
@@ -430,6 +447,7 @@ def runtime(scheduler):
         "sglang": sglang.__file__,
         "packages": {name: _version(name) for name in PACKAGES.split()},
         "attention": {"prefill": resolved("prefill"), "decode": resolved("decode")},
+        "overlap": scheduler.enable_overlap,
         "catalog": catalog_status(scheduler),
         "length_penalty": _observed.get("length_penalty"),
         "counters": dict(_counts),
@@ -465,8 +483,8 @@ def main():
     if plan["catalog"] and plan["engine"] == "sglang-beam-search-new":
         settings["beam_search_constraint_dict"] = plan["catalog"]["server_source"]
     server_args = ServerArgs(**settings)
-    if server_args.tp_size != 1 or not server_args.disable_overlap_schedule:
-        raise ValueError("NVTX phases need tp_size=1 and disable_overlap_schedule=true")
+    if server_args.tp_size != 1:
+        raise ValueError("NVTX phases need tp_size=1")
     install_routes(http_server)
     try:
         http_server.launch_server(

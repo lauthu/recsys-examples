@@ -66,6 +66,11 @@ def setup_rows(ctx):
         ["Packages", ", ".join(packages)],
         ["Attention (observed)", backends],
         ["CUDA graphs (observed)", engine.graph_usage(clean)],
+    ]
+    if "overlap" in runtime:  # SGLang's scheduler; SID-GR has its own worker
+        overlap = "on" if runtime["overlap"] else "off"
+        rows.append(["Overlap scheduler (observed)", overlap])
+    rows += [
         ["Model", f"{model['id']} @ `{model['revision'][:12]}`, bfloat16"],
         ["Workload", inputs + " per run"],
     ]

@@ -207,6 +207,14 @@ def test_vedantjh2_report_states_observed_paths_and_catalog():
     assert "catalog of 300 items" in text
 
 
+def test_report_states_the_observed_overlap_scheduler():
+    ctx = context("sglang")
+    for result in ctx["clean"]:
+        result["runtime"] = {**result["runtime"], "overlap": True}
+    assert "| Overlap scheduler (observed) | on |" in report.render(ctx)
+    assert "Overlap scheduler" not in report.render(context("sid-gr"))
+
+
 def test_report_prints_the_pins_that_reproduce_the_run():
     text = report.render(context("sid-gr"))
     assert "https://github.com/example/engine @ `cccccccccccc`" in text

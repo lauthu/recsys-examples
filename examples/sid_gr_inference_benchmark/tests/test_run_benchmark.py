@@ -119,6 +119,7 @@ INVALID_SOLUTION = [
     (LEGACY, {"server_settings.enable_beam_search": False}, "enable_beam_search"),
     (LEGACY, {"server_settings.port": 30000}, "must not set"),
     (LEGACY, {"server_settings.tp_size": 2}, "tp_size"),
+    (LEGACY, {"server_settings.disable_overlap_schedule": False}, "overlap"),
     (PUBLIC, {"server_settings.tp_size": 2}, "tp_size"),
     (PUBLIC, {"server_settings.cuda_graph_bs_decode": [128]}, r"must be \[256\]"),
     (LEGACY, {"server_settings.cuda_graph_bs_decode": [128]}, r"must be \[256\]"),
@@ -136,6 +137,13 @@ def test_invalid_solutions_fail_before_launch(tmp_path, name, changes, message):
         configs.load_solution(
             write(tmp_path, solution(name, **changes)), shipped().workload
         )
+
+
+@pytest.mark.parametrize("name", [PUBLIC, VEDANTJH2])
+def test_native_beam_search_may_use_the_overlap_scheduler(tmp_path, name):
+    value = solution(name, **{"server_settings.disable_overlap_schedule": False})
+    found = configs.load_solution(write(tmp_path, value), shipped().workload)[1]
+    assert found.server_settings["disable_overlap_schedule"] is False
 
 
 def test_sglang_solutions_need_server_settings(tmp_path):

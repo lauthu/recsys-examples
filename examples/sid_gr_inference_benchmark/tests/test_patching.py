@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import contextlib
 import sys
 import types
 
@@ -83,3 +84,51 @@ def test_latency_runs_patch_only_counters_and_routes():
         "shared_context_attention",
     ]
     assert always(server_sid_gr, "sid-gr") == ["GRHTTPServingAdapter._dispatch"]
+
+
+def test_overlap_scheduler_copies_keep_their_batch_phase(monkeypatch):
+    """Overlap launches the next batch, then processes a copy of the previous one."""
+    pushed = []
+
+    def nvtx(kind, rid, label=None):
+        pushed.append((kind, label))
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(server_sglang, "nvtx", nvtx)
+    monkeypatch.setattr(server_sglang, "_batch_phase", {})
+    monkeypatch.setattr(server_sglang, "_decode_steps", {})
+
+    class Batch:
+        def __init__(self, decode):
+            self.reqs = [types.SimpleNamespace(rid="r1")]
+            self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
+
+        copy = server_sglang.keep_phase(
+            lambda self: Batch(self.forward_mode.is_decode())
+        )
+
+    class Scheduler:
+        run_batch = server_sglang.batch_scope("run", "scheduler_forward")(
+            lambda self, batch: None
+        )
+        process_batch_result = server_sglang.batch_scope("result", "result")(
+            lambda self, batch, result: None
+        )
+
+    scheduler, prefill, running = Scheduler(), Batch(False), Batch(True)
+    queue = []
+    for batch in (prefill, running, running):  # the running batch is reused
+        scheduler.run_batch(batch)
+        queue.append(batch.copy())
+        if len(queue) > 1:
+            scheduler.process_batch_result(queue.pop(0), None)
+    scheduler.process_batch_result(queue.pop(0), None)
+    phases = [label for kind, label in pushed if kind == "phase"]
+    assert phases == [
+        "prefill",
+        "decode_1",
+        "prefill",
+        "decode_2",
+        "decode_1",
+        "decode_2",
+    ]

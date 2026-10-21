@@ -203,10 +203,8 @@ class SGLang(Engine):
         managed = {"model_path", "host", "port", "beam_search_constraint_dict"}
         if managed & settings.keys():
             fail(f"server_settings must not set {sorted(managed & settings.keys())}")
-        if settings.get("tp_size", 1) != 1 or not settings.get(
-            "disable_overlap_schedule"
-        ):
-            fail("server_settings need tp_size 1 and disable_overlap_schedule true")
+        if settings.get("tp_size", 1) != 1:
+            fail("server_settings need tp_size 1: phase markers need one process")
         # Graph sizes are fixed by the workload; a mismatch silently runs eager.
         for key, expected in (
             ("cuda_graph_bs_decode", workload.beam_width),
@@ -294,6 +292,12 @@ class BeamSearchNew(SGLang):
         super().validate(solution, workload)
         if not solution.server_settings.get("enable_beam_search"):
             fail("sglang-beam-search-new needs server_settings.enable_beam_search true")
+        # The branch turns the overlap scheduler off for beam search; say so.
+        if not solution.server_settings.get("disable_overlap_schedule"):
+            fail(
+                "sglang-beam-search-new needs server_settings.disable_overlap_schedule "
+                "true: the branch runs beam search without the overlap scheduler"
+            )
 
     def convert_catalog(self, paths, solution, vocab_size):
         """Pickled token trie read by this branch's prefix-constrained trie."""
