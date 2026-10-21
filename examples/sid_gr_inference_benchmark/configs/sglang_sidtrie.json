@@ -1,5 +1,9 @@
 {
   "engine": "sglang-sidtrie",
+  "source": {
+    "url": "https://github.com/vedantjh2/sglang",
+    "commit": "646a7f5ce6f94be84237c50cd41bb2e7beca7788"
+  },
   "env": {
     "OMP_NUM_THREADS": "10",
     "MKL_NUM_THREADS": "10",

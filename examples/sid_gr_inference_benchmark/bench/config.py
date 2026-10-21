@@ -9,7 +9,7 @@ engine in a comparison) and one file per engine (how that engine is launched).
 import random
 import re
 
-from bench import engines
+from bench import engines, provenance
 from bench.common import read_json
 from bench.engines import SIDTRIE_FILE, fail
 
@@ -40,7 +40,10 @@ def require_keys(value, keys, name):
 def load_benchmark(path):
     """What is measured: workload, run counts, CPU split and GPU."""
     config = read_json(path)
-    require_keys(config, ("workload", "runs", "cpus", "gpu"), "the benchmark config")
+    require_keys(
+        config, ("model", "workload", "runs", "cpus", "gpu"), "the benchmark config"
+    )
+    provenance.check_model_pin(config["model"])
     workload, runs, cpus = config["workload"], config["runs"], config["cpus"]
     minimums = {"context_length": 1, "beam_width": 1, "output_tokens": 2, "seed": 0}
     require_keys(workload, minimums, "workload")
@@ -69,6 +72,7 @@ def load_engine(path, workload):
     config = read_json(path)
     engine = engines.get(config.get("engine"))
     require_keys(config, engine.keys, f"the {engine.name} config")
+    provenance.check_pin(config["source"])
     env = config["env"]
     if not isinstance(env, dict) or any(type(v) is not str for v in env.values()):
         fail('env values must be strings, for example "1" rather than true')

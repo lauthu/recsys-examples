@@ -50,6 +50,8 @@ def setup_rows(ctx):
         config["runs"],
     )
     machine, cpus, runtime = clean[0], ctx["cpus"], clean[0]["runtime"]
+    manifest = ctx["manifest"]
+    model = manifest["model"]
     packages = [f"{name} {v}" for name, v in runtime["packages"].items() if v]
     cpu = f"{machine['cpu']}; server CPUs {cpus['server']}, client CPUs "
     attention = runtime["attention"]
@@ -59,12 +61,12 @@ def setup_rows(ctx):
     rows = [
         ["GPU", f"{machine['gpu']} (driver {machine['driver']})"],
         ["CPU", cpu + cpus["client"]],
-        ["Engine", f"{engine.title}, {ctx['source']}"],
-        ["Image", f"`{ctx['image']}`"],
+        ["Engine", f"{engine.title}, {source_text(manifest['source'])}"],
+        ["Image", f"`{manifest['image']['id']}`"],
         ["Packages", ", ".join(packages)],
         ["Attention (observed)", backends],
         ["CUDA graphs (observed)", engine.graph_usage(clean)],
-        ["Model", f"{ctx['model']}, bfloat16"],
+        ["Model", f"{model['id']} @ `{model['revision'][:12]}`, bfloat16"],
         ["Workload", inputs + " per run"],
     ]
     rows += engine.setup_rows(config)
@@ -73,7 +75,51 @@ def setup_rows(ctx):
         text = f"{catalog['name']}: {catalog['items']:,} items, sha256 "
         text += f"`{catalog['sha256'][:12]}`; all {checked:,} returned beams are "
         rows.append(["Catalog", text + "catalog items"])
-    return rows + [["Benchmark tools", ctx["tools"]]]
+    return rows
+
+
+def source_text(source):
+    text = f"{source['url']} @ `{source['commit'][:12]}`"
+    if not source["enforced"]:
+        text += (
+            " **(pin not enforced: "
+            + "; ".join(source["differences"] or ["no difference"])
+            + ")**"
+        )
+    return text
+
+
+def reproduce_rows(manifest):
+    source, image, model = manifest["source"], manifest["image"], manifest["model"]
+    labels = image["labels"]
+    base = labels.get("org.opencontainers.image.version") or labels.get(
+        "org.opencontainers.image.revision", "none recorded"
+    )
+    digests = (
+        ", ".join(f"`{d}`" for d in image["repo_digests"]) or "none (built locally)"
+    )
+    files = ", ".join(
+        f"{name} `{digest[:12]}`" for name, digest in model["sha256"].items()
+    )
+    return [
+        ["Benchmark code", manifest["benchmark_code"]],
+        [
+            "Engine source",
+            f"{source_text(source)}; checkout HEAD `{source['head'][:12]}`",
+        ],
+        [
+            "Image",
+            f"`{image['id']}`; tags {', '.join(image['tags']) or 'none'}; digests {digests}",
+        ],
+        ["Image base", base],
+        ["Image recipe", f"`{manifest['dockerfile']}`"],
+        ["Model", f"{model['id']} @ `{model['revision']}`; SHA-256 {files}"],
+        [
+            "Config SHA-256",
+            f"benchmark `{manifest['configs']['benchmark'][:12]}`, engine `{manifest['configs']['engine'][:12]}`",
+        ],
+        ["Nsight Systems", manifest["nsys"] or "unknown"],
+    ]
 
 
 def render(ctx):
@@ -173,6 +219,16 @@ The server window is the request handler (NVTX `bench/request`). Kernel time add
 </details>
 
 ## Reproduce
+
+{table(["", ""], reproduce_rows(ctx["manifest"]))}
+
+<details><summary>Manifest (JSON)</summary>
+
+```json
+{json.dumps(ctx["manifest"], indent=2)}
+```
+
+</details>
 
 ```bash
 {ctx['command']}

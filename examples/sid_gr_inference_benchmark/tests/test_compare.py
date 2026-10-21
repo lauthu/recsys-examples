@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 from bench import compare
-from tests.test_report import context
+from tests.test_report import MANIFEST, context
 
 A, B, C, D = ([n, 2, 3] for n in (1, 2, 3, 4))
 
@@ -38,14 +38,26 @@ def with_outputs(engine, paths, mean_ms):
     for run in ctx["clean"]:
         run["latency_ms"] = [mean_ms] * 4
     ctx["outputs"] = {"r": beams(*paths)}
+    ctx["manifest"] = MANIFEST
     return ctx
 
 
 def test_comparison_table_uses_the_first_engine_as_reference():
     reference = with_outputs("sid-gr", [A, B], 10.0)
     other = with_outputs("sglang-beam-search-new", [B, A], 15.0)
-    text = compare.render([reference, other], ["sid_gr", "sglang_beam_search_new"])
+    text = compare.render(
+        [reference, other], ["sid_gr", "sglang_beam_search_new"], "sid_gr"
+    )
     assert "| [sid_gr](sid_gr/report.md) (SID-GR) | 10.000 |" in text
     assert "| reference |" in text and "| +50.0% |" in text
     assert "| sglang_beam_search_new | 0.0% | 100.0% | 0.0% |" in text
     assert "Output agreement with sid_gr" in text
+
+
+def test_the_reference_can_be_any_engine():
+    first = with_outputs("sid-gr", [A, B], 10.0)
+    second = with_outputs("sglang", [B, A], 15.0)
+    text = compare.render([first, second], ["sid_gr", "sglang"], "sglang")
+    assert "Output agreement with sglang" in text
+    assert "| -33.3% |" in text and "| reference |" in text  # sid_gr is faster
+    assert "## Versions" in text and "example/engine `cccccccccccc`" in text

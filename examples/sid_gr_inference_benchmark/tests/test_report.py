@@ -86,6 +86,32 @@ def test_sunburst_script_is_valid_javascript(tmp_path):
     assert check.returncode == 0
 
 
+MANIFEST = {
+    "source": {
+        "url": "https://github.com/example/engine",
+        "commit": "c" * 40,
+        "head": "d" * 40,
+        "enforced": True,
+        "differences": [],
+    },
+    "image": {
+        "id": "sha256:" + "1" * 64,
+        "tags": ["bench:engine"],
+        "repo_digests": [],
+        "labels": {"org.opencontainers.image.version": "nightly-1"},
+    },
+    "model": {
+        "id": "Qwen/Qwen3-0.6B",
+        "revision": "e" * 40,
+        "sha256": {"config.json": "f" * 64},
+    },
+    "benchmark_code": "abc123",
+    "dockerfile": "images/Dockerfile.engine",
+    "configs": {"benchmark": "1" * 64, "engine": "2" * 64},
+    "nsys": "NVIDIA Nsight Systems version 2026.4",
+}
+
+
 def context(engine, **overrides):
     runtime = {
         "packages": {"torch": "2.9.1"},
@@ -130,9 +156,7 @@ def context(engine, **overrides):
         "trace": TRACE,
         "catalog": None,
         "model": "Qwen3-0.6B",
-        "source": "repo abc",
-        "tools": "abc",
-        "image": "sha256:1",
+        "manifest": MANIFEST,
         "cpus": {"server": "0-9", "client": "10"},
         "command": "python3 run_benchmark.py",
     }
@@ -163,3 +187,23 @@ def test_sidtrie_report_states_observed_paths_and_catalog():
     assert "shared-context attention on" in text
     assert "all 20 returned beams are catalog items" in text
     assert "catalog of 300 items" in text
+
+
+def test_report_prints_the_pins_that_reproduce_the_run():
+    text = report.render(context("sid-gr"))
+    assert "https://github.com/example/engine @ `cccccccccccc`" in text
+    assert f"`sha256:{'1' * 64}`" in text and "nightly-1" in text
+    assert "`images/Dockerfile.engine`" in text
+    assert "Qwen/Qwen3-0.6B @ `eeeeeeeeeeee`" in text
+    assert "NVIDIA Nsight Systems version 2026.4" in text
+    assert '"benchmark_code": "abc123"' in text  # the JSON copy
+
+
+def test_report_flags_an_unenforced_pin():
+    unpinned = {
+        **MANIFEST["source"],
+        "enforced": False,
+        "differences": ["python differs"],
+    }
+    text = report.render(context("sid-gr", manifest={**MANIFEST, "source": unpinned}))
+    assert "pin not enforced: python differs" in text

@@ -1,0 +1,24 @@
+# Build context: https://github.com/vedantjh2/sglang at
+# 646a7f5ce6f94be84237c50cd41bb2e7beca7788 (the commit in configs/sglang_sidtrie.json).
+# docker build -f images/Dockerfile.sglang-sidtrie \
+#   -t sid-gr-bench:sglang-sidtrie "$SGLANG_SIDTRIE_SOURCE"
+#
+# Reconstructed from the layer history of the image the published SIDTrie runs
+# used (SGLang nightly-dev-20261012-e6072935 base; torch 2.13.0, FlashInfer
+# 0.6.18, quack-kernels 0.6.4). A rebuild has not been compared with that image.
+FROM lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306
+COPY python/pyproject.toml /tmp/pyproject.toml
+RUN python3 -c "import tomllib; print(chr(10).join(tomllib.load(open('/tmp/pyproject.toml', 'rb'))['project']['dependencies']))" > /tmp/requirements.txt \
+    && echo 'torchvision==0.28.0' >> /tmp/requirements.txt \
+    && uv pip install --python /opt/sglang/bin/python \
+        --extra-index-url https://download.pytorch.org/whl/cu130 \
+        --index-strategy unsafe-best-match -r /tmp/requirements.txt
+RUN uv pip uninstall --python /opt/sglang/bin/python flashinfer-jit-cache \
+        flashinfer-jit-cache-sm100a flashinfer-jit-cache-sm103a flashinfer-jit-cache-sm120f \
+        flashinfer-jit-cache-sm80 flashinfer-cubin \
+    && rm -rf /opt/sglang/lib/python3.12/site-packages/flashinfer_jit_cache* \
+        /opt/sglang/lib/python3.12/site-packages/flashinfer_cubin \
+    && uv pip install --python /opt/sglang/bin/python --no-deps \
+        --index-url https://flashinfer.ai/whl flashinfer-cubin==0.6.18 \
+    && uv pip install --python /opt/sglang/bin/python --no-deps \
+        --index-url https://flashinfer.ai/whl/cu130 flashinfer-jit-cache==0.6.18+cu130

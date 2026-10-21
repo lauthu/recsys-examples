@@ -34,12 +34,17 @@ class Engine:
     title: str
     source_label: str  # what --source must be, for error messages
     entry: str  # file that must exist under --source
+    dockerfile: str  # image recipe under images/
     mount = "/source"  # where --source appears in the container
     fingerprint: tuple[str, ...] = (
         "examples/sid-gr-inference",
         "corelib/gr_decode_atten",
     )
-    keys: tuple[str, ...] = ("engine", "env")  # exactly the keys an engine config has
+    keys: tuple[str, ...] = (
+        "engine",
+        "source",
+        "env",
+    )  # exactly the keys an engine config has
     ready = "/pilot/ready"
     model_view = False  # the engine serves a generated copy of the checkpoint
     catalog_supported = True
@@ -96,6 +101,7 @@ class Engine:
 
 class SidGr(Engine):
     name = "sid-gr"
+    dockerfile = "images/Dockerfile.sid-gr"
     title = "SID-GR"
     source_label = "a recsys-examples checkout"
     entry = "examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
@@ -182,7 +188,7 @@ class SGLang(Engine):
     entry = "python/sglang/srt/entrypoints/http_server.py"
     mount = "/sglang"
     fingerprint: tuple[str, ...] = ("python",)
-    keys: tuple[str, ...] = ("engine", "env", "server_settings")
+    keys: tuple[str, ...] = ("engine", "source", "env", "server_settings")
 
     def validate(self, config, workload):
         settings = config["server_settings"]
@@ -272,6 +278,7 @@ class SGLang(Engine):
 
 class BeamSearchNew(SGLang):
     name = "sglang-beam-search-new"
+    dockerfile = "images/Dockerfile.sglang-beam-search-new"
     title = "SGLang beam-search-new"
     catalog_file = "catalog.pkl"
 
@@ -303,14 +310,16 @@ class Native(SGLang):
 
 class SGLangPublic(Native):
     name = "sglang"
+    dockerfile = "images/Dockerfile.sglang"
     title = "SGLang (public)"
     catalog_supported = False
 
 
 class SidTrie(Native):
     name = "sglang-sidtrie"
+    dockerfile = "images/Dockerfile.sglang-sidtrie"
     title = "SGLang SIDTrie"
-    keys = ("engine", "env", "server_settings", "trie_config")
+    keys = ("engine", "source", "env", "server_settings", "trie_config")
     model_view = True
     catalog_required = True
     catalog_file = SIDTRIE_FILE

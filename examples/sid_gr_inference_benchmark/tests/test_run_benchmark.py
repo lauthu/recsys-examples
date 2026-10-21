@@ -249,3 +249,22 @@ def test_public_sglang_cannot_take_a_catalog(tmp_path):
     argv = command(tmp_path, PUBLIC) + ["--catalog", str(write_catalog(tmp_path))]
     with pytest.raises(ValueError, match="cannot constrain beams"):
         runner.main(argv)
+
+
+def test_reference_must_be_a_given_engine(tmp_path):
+    argv = command(tmp_path, SID, PUBLIC) + ["--reference", "other"]
+    with pytest.raises(ValueError, match="is not one of the --engine configs"):
+        runner.main(argv)
+
+
+def test_every_shipped_engine_config_pins_its_source():
+    for name in CONFIGS:
+        pin = read_json(path(name))["source"]
+        assert pin["commit"] == pin["commit"].lower() and len(pin["commit"]) == 40
+    for name in ("benchmark", "benchmark_qwen3_1_7b"):
+        assert configs.load_benchmark(path(name))["model"]["revision"]
+
+
+def test_every_engine_names_an_image_recipe_that_exists():
+    for engine in engines.ENGINES.values():
+        assert (runner.ROOT / engine.dockerfile).is_file(), engine.name

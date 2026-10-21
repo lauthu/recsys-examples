@@ -3,7 +3,7 @@
 """comparison.md: one table across the engines measured in a single invocation.
 
 All engines receive identical requests, so beams are compared request by request
-with the first engine, the reference, using the first clean run of each.
+with a reference engine (public SGLang by default), using the first clean run of each.
 """
 
 from bench import engines
@@ -36,8 +36,13 @@ def parity(reference, candidate):
     }
 
 
-def render(contexts, names):
+def pooled_mean(ctx):
+    return summarize([ms for run in ctx["clean"] for ms in run["latency_ms"]])["mean"]
+
+
+def render(contexts, names, reference):
     """contexts are the per-engine report contexts, in command-line order."""
+    ref = contexts[names.index(reference)]
     first = contexts[0]
     workload, catalog = first["config"]["workload"], first["catalog"]
     machine = first["clean"][0]
@@ -48,8 +53,8 @@ def render(contexts, names):
     if catalog:
         scope += f" · catalog of {catalog['items']:,} items"
 
-    performance, agreement = [], []
-    reference = None
+    base = pooled_mean(ref)
+    performance, agreement, versions = [], [], []
     for name, ctx in zip(names, contexts):
         pooled = [ms for run in ctx["clean"] for ms in run["latency_ms"]]
         duration = sum(run["duration_s"] for run in ctx["clean"])
@@ -57,11 +62,9 @@ def render(contexts, names):
         trace = ctx["trace"]
         per_request = trace["kernel_ns"] / trace["requests"] / 1e6
         idle = 100 * trace["busy_ns"]["idle"] / trace["window_ns"]
-        if reference is None:
-            reference, base = ctx["outputs"], stats["mean"]
         change = (
             f"{100 * (stats['mean'] / base - 1):+.1f}%"
-            if name != names[0]
+            if name != reference
             else "reference"
         )
         title = engines.get(ctx["config"]["engine"]).title
@@ -78,7 +81,7 @@ def render(contexts, names):
                 f"{idle:.1f}%",
             ]
         )
-        found = parity(reference, ctx["outputs"])
+        found = parity(ref["outputs"], ctx["outputs"])
         agreement.append(
             [
                 name,
@@ -86,6 +89,18 @@ def render(contexts, names):
                 f"{found['overlap']:.1f}%",
                 f"{found['rank']:.1f}%",
                 f"{found['score_delta']:.4g}",
+            ]
+        )
+
+        manifest = ctx["manifest"]
+        source, image = manifest["source"], manifest["image"]
+        pinned = "yes" if source["enforced"] else "**no**"
+        versions.append(
+            [
+                name,
+                f"{source['url'].removeprefix('https://github.com/')} `{source['commit'][:12]}`",
+                f"`{image['id'].removeprefix('sha256:')[:12]}`",
+                pinned,
             ]
         )
 
@@ -97,11 +112,17 @@ def render(contexts, names):
 
 {table(["Engine", "Mean ms", "p50 ms", "p99 ms", "Requests/s", "Mean vs reference", "Kernel ms/request", "No GPU activity"], performance, right=range(1, 8))}
 
-Each engine ran the same {first['config']['runs']['requests']} requests, one at a time over HTTP, in {first['config']['runs']['clean']} separate server processes; the first engine is the reference. Kernel time and GPU idle share come from each engine's separate Nsight run; see its report for the definitions.
+Each engine ran the same {first['config']['runs']['requests']} requests, one at a time over HTTP, in {first['config']['runs']['clean']} separate server processes; the reference is `{reference}`. Kernel time and GPU idle share come from each engine's separate Nsight run; see its report for the definitions.
 
-## Output agreement with {names[0]}
+## Output agreement with {reference}
 
 {table(["Engine", "Top-1 match", "Beam overlap", "Rank match", "Max score Δ"], agreement, right=range(1, 5))}
 
 Compared over the measured requests of each engine's first clean run. Top-1 match: identical best beam. Beam overlap: share of the reference's beams that the engine also returned, in any order. Rank match: share of ranks with identical tokens. Max score Δ: largest cumulative log-probability difference among shared beams; engines normalize over different token sets with a catalog, so it can be nonzero when the beams agree.
+
+## Versions
+
+{table(["Engine", "Source", "Image", "Pins enforced"], versions)}
+
+Model {first['manifest']['model']['id']} @ `{first['manifest']['model']['revision'][:12]}`; the full manifest is in each engine's report.
 """

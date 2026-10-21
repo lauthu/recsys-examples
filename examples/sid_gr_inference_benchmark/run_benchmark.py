@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from bench import catalog, compare, report, sunburst, trace
+from bench import catalog, compare, provenance, report, sunburst, trace
 from bench.common import read_json, write_json
 from bench.config import load_benchmark, load_engine, load_model, make_workload
 from bench.engines import fail
@@ -45,6 +45,8 @@ class Run:
     source: Path
     image: str
     output: Path
+    config_path: Path | None = None
+    manifest: dict | None = None  # source and image identity, set before the runs
 
     @property
     def work(self):
@@ -186,7 +188,7 @@ def parse_args(argv):
         required=True,
         metavar=("CONFIG", "SOURCE", "IMAGE"),
         help="engine config, its source checkout and a local image with its "
-        "dependencies and nsys; repeat to compare engines (the first is the reference)",
+        "dependencies and nsys; repeat to compare engines (see --reference)",
     )
     parser.add_argument(
         "--benchmark", type=Path, default=ROOT / "configs/benchmark.json"
@@ -196,6 +198,17 @@ def parse_args(argv):
     parser.add_argument("--output", type=Path, required=True, help="new or empty dir")
     parser.add_argument(
         "--cache-dir", type=Path, help="JIT cache (default: OUTPUT/../.cache/IMAGE)"
+    )
+    parser.add_argument(
+        "--reference",
+        help="engine config name the comparison measures against "
+        "(default: sglang if given, else the first engine)",
+    )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="run although a source differs from its pinned commit; the report "
+        "marks the result as not reproducible",
     )
     parser.add_argument("--dry-run", action="store_true", help="print docker commands")
     args = parser.parse_args(argv)
@@ -218,9 +231,11 @@ def build_runs(args, benchmark):
         name = config_path.stem
         output = args.output if len(args.engine) == 1 else args.output / name
         config = {**benchmark, **engine_config}
-        runs.append(Run(name, engine, config, source, image, output))
+        runs.append(Run(name, engine, config, source, image, output, config_path))
     if len({run.name for run in runs}) != len(runs):
         fail("--engine configs need distinct file names")
+    if args.reference and args.reference not in {run.name for run in runs}:
+        fail(f"--reference {args.reference} is not one of the --engine configs")
     return runs
 
 
@@ -245,11 +260,17 @@ def main(argv=None):
         return 0
 
     for run in runs:
-        inspect = ["docker", "image", "inspect", "--format", "{{.Id}}", run.image]
-        found = subprocess.run(inspect, capture_output=True, text=True).stdout.strip()
-        if not found:
-            fail(f"no local Docker image {run.image}; the runner never pulls images")
-        run.image = found
+        run.manifest = {
+            "source": provenance.verify_source(
+                run.source,
+                run.config["source"],
+                run.engine.fingerprint,
+                args.allow_dirty,
+            ),
+            "image": provenance.image_info(run.image),
+        }
+        run.image = run.manifest["image"]["id"]
+    model = provenance.verify_model(args.model, benchmark["model"])
     running = ["docker", "ps", "-q", "--filter", f"label={LABEL}"]
     busy = subprocess.run(running, capture_output=True, text=True, check=True).stdout
     if busy.split():
@@ -258,14 +279,14 @@ def main(argv=None):
     finished = []
     for run in runs:
         print(f"=== {run.name}", flush=True)
-        finished.append(measure(args, run, phases, model_config, rows))
+        finished.append(measure(args, run, phases, model_config, rows, model))
     if len(runs) > 1:
         write_comparison(args, runs, finished)
     print(f"Wrote the reports to {args.output}")
     return 0
 
 
-def measure(args, run, phases, model_config, rows):
+def measure(args, run, phases, model_config, rows, model):
     """Run every phase for one engine and write its three output files."""
     image = run.image
     cache = args.cache_dir or args.output.parent / ".cache" / image.split(":")[-1][:12]
@@ -280,15 +301,15 @@ def measure(args, run, phases, model_config, rows):
         run_container(argv, name, run.work / f"{phase}.log")
     if input_state(args, run) != before:
         fail("source, benchmark code or model files changed during the runs")
-    summary = write_outputs(args, run, phases, catalog_info, before)
+    summary = write_outputs(args, run, phases, catalog_info, before, model)
     shutil.rmtree(run.work)
     return summary
 
 
-def write_outputs(args, run, phases, catalog_info, before):
+def write_outputs(args, run, phases, catalog_info, before, model):
     work, config = run.work, run.config
     summary = trace.analyze(work / "profile/trace.sqlite")
-    title = f"{run.engine.title} · {args.model.name}"
+    title = f"{run.engine.title} · {model['id'].split('/')[-1]}"
     subtitle = f"GPU kernel time per request, mean of {summary['requests']} profiled"
     subtitle += " requests: phase › section › kernel family"
     svg = sunburst.render(summary["work"], summary["requests"], title, subtitle)
@@ -301,10 +322,10 @@ def write_outputs(args, run, phases, catalog_info, before):
         "profile": read_json(work / "profile/result.json"),
         "trace": summary,
         "catalog": catalog_info,
-        "model": args.model.name,
-        "source": f"{run.source.name} {before['source'][0]}",
-        "tools": before["tools"],
-        "image": run.image,
+        "model": model["id"].split("/")[-1],
+        "manifest": manifest(
+            args, run, before, model, read_json(work / "profile/result.json")
+        ),
         "cpus": {key: cpu_list(config["cpus"][key]) for key in ("server", "client")},
         "command": shlex.join(["python3", *sys.argv]),
         # The first clean run's beams per request, for the cross-engine comparison.

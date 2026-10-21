@@ -1,5 +1,9 @@
 {
   "engine": "sglang-beam-search-new",
+  "source": {
+    "url": "https://github.com/cswuyg/sglang",
+    "commit": "df191d672f1955d273bf56fe21684b60dcf6a891"
+  },
   "env": {
     "OMP_NUM_THREADS": "10",
     "MKL_NUM_THREADS": "10",

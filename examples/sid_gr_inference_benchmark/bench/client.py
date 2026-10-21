@@ -145,6 +145,10 @@ def run(plan, name, profile, work=Path("/work")):
         shape = {key: workload[key] for key in ("output_tokens", "beam_width")}
         paths, _ = catalog.parse(data, **shape, vocab_size=plan["vocab_size"])
     result = {"run": name, "profile": profile, **machine()}
+    if profile:
+        result["nsys"] = subprocess.run(
+            ["nsys", "--version"], capture_output=True, text=True
+        ).stdout.strip()
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]

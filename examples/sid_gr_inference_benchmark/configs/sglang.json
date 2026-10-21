@@ -1,5 +1,9 @@
 {
   "engine": "sglang",
+  "source": {
+    "url": "https://github.com/sgl-project/sglang",
+    "commit": "baa9befa381511cd4d56f83980951e5a45fffc6d"
+  },
   "env": {
     "OMP_NUM_THREADS": "10",
     "MKL_NUM_THREADS": "10",
