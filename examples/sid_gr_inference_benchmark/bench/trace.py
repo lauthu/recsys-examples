@@ -49,6 +49,14 @@ FAMILIES = [
 ]
 
 
+# CUDA API calls that launch GPU work, by lowercase name substring; the kernels
+# inside a CUDA graph run without calls of their own.
+LAUNCH_CALLS = [
+    ("kernel", ("launchkernel", "launchcooperativekernel")),
+    ("graph", ("graphlaunch",)),
+]
+
+
 def family(name):
     """Coarse operation family from the kernel symbol (not its model phase)."""
     lower = name.lower()
@@ -190,6 +198,14 @@ def analyze(path, prefix=MARKER):
         raise ValueError(
             "graph-level CUDA activity; capture with --cuda-graph-trace=node"
         )
+    launches = {kind: 0 for kind, _ in LAUNCH_CALLS}
+    for api in apis:
+        name = strings.get(api.get("nameId"), "").lower()
+        for kind, needles in LAUNCH_CALLS:
+            if any(n in name for n in needles) and any(
+                w["start"] <= api["start"] < w["end"] for w in windows
+            ):
+                launches[kind] += 1
     kernels = [k for k in kernels if inside(k)]
     devices = {k["deviceId"] for k in kernels}
     if len(devices) != 1:
@@ -231,6 +247,7 @@ def analyze(path, prefix=MARKER):
         "busy_ns": busy,
         "kernel_ns": sum(work.values()),
         "kernels": len(kernels),
+        "launches": launches,
         "unknown_kernels": sum(k["phase"] == "unknown" for k in kernels),
         "work": [[*key, value] for key, value in sorted(work.items())],
         "gaps": [[*key, value] for key, value in sorted(gaps.items())],

@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -27,6 +28,7 @@ TRACE = {
     "window_ns": 30_000_000,
     "kernel_ns": 12_000_000,
     "kernels": 40,
+    "launches": {"kernel": 30, "graph": 4},
     "unknown_kernels": 0,
     "work": WORK,
     "gaps": GAPS,
@@ -143,13 +145,14 @@ def context(engine, **overrides):
                 "forward.prefill.eager": 0,
                 "forward.decode.graph": 0,
                 "forward.decode.eager": 8,
+                "forward.decode.rows": 2048,
             },
         }
         for i in (1, 2)
     ]
     scenario = SimpleNamespace(
         workload=Workload(
-            context_length=2048, beam_width=256, output_tokens=3, seed=42
+            context_length=2048, beam_width=256, output_tokens=3, concurrency=1, seed=42
         ),
         runs=Runs(clean=2, requests=4, warmups=1, profile_requests=2),
     )
@@ -193,6 +196,7 @@ def test_sid_gr_report_with_a_disabled_graph_runner():
     assert "| no phase | no section | 0.000 | 7.500 | 7.500 | 50.0% |" in text
     assert "| **Total** |  | 6.000 | 9.000 | 15.000 | 100.0% |" in text
     assert "| No GPU activity | 9.000 | 60.0% |" in text
+    assert "15 kernel launches and 2 CUDA graph launches" in text
     assert "| `cutlass::Kernel2<gemm_bf16>(T1::Params)` | linear | 4.000 | 20 |" in text
     assert "gatherTopK<float>(a \\| b)" in text  # a pipe must not split the row
 
@@ -213,6 +217,21 @@ def test_report_states_the_observed_overlap_scheduler():
         result["runtime"] = {**result["runtime"], "overlap": True}
     assert "| Overlap scheduler (observed) | on |" in report.render(ctx)
     assert "Overlap scheduler" not in report.render(context("sid-gr"))
+
+
+def test_report_states_the_requests_in_flight():
+    text = report.render(context("sglang"))
+    assert "80.00 requests/s at concurrency 1." in text
+    assert "; requests go one at a time." in text
+    assert "decode: 0 of 16 forwards as graph replays, 256 rows each" in text
+    ctx = context("sglang")
+    workload = dataclasses.replace(ctx["scenario"].workload, concurrency=4)
+    ctx["scenario"] = SimpleNamespace(workload=workload, runs=ctx["scenario"].runs)
+    text = report.render(ctx)
+    assert "at concurrency 4." in text
+    assert "1 warmup + 4 measured requests per run, 4 in flight |" in text
+    assert "4 requests are in flight, as each of 4 clients sends its next" in text
+    assert "one at a time after 1 warmups, so it shows one request's GPU time" in text
 
 
 def test_report_prints_the_pins_that_reproduce_the_run():

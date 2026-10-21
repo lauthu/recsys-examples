@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import json
 import re
 from argparse import Namespace
@@ -75,6 +76,7 @@ INVALID_SCENARIO = [
     ({"cpus.client": [True]}, r"cpus.client\[0\] must be int, not bool"),
     ({"workload.output_tokens": 1}, "workload.output_tokens must be >= 2"),
     ({"workload.beam_width": 1.5}, "workload.beam_width must be int, not float"),
+    ({"workload.concurrency": 0}, "workload.concurrency must be >= 1"),
     ({"runs.clean": "3"}, "runs.clean must be int, not str"),
     ({"gpu": 0}, "gpu must be str, not int"),
     ({"gpu": "0,1"}, "one device index"),
@@ -121,9 +123,9 @@ INVALID_SOLUTION = [
     (LEGACY, {"server_settings.tp_size": 2}, "tp_size"),
     (LEGACY, {"server_settings.disable_overlap_schedule": False}, "overlap"),
     (PUBLIC, {"server_settings.tp_size": 2}, "tp_size"),
-    (PUBLIC, {"server_settings.cuda_graph_bs_decode": [128]}, r"must be \[256\]"),
-    (LEGACY, {"server_settings.cuda_graph_bs_decode": [128]}, r"must be \[256\]"),
-    (LEGACY, {"server_settings.cuda_graph_bs_prefill": [1024]}, r"must be \[2048\]"),
+    (PUBLIC, {"server_settings.cuda_graph_bs_decode": [256]}, "must not set"),
+    (LEGACY, {"server_settings.cuda_graph_bs_prefill": [2048]}, "must not set"),
+    (PUBLIC, {"server_settings.max_running_requests": 256}, r"\+ 1\) = 257"),
     (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
     (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
     (VEDANTJH2, {"trie_config.codebook_size": 0}, "codebook_size must be >= 1"),
@@ -146,6 +148,29 @@ def test_native_beam_search_may_use_the_overlap_scheduler(tmp_path, name):
     assert found.server_settings["disable_overlap_schedule"] is False
 
 
+def test_sglang_slots_cover_every_beam_in_flight():
+    four = dataclasses.replace(shipped().workload, concurrency=4)
+    for name in (PUBLIC, LEGACY, VEDANTJH2):
+        configs.load_solution(path(name), four)
+    five = dataclasses.replace(four, concurrency=5)
+    with pytest.raises(ValueError, match=r"concurrency x \(beam_width \+ 1\) = 1285"):
+        configs.load_solution(path(PUBLIC), five)
+
+
+def test_engines_size_batches_for_the_requests_in_flight():
+    workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
+    workload.update(concurrency=3, seed=0)
+    assert engines.graph_sizes(workload) == {
+        "cuda_graph_bs_decode": [256, 512, 768],
+        "cuda_graph_bs_prefill": [2048, 4096, 6144],
+    }
+    plan = {"workload": workload, "env": {}, "catalog": None}
+    env = engines.get("sid-gr").server(plan, 8000, profile=False)[1]
+    assert env["GR_MAX_BATCH_SIZE"] == env["GR_BEAM_KV_POOL_CAPACITY"] == "3"
+    assert env["GR_CONTEXT_KV_POOL_CAPACITY"] == "3"
+    assert env["GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS"] == "1,2,3"
+
+
 def test_sglang_solutions_need_server_settings(tmp_path):
     value = solution(PUBLIC)
     del value["server_settings"]
@@ -155,7 +180,7 @@ def test_sglang_solutions_need_server_settings(tmp_path):
 
 def test_vedantjh2_needs_three_output_tokens(tmp_path):
     workload = configs.Workload(
-        context_length=2048, beam_width=256, output_tokens=4, seed=0
+        context_length=2048, beam_width=256, output_tokens=4, concurrency=1, seed=0
     )
     with pytest.raises(ValueError, match="three SID codebooks"):
         configs.load_solution(path(VEDANTJH2), workload)

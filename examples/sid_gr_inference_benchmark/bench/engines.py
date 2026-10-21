@@ -117,6 +117,7 @@ class SidGr(Engine):
 
     def server(self, plan, port, profile):
         workload = plan["workload"]
+        batch = workload["concurrency"]  # every request in flight shares one batch
         env = self.environment(plan, profile)
         env.update(
             {
@@ -128,10 +129,12 @@ class SidGr(Engine):
                 "GR_CONTEXT_LEN": str(workload["context_length"]),
                 "GR_BEAM_WIDTH": str(workload["beam_width"]),
                 "GR_DECODE_STEPS": str(workload["output_tokens"] - 1),
-                "GR_MAX_BATCH_SIZE": "1",
-                "GR_BEAM_KV_POOL_CAPACITY": "1",
-                "GR_CONTEXT_KV_POOL_CAPACITY": "1",
-                "GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS": "1",
+                "GR_MAX_BATCH_SIZE": str(batch),
+                "GR_BEAM_KV_POOL_CAPACITY": str(batch),
+                "GR_CONTEXT_KV_POOL_CAPACITY": str(batch),
+                "GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS": ",".join(
+                    str(size) for size in range(1, batch + 1)
+                ),
                 "GR_DEVICE": "cuda",
                 "GR_DECODE_BACKEND": "real",
                 "GR_SUPPRESS_SPECIAL_TOKENS_ON_IGNORE_EOS": "0",
@@ -200,18 +203,21 @@ class SGLang(Engine):
 
     def validate(self, solution, workload):
         settings = solution.server_settings
+        # The launcher sets these; graph sizes follow the workload (graph_sizes).
         managed = {"model_path", "host", "port", "beam_search_constraint_dict"}
+        managed |= {"cuda_graph_bs_decode", "cuda_graph_bs_prefill"}
         if managed & settings.keys():
             fail(f"server_settings must not set {sorted(managed & settings.keys())}")
         if settings.get("tp_size", 1) != 1:
             fail("server_settings need tp_size 1: phase markers need one process")
-        # Graph sizes are fixed by the workload; a mismatch silently runs eager.
-        for key, expected in (
-            ("cuda_graph_bs_decode", workload.beam_width),
-            ("cuda_graph_bs_prefill", workload.context_length),
-        ):
-            if key in settings and settings[key] != [expected]:
-                fail(f"server_settings.{key} must be [{expected}] for this workload")
+        # Every beam holds a request slot, and beam-search-new keeps the request's
+        # own slot too; with too few, requests queue or the server fails.
+        slots = workload.concurrency * (workload.beam_width + 1)
+        if settings.get("max_running_requests", slots) < slots:
+            fail(
+                "server_settings.max_running_requests must be at least "
+                f"concurrency x (beam_width + 1) = {slots}"
+            )
 
     def server(self, plan, port, profile):
         env = self.environment(plan, profile)
@@ -279,6 +285,9 @@ class SGLang(Engine):
             parts.append(
                 f"{phase}: {graph:,} of {graph + eager:,} forwards as graph replays"
             )
+        decodes = counts["forward.decode.graph"] + counts["forward.decode.eager"]
+        if counts["forward.decode.rows"]:  # the beams of every request batched
+            parts[-1] += f", {counts['forward.decode.rows'] / decodes:g} rows each"
         return "; ".join(parts)
 
 
@@ -495,6 +504,16 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
     encoded = json.dumps(header, separators=(",", ":")).encode()
     encoded += b" " * (-len(encoded) % 8)
     return struct.pack("<Q", len(encoded)) + encoded + bytes(payload)
+
+
+def graph_sizes(workload):
+    """SGLang CUDA graph sizes: k requests in flight decode k * beam_width rows
+    and prefill k * context_length tokens."""
+    sizes = range(1, workload["concurrency"] + 1)
+    return {
+        "cuda_graph_bs_decode": [workload["beam_width"] * k for k in sizes],
+        "cuda_graph_bs_prefill": [workload["context_length"] * k for k in sizes],
+    }
 
 
 def _sum_counters(clean):

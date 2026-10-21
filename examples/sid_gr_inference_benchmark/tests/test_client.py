@@ -11,15 +11,21 @@ from bench import client, engines
 from bench.common import read_json, write_json
 
 PATHS = [[1000 + a, 2000, 3000] for a in range(4)]
-WORKLOAD = {"context_length": 4, "beam_width": 4, "output_tokens": 3, "seed": 0}
+WORKLOAD = {
+    "context_length": 4,
+    "beam_width": 4,
+    "output_tokens": 3,
+    "concurrency": 1,
+    "seed": 0,
+}
 # Answers like a SID-GR server with the benchmark wrapper; SGLang's native
 # profile endpoints answer with plain text.
 FAKE_SERVER = """
-import json, os, sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import json, os, sys, threading, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 port, mode, paths = int(sys.argv[1]), sys.argv[2], json.loads(sys.argv[3])
-served = [0]
+served, in_flight, lock = [0], [0, 0], threading.Lock()  # in flight: [now, max]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -37,8 +43,9 @@ class Handler(BaseHTTPRequestHandler):
         counters = {"prefill.graph_replays": served[0], "decode.graph_replays": 2 * served[0],
                     "decode.eager_fallbacks": None}
         catalog = {"source": "/work/catalog.jsonl", "item_count": len(paths)}
+        runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1]}
         self.reply({"/ready": {"ready": True}, "/catalog/status": {"catalog": catalog},
-                    "/pilot/runtime": {"pid": os.getpid(), "counters": counters}}[self.path])
+                    "/pilot/runtime": runtime}[self.path])
 
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"null")
@@ -46,7 +53,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply("Start profiling.\\n")
         if self.path.startswith("/pilot/profile/"):
             return self.reply({"capturing": self.path.endswith("start")})
-        served[0] += 1
+        with lock:
+            served[0] += 1
+            in_flight[0] += 1
+            in_flight[1] = max(in_flight)
+        if mode == "slow":
+            time.sleep(0.2)
+        with lock:
+            in_flight[0] -= 1
         beams = [{"output_ids": p, "meta_info": {"sequence_score": -float(i)}}
                  for i, p in enumerate(paths[: request["sampling_params"]["n"]])]
         if mode == "duplicate":
@@ -54,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
         self.reply({"meta_info": {"request_id": request["rid"], "beam_results": beams}})
 
 
-HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 """
 
 
@@ -64,7 +78,7 @@ def fake_server(tmp_path, port, mode="valid"):
     return [sys.executable, str(script), str(port), mode, json.dumps(PATHS)]
 
 
-def run_fake(tmp_path, monkeypatch, mode="valid"):
+def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
     write_json(
@@ -79,7 +93,7 @@ def run_fake(tmp_path, monkeypatch, mode="valid"):
     }
     plan = {
         "engine": "sid-gr",
-        "workload": WORKLOAD,
+        "workload": {**WORKLOAD, "concurrency": concurrency},
         "warmups": 2,
         "requests": 3,
         "profile_requests": 1,
@@ -117,6 +131,15 @@ def test_clean_run_measures_checks_and_counts(tmp_path, monkeypatch):
     assert sorted(outputs) == ["request-2", "request-3", "request-4"]
     assert outputs["request-2"][1] == [PATHS[1], -1.0]
     assert "outputs" not in result
+
+
+def test_clients_keep_concurrency_requests_in_flight(tmp_path, monkeypatch):
+    result = run_fake(tmp_path, monkeypatch, mode="slow", concurrency=3)
+    assert result["concurrency"] == 3 and result["runtime"]["max_in_flight"] == 3
+    assert len(result["latency_ms"]) == 3
+    # Responses stay with their requests whatever order they finish in.
+    outputs = read_json(tmp_path / "clean_1/outputs.json")
+    assert sorted(outputs) == ["request-2", "request-3", "request-4"]
 
 
 def test_invalid_beams_fail_the_run(tmp_path, monkeypatch):

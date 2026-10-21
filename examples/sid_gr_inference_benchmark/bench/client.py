@@ -4,11 +4,12 @@
 
     python3 -m bench.client --plan /work/plan.json --run clean_1 [--profile]
 
-Starts the server, sends warmup and then measured requests one at a time
-(closed loop, concurrency 1, a new loopback connection per request), checks
+Starts the server, sends warmup and then measured requests from a closed loop of
+workload.concurrency clients (a new loopback connection per request), checks
 every returned beam and writes /work/<run>/result.json. With --profile the
-server runs under Nsight Systems and the capture covers only the measured
-requests; the report is exported to SQLite after the server exits.
+server runs under Nsight Systems, requests go one at a time and the capture
+covers only the measured ones; the report is exported to SQLite after the
+server exits.
 """
 
 import argparse
@@ -19,6 +20,7 @@ import signal
 import socket
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from bench import catalog, engines
@@ -64,6 +66,14 @@ def send(port, body, timeout=120):
     start = time.perf_counter_ns()
     response = call(port, "POST", "/generate", body, timeout)
     return response, (time.perf_counter_ns() - start) / 1e6
+
+
+def send_all(port, engine, rows, workload, concurrency):
+    """[(response, ms)] in row order; each client sends its next row on a reply."""
+    with ThreadPoolExecutor(concurrency) as clients:
+        return list(
+            clients.map(lambda row: send(port, engine.payload(row, workload)), rows)
+        )
 
 
 def check(result, workload, vocab_size):
@@ -138,13 +148,16 @@ def run(plan, name, profile, work=Path("/work")):
     warmups = plan["warmups"]
     rows = read_json(plan["workload_path"])
     count = plan["profile_requests"] if profile else plan["requests"]
+    # The trace attributes GPU time per request, so profiled requests never overlap.
+    concurrency = 1 if profile else workload["concurrency"]
     measured = rows[warmups : warmups + count]
     paths = None
     if plan["catalog"]:
         data = Path(plan["catalog"]["path"]).read_bytes()
         shape = {key: workload[key] for key in ("output_tokens", "beam_width")}
         paths, _ = catalog.parse(data, **shape, vocab_size=plan["vocab_size"])
-    result = {"run": name, "profile": profile, **machine()}
+    result = {"run": name, "profile": profile, "concurrency": concurrency}
+    result.update(machine())
     if profile:
         result["nsys"] = subprocess.run(
             ["nsys", "--version"], capture_output=True, text=True
@@ -159,9 +172,9 @@ def run(plan, name, profile, work=Path("/work")):
         process = subprocess.Popen(argv, start_new_session=True, **options)
     try:
         wait_ready(process, port, engine.ready)
-        os.sched_setaffinity(0, plan["client_cpus"])
-        for row in rows[:warmups]:
-            response = send(port, engine.payload(row, workload))[0]
+        os.sched_setaffinity(0, plan["client_cpus"])  # client threads inherit it
+        warm = send_all(port, engine, rows[:warmups], workload, concurrency)
+        for row, (response, _) in zip(rows[:warmups], warm):
             validate(engine, plan, row, response, paths)
         before = call(port, "GET", "/pilot/runtime")
         pid = before["pid"]
@@ -169,7 +182,7 @@ def run(plan, name, profile, work=Path("/work")):
         if profile:
             engine.profile(port, start=True)
         first = time.perf_counter()
-        timed = [send(port, engine.payload(row, workload)) for row in measured]
+        timed = send_all(port, engine, measured, workload, concurrency)
         duration = time.perf_counter() - first
         if profile:
             engine.profile(port, start=False)

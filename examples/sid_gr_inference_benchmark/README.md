@@ -1,8 +1,8 @@
 # SID-GR inference benchmark
 
-Measures beam-search latency of HTTP inference servers at concurrency 1 and
-shows where each engine's GPU time goes. Every engine gets the same seeded
-requests, the same checks and the same three outputs.
+Measures beam-search latency and throughput of HTTP inference servers under a
+closed-loop load and shows where each engine's GPU time goes. Every engine gets
+the same seeded requests, the same checks and the same three outputs.
 
 | `engine` | Server | Beam-search API |
 | --- | --- | --- |
@@ -15,13 +15,13 @@ requests, the same checks and the same three outputs.
 
 Each engine's directory receives:
 
-- `report.md`: latency of every run and pooled, kernel and non-kernel time by phase and section, the longest-running kernels, and the setup observed at runtime.
+- `report.md`: latency and requests/s of every run and pooled, kernel and non-kernel time by phase and section, launch calls, the longest-running kernels, and the setup observed at runtime.
 - `sunburst.svg`: server time per request, phase › section › kernel family, with the time no kernel runs (memcpy/memset only, or no GPU activity, in grey) in the phase and section it falls in. The report embeds it as an image; open the file in a browser to hover for details and click a slice to zoom in (the center or Esc zooms out).
 - `profile.nsys-rep`: the Nsight Systems trace of the profiled requests.
 
 When several engines run in one invocation, `comparison.md` in the output
-directory puts them side by side: latency, kernel time, GPU idle share and
-output agreement with the first engine.
+directory puts them side by side: latency, requests/s, kernel time, GPU idle
+share and output agreement with the reference engine.
 
 ```text
 OUTPUT/comparison.md             (several engines only)
@@ -81,7 +81,9 @@ python3 run_benchmark.py --model /path/to/Qwen3-0.6B --output logs/compare \
 ```
 
 The scenario defaults to `configs/scenarios/qwen3_0_6b.yaml`; for Qwen3-1.7B add
-`--scenario configs/scenarios/qwen3_1_7b.yaml`.
+`--scenario configs/scenarios/qwen3_1_7b.yaml`. For throughput under load, copy a
+scenario and raise `workload.concurrency`; the shipped SGLang solutions have
+request slots for up to 4 requests in flight.
 
 `--dry-run` validates the configuration and prints the `docker run` commands; it does not hash the checkpoint or check the pins. The output
 directory must be new or empty. JIT caches go to `.cache/<image>` next to the
@@ -93,12 +95,12 @@ the runner does one after another.
 ## What is measured
 
 - **Workload:** seeded random token IDs without the model's special tokens, so every engine gets the same requests for the same model and seed.
-- **Latency:** `runs.clean` separate server processes, each sent `runs.warmups` unmeasured and then `runs.requests` measured requests, one at a time over a new loopback connection. The client times each request from JSON encoding to the parsed response.
+- **Latency and throughput:** `runs.clean` separate server processes, each sent `runs.warmups` unmeasured and then `runs.requests` measured requests, each over a new loopback connection. `workload.concurrency` clients keep that many requests in flight: each sends its next request when its last one returns (closed loop; 1 means one at a time). The client times each request from JSON encoding to the parsed response; requests/s is measured requests over the time from the first send to the last reply.
 - **Correctness:** every returned request must have `beam_width` distinct beams of `output_tokens` valid token IDs with finite scores in descending order. Scores are cumulative log-probabilities; SGLang's mean log-probability is multiplied by the beam length.
-- **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time. Memory-only and no-GPU time go to the innermost phase and section range covering them, so the sunburst shows where the GPU waits, for example on eager kernel launches. With SGLang's overlap scheduler (`disable_overlap_schedule: false`) the server launches the next step before it processes the current step's results, so phases interleave in time; kernels still take the phase of their launch call.
-- **Runtime facts:** attention backends, package versions, CUDA graph use and, for SGLang, whether the overlap scheduler ran are read from the running server, not inferred from settings.
+- **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups, one at a time at any concurrency, so GPU time can be attributed to each request. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time, and the report counts the kernel and CUDA graph launch calls per request. Memory-only and no-GPU time go to the innermost phase and section range covering them, so the sunburst shows where the GPU waits, for example on eager kernel launches. With SGLang's overlap scheduler (`disable_overlap_schedule: false`) the server launches the next step before it processes the current step's results, so phases interleave in time; kernels still take the phase of their launch call.
+- **Runtime facts:** attention backends, package versions, CUDA graph use and, for SGLang, decode rows per forward (the beams of every request batched together) and whether the overlap scheduler ran are read from the running server, not inferred from settings.
 - **Output agreement** (`comparison.md`): beams of the first clean run, request by request, against the reference engine (public SGLang by default, as in the SID-GR accuracy benchmark). Agreement with SGLang shows consistency, not correctness: bf16 can flip near-tied beams.
-  It reports top-1 match, share of shared beams, rank match and the largest score difference.
+  It reports top-1 match, share of shared beams (mean and worst request), rank match and the largest score difference.
 
 The runner refuses to start while another benchmark container is running, and it
 fails if the source, benchmark code or model files change during the runs.
@@ -140,7 +142,7 @@ A scenario, `configs/scenarios/<model>.yaml`, is shared by every solution in a r
 | Key | Meaning |
 | --- | --- |
 | `model` | `id`, Hub `revision` and `sha256` per checkpoint file; see Reproducibility |
-| `workload` | `context_length`, `beam_width`, `output_tokens` and `seed` |
+| `workload` | `context_length`, `beam_width`, `output_tokens`, `concurrency` (requests in flight) and `seed` |
 | `runs` | `clean` processes × `requests`, `warmups` per process, `profile_requests` |
 | `cpus` | Disjoint `server` and `client` CPU lists; the container is limited to both |
 | `gpu` | Device index or GPU UUID |
@@ -152,13 +154,14 @@ A solution, `configs/solutions/<name>.yaml`, launches one engine:
 | `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang` |
 | `source` | `url` and the full 40-character `commit` of the engine source; optional `branch` the commit was taken from, which names a from-source image |
 | `env` | String environment variables for the server, passed verbatim |
-| `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets the model path, host, port and catalog. `cuda_graph_bs_decode` and `cuda_graph_bs_prefill` must match the workload's beam width and context length |
+| `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets the model path, host, port, catalog and CUDA graph sizes: with k requests batched, decode runs k × `beam_width` rows and prefill k × `context_length` tokens, for k up to the concurrency. Every beam holds a request slot and beam-search-new also keeps the request's own, so `max_running_requests` must be at least concurrency × (`beam_width` + 1) |
 | `trie_config` | `vedantjh2-sglang` only: `token_start` and `codebook_size` of the three SID codebooks |
 
 The runner derives the request shape (`GR_CONTEXT_LEN`, `GR_BEAM_WIDTH`,
-`GR_DECODE_STEPS`, batch size 1) and the profiler settings; `env` must not set
-them. The report copies `env` and `server_settings` verbatim. To vary an engine
-setting, copy its file; the file name names the solution's directory in the output.
+`GR_DECODE_STEPS`), the batch size, pool capacities and decode graph buckets
+from the concurrency, and the profiler settings; `env` must not set them. The
+report copies `env` and `server_settings` verbatim. To vary an engine setting,
+copy its file; the file name names the solution's directory in the output.
 
 ## Catalog filtering
 

@@ -15,6 +15,7 @@ def test_identical_outputs_agree_completely():
     assert compare.parity(outputs, outputs) == {
         "top1": 100.0,
         "overlap": 100.0,
+        "overlap_min": 100.0,
         "rank": 100.0,
         "score_delta": 0.0,
     }
@@ -29,6 +30,7 @@ def test_parity_separates_order_membership_and_score():
     found = compare.parity(reference, candidate)
     assert found["top1"] == 50.0  # request r starts with B
     assert found["overlap"] == (75.0 + 100.0) / 2  # three of four beams shared
+    assert found["overlap_min"] == 75.0  # the worst request, r
     assert found["rank"] == (25.0 + 100.0) / 2  # only C is still at its rank
     assert found["score_delta"] == 1.0  # A: -0.0 versus -1.0
 
@@ -50,7 +52,7 @@ def test_comparison_table_uses_the_first_engine_as_reference():
     )
     assert "| [sid_gr](sid_gr/report.md) (SID-GR) | 10.000 |" in text
     assert "| reference |" in text and "| +50.0% |" in text
-    assert "| sglang_beam_search_new | 0.0% | 100.0% | 0.0% |" in text
+    assert "| sglang_beam_search_new | 0.0% | 100.0% (100.0%) | 0.0% |" in text
     assert "Output agreement with sid_gr" in text
 
 

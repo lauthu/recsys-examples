@@ -78,10 +78,13 @@ class Workload:
     context_length: int  # prompt tokens per request
     beam_width: int
     output_tokens: int  # generated tokens per beam: one from prefill, the rest decode
+    concurrency: int  # requests in flight, as a closed loop of this many clients
     seed: int  # seeds the synthetic token IDs
 
     def __post_init__(self):
-        minimums = dict(context_length=1, beam_width=1, output_tokens=2, seed=0)
+        minimums = dict(
+            context_length=1, beam_width=1, output_tokens=2, concurrency=1, seed=0
+        )
         at_least(self, "workload", **minimums)
 
 

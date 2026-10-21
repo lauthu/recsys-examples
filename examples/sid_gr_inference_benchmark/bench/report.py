@@ -57,7 +57,8 @@ def setup_rows(ctx):
     attention = runtime["attention"]
     backends = f"prefill {attention['prefill']}; decode {attention['decode']}"
     inputs = f"synthetic token IDs (seed {workload.seed}, special tokens excluded)"
-    inputs += f"; {runs.warmups} warmup + {runs.requests} measured requests"
+    inputs += f"; {runs.warmups} warmup + {runs.requests} measured requests per run"
+    inputs += f", {workload.concurrency} in flight"
     rows = [
         ["GPU", f"{machine['gpu']} (driver {machine['driver']})"],
         ["CPU", cpu + cpus["client"]],
@@ -72,7 +73,7 @@ def setup_rows(ctx):
         rows.append(["Overlap scheduler (observed)", overlap])
     rows += [
         ["Model", f"{model['id']} @ `{model['revision'][:12]}`, bfloat16"],
-        ["Workload", inputs + " per run"],
+        ["Workload", inputs],
     ]
     rows += engine.setup_rows(solution)
     if catalog:
@@ -167,7 +168,7 @@ def render(ctx):
     order = sorted(keys, key=lambda key: (phase_key(key[0]), -totals[key]))
     section_rows = [[*key, *time_row(sections[key], gaps[key])] for key in order]
     section_rows.append(["**Total**", "", *time_row(kernel_ns, gap_ns)])
-    busy = trace["busy_ns"]
+    busy, launches = trace["busy_ns"], trace["launches"]
     window_rows = [
         ["One kernel running", *share(busy["kernel"], window_ns)],
         ["Kernels overlapping", *share(busy["overlap"], window_ns)],
@@ -192,6 +193,17 @@ def render(ctx):
     patch_lines = "\n".join(f"- `{p}`" for p in latency_patches) or "- none"
     patch_lines += "\n\nThe profiled run also patched:\n\n"
     patch_lines += "\n".join(f"- `{p}`" for p in added) or "- nothing else"
+    in_flight = (
+        "requests go one at a time"
+        if workload.concurrency == 1
+        else f"{workload.concurrency} requests are in flight, as each of "
+        f"{workload.concurrency} clients sends its next one when its last returns"
+    )
+    sequential = (
+        ""
+        if workload.concurrency == 1
+        else ", so it shows one request's GPU time, not how the latency runs batch"
+    )
     settings = {"env": solution.env}
     if solution.server_settings is not None:
         settings["server_settings"] = solution.server_settings
@@ -200,18 +212,18 @@ def render(ctx):
 
 {scope}
 
-- **Latency:** mean {total['mean']:.3f} ms, p99 {total['p99']:.3f} ms over {total['n']:,} requests ({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests}), {throughput:.2f} requests/s at concurrency 1.
+- **Latency:** mean {total['mean']:.3f} ms, p99 {total['p99']:.3f} ms over {total['n']:,} requests ({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests}), {throughput:.2f} requests/s at concurrency {workload.concurrency}.
 - **GPU profile:** {per_request(kernel_ns):.3f} ms of kernel time per request; the largest section is {top_phase} `{top_section}` ({per_request(top_ns):.3f} ms, {100 * top_ns / kernel_ns:.1f}%). No GPU activity is traced for {per_request(idle):.3f} ms ({100 * idle / window_ns:.1f}%) of the {per_request(window_ns):.3f} ms server window.
 
 ## Latency
 
 {table(["Run", "Requests", "Mean ms", "p50 ms", "p95 ms", "p99 ms", "Max ms", "Requests/s"], latency, right=range(1, 8))}
 
-The client times each request from JSON encoding to the parsed response, one request at a time over a new loopback HTTP connection. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.
+The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.
 
 ## GPU profile
 
-A separate server process ran under Nsight Systems; the capture holds {requests} requests sent after {runs.warmups} warmups. Trace: [profile.nsys-rep](profile.nsys-rep).
+A separate server process ran under Nsight Systems; the capture holds {requests} requests sent one at a time after {runs.warmups} warmups{sequential}. Trace: [profile.nsys-rep](profile.nsys-rep).
 
 ![Server time per request](sunburst.svg)
 
@@ -220,6 +232,8 @@ Open [sunburst.svg](sunburst.svg) directly in a browser to hover for details and
 {table(["Phase", "Section", "Kernel ms", "Non-kernel ms", "Total ms", "Share"], section_rows, right=(2, 3, 4, 5))}
 
 {table(["Server window per request", "ms", "Share"], window_rows, right=(1, 2))}
+
+Launch calls per request: {launches['kernel'] / requests:g} kernel launches and {launches['graph'] / requests:g} CUDA graph launches; the kernels inside a graph need no call of their own.
 
 {table(["Longest-running kernels", "Family", "ms/request", "Launches/request"], kernel_rows, right=(2, 3))}
 

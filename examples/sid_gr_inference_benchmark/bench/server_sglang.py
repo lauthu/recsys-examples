@@ -10,7 +10,8 @@ Same
   - The server: SGLang's http_server.launch_server, run from the mounted source.
     Requests go to SGLang's own /generate; there is no proxy or extra hop.
   - ServerArgs: `server_settings` from the solution file verbatim, plus
-    model_path, host, port and, for beam-search-new with a catalog,
+    model_path, host, port, the CUDA graph sizes of the workload
+    (engines.graph_sizes) and, for beam-search-new with a catalog,
     beam_search_constraint_dict.
 
 Different, and nothing else
@@ -34,6 +35,7 @@ import os
 import threading
 from pathlib import Path
 
+from bench.engines import graph_sizes
 from bench.patching import Patch, apply
 
 ENGINE = os.environ.get("BENCH_ENGINE")
@@ -45,8 +47,8 @@ PACKAGES = (
     "sglang-kernel torch triton flashinfer-python nvidia-cutlass-dsl transformers"
 )
 COUNTERS = """forward.prefill.graph forward.prefill.eager forward.decode.graph
-    forward.decode.eager vedantjh2.compact_decode vedantjh2.exact_normalizer
-    vedantjh2.device_history vedantjh2.shared_attention"""
+    forward.decode.eager forward.decode.rows vedantjh2.compact_decode
+    vedantjh2.exact_normalizer vedantjh2.device_history vedantjh2.shared_attention"""
 
 
 # ---- every difference from the native server ------------------------------
@@ -69,8 +71,9 @@ def patches():
         Patch(
             "sglang.srt.model_executor.model_runner:ModelRunner.forward",
             count_forward,
-            "counts forwards by phase and graph/eager mode (and the vedantjh2 fork's "
-            "trie-head decode path); NVTX section `model` when profiling",
+            "counts forwards by phase and graph/eager mode, decode rows (and the "
+            "vedantjh2 fork's trie-head decode path); NVTX section `model` when "
+            "profiling",
         ),
         Patch(
             "sglang.srt.beam_search.beam_group:BeamGroup.finalize",
@@ -229,6 +232,8 @@ def count_forward(original):
         kind = "decode" if batch.forward_mode.is_decode() else "prefill"
         mode = "graph" if result.can_run_graph else "eager"
         _counts[f"forward.{kind}.{mode}"] += 1
+        if kind == "decode":
+            _counts["forward.decode.rows"] += batch.batch_size
         if VEDANTJH2 and kind == "decode":
             output = getattr(result, "logits_output", None)
             trie = getattr(batch, "beam_trie_levels", None)
@@ -479,7 +484,7 @@ def main():
     from sglang.srt.utils import kill_process_tree
 
     settings = dict(plan["server_settings"], model_path="/model", host="127.0.0.1")
-    settings["port"] = args.port
+    settings.update(graph_sizes(plan["workload"]), port=args.port)
     if plan["catalog"] and plan["engine"] == "sglang-beam-search-new":
         settings["beam_search_constraint_dict"] = plan["catalog"]["server_source"]
     server_args = ServerArgs(**settings)

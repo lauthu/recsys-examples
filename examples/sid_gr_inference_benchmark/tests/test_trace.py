@@ -18,12 +18,13 @@ def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
         CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (start INTEGER, end INTEGER, deviceId INTEGER,
             correlationId INTEGER, globalPid INTEGER, demangledName INTEGER, shortName INTEGER);
         CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (start INTEGER, end INTEGER, correlationId INTEGER,
-            globalTid INTEGER);
+            globalTid INTEGER, nameId INTEGER);
         CREATE TABLE CUPTI_ACTIVITY_KIND_MEMCPY (start INTEGER, end INTEGER, deviceId INTEGER);
         CREATE TABLE CUPTI_ACTIVITY_KIND_GRAPH_TRACE (start INTEGER, end INTEGER, deviceId INTEGER);
     """
     )
     names = ["gemm_kernel", "flash_fwd_kernel", "rmsnorm_kernel", "topk_kernel"]
+    names += ["cudaLaunchKernel_v7000", "cudaGraphLaunch_v10000", "cuLaunchKernelEx"]
     db.executemany("INSERT INTO StringIds VALUES (?, ?)", enumerate(names))
     nvtx = [
         (a, b, f"bench/request:r{i}", None, HTTP) for i, (a, b) in enumerate(windows)
@@ -46,8 +47,9 @@ def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
         (299, 5, 300, 310, 0),
     ]
     db.executemany(
-        "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (?, ?, ?, ?)",
-        [(t, t + 1, c, THREAD) for t, c, *_ in launches],
+        "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (?, ?, ?, ?, ?)",
+        [(t, t + 1, c, THREAD, 6 if c == 6 else 4) for t, c, *_ in launches]
+        + [(157, 158, 7, THREAD, 5)],  # a graph launch; its kernels are not traced here
     )
     db.executemany(
         "INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (?, ?, 0, ?, ?, ?, ?)",
@@ -75,6 +77,8 @@ def test_attribution_and_window_partition(tmp_path):
         ["unknown", "unknown", "normalization", 6],
     ]
     assert result["kernel_ns"] == 46
+    # Launch calls inside the request windows; the one at 299 is outside both.
+    assert result["launches"] == {"kernel": 5, "graph": 1}
     # Non-kernel time by the innermost covering phase/section; it sums to busy_ns.
     assert result["gaps"] == [
         ["decode_1", "no section", "idle", 25],
