@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""PYTHON_BIN for scripts/serve_qwen3_gr_http.sh: the native SID-GR server plus
-benchmark endpoints.
+"""PYTHON_BIN for scripts/serve_qwen3_gr_http.sh: runs the native SID-GR server
+in this process with benchmark hooks; not a separate server or proxy.
 
 GET  /pilot/runtime        packages, resolved attention backends, CUDA graph counters
 POST /pilot/profile/start  cudaProfilerStart (BENCH_PROFILE=1 only)

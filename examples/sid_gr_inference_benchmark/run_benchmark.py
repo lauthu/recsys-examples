@@ -340,9 +340,11 @@ def write_outputs(args, run, phases, catalog_info, before, model):
     work, cpus = run.work, run.scenario.cpus
     summary = trace.analyze(work / "profile/trace.sqlite")
     title = f"{run.engine.title} · {model['id'].split('/')[-1]}"
-    subtitle = f"GPU kernel time per request, mean of {summary['requests']} profiled"
-    subtitle += " requests: phase › section › kernel family"
-    svg = sunburst.render(summary["work"], summary["requests"], title, subtitle)
+    subtitle = f"Server time per request, mean of {summary['requests']} profiled"
+    subtitle += " requests: phase › section › kernel family or non-kernel time"
+    svg = sunburst.render(
+        summary["work"], summary["gaps"], summary["requests"], title, subtitle
+    )
     (run.output / "sunburst.svg").write_text(svg)
     shutil.move(work / "profile/trace.nsys-rep", run.output / "profile.nsys-rep")
     clean = [read_json(work / phase / "result.json") for phase in phases[:-1]]

@@ -15,8 +15,8 @@ requests, the same checks and the same three outputs.
 
 Each engine's directory receives:
 
-- `report.md`: latency of every run and pooled, GPU kernel time by phase and section, the longest-running kernels, and the setup observed at runtime.
-- `sunburst.svg`: GPU kernel time per request, phase › section › kernel family. The report embeds it as an image; open the file in a browser to hover for details and click a slice to zoom in (the center or Esc zooms out).
+- `report.md`: latency of every run and pooled, kernel and non-kernel time by phase and section, the longest-running kernels, and the setup observed at runtime.
+- `sunburst.svg`: server time per request, phase › section › kernel family, with the time no kernel runs (memcpy/memset only, or no GPU activity, in grey) in the phase and section it falls in. The report embeds it as an image; open the file in a browser to hover for details and click a slice to zoom in (the center or Esc zooms out).
 - `profile.nsys-rep`: the Nsight Systems trace of the profiled requests.
 
 When several engines run in one invocation, `comparison.md` in the output
@@ -44,7 +44,7 @@ bench/
   provenance.py        source, model and image pins and identities
   client.py            runs inside the container: server, requests, checks
   server_*.py          the servers with benchmark endpoints and NVTX markers
-  catalog.py           item catalog parsing and native trie formats
+  catalog.py           the shared item catalog: parsing and beam membership checks
   trace.py sunburst.py report.py compare.py    outputs
 tests/                 CPU-only tests
 ```
@@ -89,7 +89,7 @@ the runner does one after another.
 - **Workload:** seeded random token IDs without the model's special tokens, so every engine gets the same requests for the same model and seed.
 - **Latency:** `runs.clean` separate server processes, each sent `runs.warmups` unmeasured and then `runs.requests` measured requests, one at a time over a new loopback connection. The client times each request from JSON encoding to the parsed response.
 - **Correctness:** every returned request must have `beam_width` distinct beams of `output_tokens` valid token IDs with finite scores in descending order. Scores are cumulative log-probabilities; SGLang's mean log-probability is multiplied by the beam length.
-- **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time.
+- **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time. Memory-only and no-GPU time go to the innermost phase and section range covering them, so the sunburst shows where the GPU waits, for example on eager kernel launches.
 - **Runtime facts:** attention backends, package versions and CUDA graph use are read from the running server, not inferred from settings.
 - **Output agreement** (`comparison.md`): beams of the first clean run, request by request, against the reference engine (public SGLang by default, as in the SID-GR accuracy benchmark). Agreement with SGLang shows consistency, not correctness: bf16 can flip near-tied beams.
   It reports top-1 match, share of shared beams, rank match and the largest score difference.
@@ -185,6 +185,7 @@ listed in `ENGINES`, plus a config file with its `source` pin and an `images/` r
 - the source file the checkout must contain, where it is mounted, the paths pinned by `source.commit`, the image recipe, and the config keys and checks;
 - the server command, readiness endpoint and profiler start/stop calls;
 - the request payload and how to read beams and scores from the response, as cumulative log-probabilities;
+- whether it supports a catalog and, if it stores one natively, how to convert the shared catalog (`convert_catalog`);
 - the runtime facts to check and report (graph use, the code path taken).
 
 The engine needs an HTTP server with a beam-search request, a way to start and

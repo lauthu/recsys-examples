@@ -1,19 +1,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Catalog parsing, native trie serialization and beam membership checks.
+"""The catalog every solution shares: parsing and beam membership checks.
 
 A catalog is JSONL with one item per line:
     {"item_id": "item-a", "token_ids": [1000, 2000, 3000], "metadata": {...}}
-Token IDs are model token IDs. Conversion changes only the storage format, so
-every engine constrains generation to exactly the same token paths.
+Token IDs are model token IDs. It is part of what is measured: every solution
+in a run is constrained to exactly these token paths, and every returned beam is
+checked against them. Each engine's native storage format is solution-specific
+and lives with the engine (`Engine.convert_catalog` in bench/engines.py).
 """
 
-import array
 import hashlib
 import json
-import pickle
-import struct
-import sys
 
 
 def parse(data, *, output_tokens, beam_width, vocab_size):
@@ -69,96 +67,6 @@ def parse(data, *, output_tokens, beam_width, vocab_size):
         "items": len(paths),
         "first_tokens": first_tokens,
     }
-
-
-def sglang_trie(paths):
-    """Pickled token trie read by SGLang beam-search-new's prefix-constrained trie."""
-    root = {"t": False, "c": {}}
-    nodes = 1
-    for tokens in sorted(paths):
-        node = root
-        for token in tokens:
-            if token not in node["c"]:
-                node["c"][token] = {"t": False, "c": {}}
-                nodes += 1
-            node = node["c"][token]
-        node["t"] = True
-    lengths = {len(path) for path in paths}
-    return pickle.dumps(
-        {
-            "tree": root,
-            "num_sequences": len(paths),
-            "num_nodes": nodes,
-            "num_edges": nodes - 1,
-            "max_depth": max(lengths),
-            "min_depth": min(lengths),
-        },
-        protocol=4,
-    )
-
-
-def sidtrie(paths, *, token_start, codebook_size, vocab_size):
-    """trie_output_head.safetensors for the SGLang SIDTrie output head.
-
-    Depth d of a three-token path must lie in codebook range
-    [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
-    The file stores range-local codes as three-level CSR int32 indices.
-    """
-    if token_start < 0 or codebook_size <= 0:
-        raise ValueError("trie_config needs token_start >= 0 and codebook_size > 0")
-    if token_start + 3 * codebook_size > vocab_size:
-        raise ValueError("trie_config codebook ranges exceed the model vocabulary")
-    tree = {}
-    for path in paths:
-        if len(path) != 3:
-            raise ValueError("SIDTrie paths must have exactly three tokens")
-        codes = [
-            token - token_start - depth * codebook_size
-            for depth, token in enumerate(path)
-        ]
-        if any(not 0 <= code < codebook_size for code in codes):
-            raise ValueError(
-                f"token path {path} is outside the trie_config codebook ranges"
-            )
-        tree.setdefault(codes[0], {}).setdefault(codes[1], []).append(codes[2])
-    roots, level1, level2 = sorted(tree), [], []
-    level1_offsets, level2_offsets = [0], [0]
-    for a in roots:
-        for b in sorted(tree[a]):
-            level1.append(b)
-            level2.extend(sorted(tree[a][b]))
-            level2_offsets.append(len(level2))
-        level1_offsets.append(len(level1))
-    arrays = {
-        "root_token_ids": roots,
-        "level1_offsets": level1_offsets,
-        "level1_token_ids": level1,
-        "level2_offsets": level2_offsets,
-        "level2_token_ids": level2,
-    }
-    header = {
-        "__metadata__": {
-            "format_version": "1",
-            "token_start": str(token_start),
-            "codebook_size": str(codebook_size),
-            "num_codebooks": "3",
-        }
-    }
-    payload = bytearray()
-    for name, values in arrays.items():
-        start = len(payload)
-        packed = array.array("i", values)
-        if sys.byteorder != "little":
-            packed.byteswap()
-        payload += packed.tobytes()
-        header[name] = {
-            "dtype": "I32",
-            "shape": [len(values)],
-            "data_offsets": [start, len(payload)],
-        }
-    encoded = json.dumps(header, separators=(",", ":")).encode()
-    encoded += b" " * (-len(encoded) % 8)
-    return struct.pack("<Q", len(encoded)) + encoded + bytes(payload)
 
 
 def check_status(status, *, source, items):

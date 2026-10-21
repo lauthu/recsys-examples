@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""SVG sunburst of GPU kernel time per request: phase > section > family.
+"""SVG sunburst of server time per request: phase > section > family.
+
+Kernel time is split by kernel family; time with no kernel running is shown as
+memcpy/memset-only or no-GPU-activity slices of the phase and section it falls in.
 
 The shapes are drawn statically, so the file also works as an image (the report
 embeds it). Opened directly in a browser, an embedded script adds hover details
@@ -12,6 +15,8 @@ import json
 import math
 import re
 from html import escape
+
+from bench.trace import NO_PHASE
 
 PHASE_COLORS = ("#465da5", "#97558e", "#b87838", "#549250", "#3f8f9b", "#a5544a")
 # Related families share a hue: attention teal, top-k/sort/softmax orange,
@@ -35,6 +40,9 @@ FAMILY_COLORS = {
     "math": "#e68fb4",
     "other": "#9da6b2",
 }
+# Non-kernel time, keyed by the trace's busy state
+NON_KERNEL = {"memory": "memcpy/memset only", "idle": "no GPU activity"}
+FAMILY_COLORS.update({NON_KERNEL["memory"]: "#c2c98f", NON_KERNEL["idle"]: "#dde1e7"})
 GREY = "#9da6b2"
 MIDDLE, BOLD = 'text-anchor="middle"', 'font-weight="650"'
 CENTER = (300, 345)
@@ -90,7 +98,7 @@ SCRIPT = r"""
   function show(node) {
     var shown = node || focus;
     main.textContent = ms(shown.v) + " ms";
-    sub.textContent = shown === root ? "GPU kernel time / request" : pct(shown.v, DATA.total) + " of total";
+    sub.textContent = shown === root ? "server time / request" : pct(shown.v, DATA.total) + " of total";
     var label = names(shown).join(" › ");
     if (node) {
       path.textContent = label;
@@ -217,12 +225,17 @@ def swatch(x, y, color):
     return f'<rect x="{x}" y="{y - 10}" width="11" height="11" rx="2" fill="{color}"/>'
 
 
-def render(work, requests, title, subtitle):
-    """Return an SVG document; durations are means over the profiled requests."""
+def render(work, gaps, requests, title, subtitle):
+    """Return an SVG document; durations are means over the profiled requests.
+
+    work rows are [phase, section, kernel family, ns]; gaps rows are
+    [phase, section, "memory" | "idle", ns] from trace.analyze.
+    """
+    work = work + [[p, s, NON_KERNEL[state], ns] for p, s, state, ns in gaps]
     phases = [phase for phase in build(work) if phase[1] > 0]
     total = sum(ns for _, ns, _ in phases)
     if total <= 0 or requests < 1:
-        raise ValueError("sunburst needs positive kernel time and at least one request")
+        raise ValueError("sunburst needs positive time and at least one request")
 
     def ms(ns):
         return ns / requests / 1e6
@@ -255,7 +268,7 @@ def render(work, requests, title, subtitle):
     colors, start, tree = {}, -math.pi / 2, []
     for index, (phase, phase_ns, sections) in enumerate(phases):
         colors[phase] = PHASE_COLORS[index % len(PHASE_COLORS)]
-        colors[phase] = GREY if phase == "unknown" else colors[phase]
+        colors[phase] = GREY if phase in ("unknown", NO_PHASE) else colors[phase]
         add(0, start, phase_ns, colors[phase], [phase], phase)
         phase_node = {"n": phase, "v": phase_ns, "k": colors[phase], "c": []}
         tree.append(phase_node)
@@ -283,7 +296,7 @@ def render(work, requests, title, subtitle):
         legend.append(text(920, y, share, extra='text-anchor="end"'))
         y += 24
     y += 22
-    heading = "Kernel family (outer ring)"
+    heading = "Kernel family or non-kernel time (outer ring)"
     legend.append(text(600, y, heading, 12, muted, 'font-weight="600"'))
     present = [f for f in FAMILY_COLORS if any(r[2] == f and r[3] > 0 for r in work)]
     for index, family in enumerate(present):
@@ -299,9 +312,7 @@ def render(work, requests, title, subtitle):
     main = f'id="c-main" {MIDDLE} {BOLD}'
     center = [text(cx, cy - 4, f"{ms(total):.3f} ms", 22, extra=main)]
     center.append(
-        text(
-            cx, cy + 18, "GPU kernel time / request", 11, muted, f'id="c-sub" {MIDDLE}'
-        )
+        text(cx, cy + 18, "server time / request", 11, muted, f'id="c-sub" {MIDDLE}')
     )
     detail = [text(cx, 655, "", 13, extra=f'id="c-path" {MIDDLE} {BOLD}')]
     detail.append(text(cx, 677, "", 12, muted, f'id="c-share" {MIDDLE}'))

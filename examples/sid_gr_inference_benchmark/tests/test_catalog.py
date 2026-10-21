@@ -3,9 +3,11 @@
 import json
 import pickle
 import struct
+from types import SimpleNamespace
 
 import pytest
-from bench import catalog
+from bench import catalog, engines
+from bench.config import TrieConfig
 
 PATHS = [
     [1000 + a, 2000 + b, 3000 + c] for a in range(4) for b in range(2) for c in range(2)
@@ -69,7 +71,9 @@ def test_parse_needs_beam_width_first_tokens():
 
 
 def test_sglang_trie_contains_every_path():
-    data = pickle.loads(catalog.sglang_trie({tuple(p): i for i, p in enumerate(PATHS)}))
+    legacy = engines.get("sglang-beam-search-new")
+    paths = {tuple(p): i for i, p in enumerate(PATHS)}
+    data = pickle.loads(legacy.convert_catalog(paths, None, 5000))
     assert data["num_sequences"] == 16 and data["max_depth"] == data["min_depth"] == 3
 
     def walk(node, prefix=()):
@@ -83,12 +87,9 @@ def test_sglang_trie_contains_every_path():
 
 
 def test_sidtrie_round_trip():
-    data = catalog.sidtrie(
-        {tuple(p): i for i, p in enumerate(PATHS)},
-        token_start=1000,
-        codebook_size=1000,
-        vocab_size=5000,
-    )
+    solution = SimpleNamespace(trie_config=TrieConfig(1000, 1000))
+    paths = {tuple(p): i for i, p in enumerate(PATHS)}
+    data = engines.get("sglang-sidtrie").convert_catalog(paths, solution, 5000)
     size = struct.unpack("<Q", data[:8])[0]
     header = json.loads(data[8 : 8 + size])
     assert size % 8 == 0 and header["__metadata__"]["token_start"] == "1000"
@@ -118,14 +119,14 @@ def test_sidtrie_round_trip():
 
 def test_sidtrie_rejects_tokens_outside_codebooks():
     with pytest.raises(ValueError, match="codebook ranges"):
-        catalog.sidtrie(
+        engines.trie_output_head(
             {(1000, 1999, 3000): 0},
             token_start=1000,
             codebook_size=1000,
             vocab_size=5000,
         )
     with pytest.raises(ValueError, match="vocabulary"):
-        catalog.sidtrie(
+        engines.trie_output_head(
             {(1000, 2000, 3000): 0},
             token_start=1000,
             codebook_size=1000,

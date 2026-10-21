@@ -14,6 +14,7 @@ import yaml
 from bench import engines
 from bench.common import summarize
 from bench.sunburst import phase_key
+from bench.trace import NO_PHASE, NO_SECTION
 
 
 def short(name, limit=90):
@@ -131,10 +132,13 @@ def render(ctx):
         return ns / requests / 1e6
 
     latency, total, throughput = latency_rows(clean)
-    sections = defaultdict(int)
+    sections, gaps = defaultdict(int), defaultdict(int)
     for phase, section, _, ns in trace["work"]:
         sections[(phase, section)] += ns
+    for phase, section, _, ns in trace["gaps"]:
+        gaps[(phase, section)] += ns
     kernel_ns, window_ns = trace["kernel_ns"], trace["window_ns"]
+    gap_ns = sum(gaps.values())
     (top_phase, top_section), top_ns = max(sections.items(), key=lambda item: item[1])
     idle = trace["busy_ns"]["idle"]
     catalog = ctx["catalog"]
@@ -148,9 +152,16 @@ def render(ctx):
     def share(ns, whole):
         return [f"{per_request(ns):.3f}", f"{100 * ns / whole:.1f}%"]
 
-    order = sorted(sections.items(), key=lambda x: (phase_key(x[0][0]), -x[1]))
-    section_rows = [[*key, *share(ns, kernel_ns)] for key, ns in order]
-    section_rows.append(["**Total**", "", *share(kernel_ns, kernel_ns)])
+    def time_row(kernel, gap):
+        share = 100 * (kernel + gap) / (kernel_ns + gap_ns)
+        times = (per_request(ns) for ns in (kernel, gap, kernel + gap))
+        return [*(f"{ms:.3f}" for ms in times), f"{share:.1f}%"]
+
+    keys = set(sections) | set(gaps)
+    totals = {key: sections[key] + gaps[key] for key in keys}
+    order = sorted(keys, key=lambda key: (phase_key(key[0]), -totals[key]))
+    section_rows = [[*key, *time_row(sections[key], gaps[key])] for key in order]
+    section_rows.append(["**Total**", "", *time_row(kernel_ns, gap_ns)])
     busy = trace["busy_ns"]
     window_rows = [
         ["One kernel running", *share(busy["kernel"], window_ns)],
@@ -191,11 +202,11 @@ The client times each request from JSON encoding to the parsed response, one req
 
 A separate server process ran under Nsight Systems; the capture holds {requests} requests sent after {runs.warmups} warmups. Trace: [profile.nsys-rep](profile.nsys-rep).
 
-![GPU kernel time per request](sunburst.svg)
+![Server time per request](sunburst.svg)
 
 Open [sunburst.svg](sunburst.svg) directly in a browser to hover for details and click a slice to zoom in.
 
-{table(["Phase", "Section", "Kernel ms/request", "Share"], section_rows, right=(2, 3))}
+{table(["Phase", "Section", "Kernel ms", "Non-kernel ms", "Total ms", "Share"], section_rows, right=(2, 3, 4, 5))}
 
 {table(["Server window per request", "ms", "Share"], window_rows, right=(1, 2))}
 
@@ -203,7 +214,7 @@ Open [sunburst.svg](sunburst.svg) directly in a browser to hover for details and
 
 Families come from kernel names only: GEMMs of different layers (QKV, MLP, LM head) look alike, so they share `linear`; phase and section show where a kernel ran. Open the sunburst to see families per phase and section.
 
-The server window is the request handler (NVTX `bench/request`). Kernel time adds up kernel durations, so concurrent kernels count separately. A kernel gets its phase and section from the NVTX range around its launch call; {trace['unknown_kernels']} of {trace['kernels']:,} kernels had no unambiguous launch range and are listed as `unknown`. "No GPU activity" means no traced kernel or memory operation, which alone does not prove CPU overhead. Profiled timings are separate from the latency runs.
+The server window is the request handler (NVTX `bench/request`). Times are per request. Kernel time adds up kernel durations, so concurrent kernels count separately and the total exceeds the server window by their overlap. A kernel gets its phase and section from the NVTX range around its launch call; {trace['unknown_kernels']} of {trace['kernels']:,} kernels had no unambiguous launch range and are listed as `unknown`. Non-kernel time (memory copy/set only, or no GPU activity) gets the innermost phase and section range, on any thread, that covers it; outside every range it is `{NO_PHASE}` / `{NO_SECTION}`. "No GPU activity" means no traced kernel or memory operation, which alone does not prove CPU overhead. Profiled timings are separate from the latency runs.
 
 ## Setup
 

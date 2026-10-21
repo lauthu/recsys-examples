@@ -14,10 +14,13 @@ Server side launch command, readiness and profiler endpoints, request payload.
 Response    beam parsing, per-run observed checks, setup rows for the report.
 """
 
+import array
+import json
 import os
+import pickle
+import struct
 import sys
 
-from bench import catalog as catalogs
 from bench.common import call
 
 SIDTRIE_FILE = "trie_output_head.safetensors"
@@ -289,7 +292,29 @@ class BeamSearchNew(SGLang):
             fail("sglang-beam-search-new needs server_settings.enable_beam_search true")
 
     def convert_catalog(self, paths, solution, vocab_size):
-        return catalogs.sglang_trie(paths)
+        """Pickled token trie read by this branch's prefix-constrained trie."""
+        root = {"t": False, "c": {}}
+        nodes = 1
+        for tokens in sorted(paths):
+            node = root
+            for token in tokens:
+                if token not in node["c"]:
+                    node["c"][token] = {"t": False, "c": {}}
+                    nodes += 1
+                node = node["c"][token]
+            node["t"] = True
+        lengths = {len(path) for path in paths}
+        return pickle.dumps(
+            {
+                "tree": root,
+                "num_sequences": len(paths),
+                "num_nodes": nodes,
+                "num_edges": nodes - 1,
+                "max_depth": max(lengths),
+                "min_depth": min(lengths),
+            },
+            protocol=4,
+        )
 
     def sampling(self, workload):
         return {"use_beam_search": True}
@@ -340,7 +365,7 @@ class SidTrie(Native):
 
     def convert_catalog(self, paths, solution, vocab_size):
         trie = solution.trie_config
-        return catalogs.sidtrie(
+        return trie_output_head(
             paths,
             token_start=trie.token_start,
             codebook_size=trie.codebook_size,
@@ -396,6 +421,70 @@ class SidTrie(Native):
                 f"{text}history on every measured request; shared-context attention {state}",
             )
         ]
+
+
+def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
+    """trie_output_head.safetensors for the SGLang SIDTrie output head.
+
+    Depth d of a three-token path must lie in codebook range
+    [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
+    The file stores range-local codes as three-level CSR int32 indices.
+    """
+    if token_start < 0 or codebook_size <= 0:
+        raise ValueError("trie_config needs token_start >= 0 and codebook_size > 0")
+    if token_start + 3 * codebook_size > vocab_size:
+        raise ValueError("trie_config codebook ranges exceed the model vocabulary")
+    tree = {}
+    for path in paths:
+        if len(path) != 3:
+            raise ValueError("SIDTrie paths must have exactly three tokens")
+        codes = [
+            token - token_start - depth * codebook_size
+            for depth, token in enumerate(path)
+        ]
+        if any(not 0 <= code < codebook_size for code in codes):
+            raise ValueError(
+                f"token path {path} is outside the trie_config codebook ranges"
+            )
+        tree.setdefault(codes[0], {}).setdefault(codes[1], []).append(codes[2])
+    roots, level1, level2 = sorted(tree), [], []
+    level1_offsets, level2_offsets = [0], [0]
+    for a in roots:
+        for b in sorted(tree[a]):
+            level1.append(b)
+            level2.extend(sorted(tree[a][b]))
+            level2_offsets.append(len(level2))
+        level1_offsets.append(len(level1))
+    arrays = {
+        "root_token_ids": roots,
+        "level1_offsets": level1_offsets,
+        "level1_token_ids": level1,
+        "level2_offsets": level2_offsets,
+        "level2_token_ids": level2,
+    }
+    header = {
+        "__metadata__": {
+            "format_version": "1",
+            "token_start": str(token_start),
+            "codebook_size": str(codebook_size),
+            "num_codebooks": "3",
+        }
+    }
+    payload = bytearray()
+    for name, values in arrays.items():
+        start = len(payload)
+        packed = array.array("i", values)
+        if sys.byteorder != "little":
+            packed.byteswap()
+        payload += packed.tobytes()
+        header[name] = {
+            "dtype": "I32",
+            "shape": [len(values)],
+            "data_offsets": [start, len(payload)],
+        }
+    encoded = json.dumps(header, separators=(",", ":")).encode()
+    encoded += b" " * (-len(encoded) % 8)
+    return struct.pack("<Q", len(encoded)) + encoded + bytes(payload)
 
 
 def _sum_counters(clean):

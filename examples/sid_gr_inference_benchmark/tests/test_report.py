@@ -18,6 +18,10 @@ WORK = [
     ["decode_2", "beam_selection", "topk", 1_000_000],
     ["unknown", "unknown", "other", 0],
 ]
+GAPS = [
+    ["decode_1", "model", "idle", 3_000_000],
+    ["no phase", "no section", "idle", 15_000_000],
+]
 TRACE = {
     "requests": 2,
     "window_ns": 30_000_000,
@@ -25,6 +29,7 @@ TRACE = {
     "kernels": 40,
     "unknown_kernels": 0,
     "work": WORK,
+    "gaps": GAPS,
     "top": [
         ["void cutlass::Kernel2<gemm_bf16>(T1::Params)", "linear", 8_000_000, 40],
         ["void at::native::mbtopk::gatherTopK<float>(a | b)", "topk", 1_000_000, 4],
@@ -51,12 +56,13 @@ def test_statistics():
 
 
 def test_sunburst_is_valid_svg_with_one_slice_per_node():
-    svg = sunburst.render(WORK, 2, "title", "subtitle")
+    svg = sunburst.render(WORK, GAPS, 2, "title", "subtitle")
     root = ET.fromstring(svg.split("\n", 1)[1])
     paths = root.findall(".//{http://www.w3.org/2000/svg}path")
-    # 3 phases, 3 sections and 4 families; the zero-time unknown phase is dropped
-    assert len(paths) == 3 + 3 + 4
-    assert "6.000 ms" in svg  # 12 ms of kernel time over 2 requests
+    # 4 phases, 4 sections and 6 families; the zero-time unknown phase is dropped
+    assert len(paths) == 4 + 4 + 6
+    assert "15.000 ms" in svg  # 12 ms of kernel and 18 ms of idle time over 2 requests
+    assert "decode_1 / model / no GPU activity: 1.500 ms/request" in svg
 
 
 def embedded(svg):
@@ -67,10 +73,11 @@ def embedded(svg):
 
 
 def test_sunburst_embeds_the_tree_its_script_zooms_through():
-    script, data = embedded(sunburst.render(WORK, 2, "title", "<subtitle>"))
-    assert data["requests"] == 2 and data["total"] == 12_000_000
+    script, data = embedded(sunburst.render(WORK, GAPS, 2, "title", "<subtitle>"))
+    assert data["requests"] == 2 and data["total"] == 30_000_000
     phases = data["tree"]
-    assert [phase["n"] for phase in phases] == ["prefill", "decode_1", "decode_2"]
+    names = [phase["n"] for phase in phases]
+    assert names == ["prefill", "decode_1", "decode_2", "no phase"]
     # Every node's time is the sum of its children's, so a zoomed view adds up.
     for phase in phases:
         assert phase["v"] == sum(c["v"] for c in phase["c"])
@@ -81,7 +88,7 @@ def test_sunburst_embeds_the_tree_its_script_zooms_through():
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_sunburst_script_is_valid_javascript(tmp_path):
-    script, _ = embedded(sunburst.render(WORK, 2, "title", "subtitle"))
+    script, _ = embedded(sunburst.render(WORK, GAPS, 2, "title", "subtitle"))
     (tmp_path / "script.js").write_text(script)
     check = subprocess.run(["node", "--check", str(tmp_path / "script.js")])
     assert check.returncode == 0
@@ -176,7 +183,10 @@ def test_sid_gr_report_with_a_disabled_graph_runner():
         "| **All** | 8 | 13.000 | 13.000 | 16.000 | 16.000 | 16.000 | 80.00 |" in text
     )
     assert "prefill: 1.00 replays/request; decode: disabled" in text
-    assert "| prefill | model | 4.500 | 75.0% |" in text
+    assert "| prefill | model | 4.500 | 0.000 | 4.500 | 30.0% |" in text
+    assert "| decode_1 | model | 1.000 | 1.500 | 2.500 | 16.7% |" in text
+    assert "| no phase | no section | 0.000 | 7.500 | 7.500 | 50.0% |" in text
+    assert "| **Total** |  | 6.000 | 9.000 | 15.000 | 100.0% |" in text
     assert "| No GPU activity | 9.000 | 60.0% |" in text
     assert "| `cutlass::Kernel2<gemm_bf16>(T1::Params)` | linear | 4.000 | 20 |" in text
     assert "gatherTopK<float>(a \\| b)" in text  # a pipe must not split the row

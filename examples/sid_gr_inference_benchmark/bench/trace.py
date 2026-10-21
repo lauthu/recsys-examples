@@ -8,12 +8,18 @@ runtime/driver call with the same process and correlation ID must start inside
 the innermost <prefix>/phase:<rid>:<name> range on its own thread. CUDA graph
 nodes (captured with --cuda-graph-trace=node) inherit their graph launch's
 markers. Anything without unambiguous evidence stays "unknown".
+
+Window time with no kernel running (memory operations only, or no GPU activity)
+is labeled by time instead: the innermost phase and section range, on any
+thread, that covers it, else NO_PHASE / NO_SECTION.
 """
 
 import sqlite3
 from collections import defaultdict
 
 from bench.common import MARKER
+
+NO_PHASE, NO_SECTION = "no phase", "no section"
 
 TOP = 12  # kernels listed in the report
 
@@ -96,8 +102,20 @@ def _attribute(kernels, apis, markers, key):
         kernel[key] = memo[launch]
 
 
-def _partition(start, end, kernels, memory):
-    """Split [start, end) into kernel-only, overlap, memory-only and idle time."""
+def _cover(markers, a, b, default):
+    """Label of the innermost marker that covers [a, b), else default."""
+    covering = [m for m in markers if m["start"] <= a and b <= m["end"]]
+    if not covering:
+        return default
+    return min(covering, key=lambda m: m["end"] - m["start"])["label"]
+
+
+def _partition(start, end, kernels, memory, phases, sections):
+    """Split [start, end) into kernel-only, overlap, memory-only and idle time.
+
+    Also returns {(phase, section, state): ns} for the memory-only and idle time;
+    marker edges split the window so each piece lies inside or outside a marker.
+    """
     edges = defaultdict(lambda: [0, 0])
     for index, rows in enumerate((kernels, memory)):
         for row in rows:
@@ -105,7 +123,12 @@ def _partition(start, end, kernels, memory):
             if a < b:
                 edges[a][index] += 1
                 edges[b][index] -= 1
+    for marker in phases + sections:
+        for point in (marker["start"], marker["end"]):
+            if start < point < end:
+                edges.setdefault(point, [0, 0])  # a boundary, no count change
     totals = dict.fromkeys(("kernel", "overlap", "memory", "idle"), 0)
+    gaps = defaultdict(int)
     active, previous = [0, 0], start
     for point in sorted(set(edges) | {start, end}):
         if previous < point:
@@ -118,9 +141,13 @@ def _partition(start, end, kernels, memory):
                 )
             )
             totals[state] += point - previous
+            if state in ("memory", "idle"):
+                phase = _cover(phases, previous, point, NO_PHASE)
+                section = _cover(sections, previous, point, NO_SECTION)
+                gaps[(phase, section, state)] += point - previous
         active = [active[0] + edges[point][0], active[1] + edges[point][1]]
         previous = point
-    return totals
+    return totals, gaps
 
 
 def analyze(path, prefix=MARKER):
@@ -173,11 +200,15 @@ def analyze(path, prefix=MARKER):
     _attribute(kernels, apis, ranges["phase"], "phase")
     _attribute(kernels, apis, ranges["section"], "section")
 
-    work = defaultdict(int)
+    work, gaps = defaultdict(int), defaultdict(int)
     top = defaultdict(lambda: [0, 0])  # kernel symbol -> [ns, launches]
     busy = dict.fromkeys(("kernel", "overlap", "memory", "idle"), 0)
     for window in windows:
         a, b = window["start"], window["end"]
+        phases, sections = (
+            [m for m in ranges[kind] if m["start"] < b and a < m["end"]]
+            for kind in ("phase", "section")
+        )
         in_window = [k for k in kernels if k["start"] < b and a < k["end"]]
         for kernel in in_window:
             name = strings.get(kernel.get("demangledName")) or strings.get(
@@ -189,8 +220,11 @@ def analyze(path, prefix=MARKER):
             top[name][0] += overlap
             top[name][1] += 1
         mem = [m for m in memory if m["start"] < b and a < m["end"]]
-        for state, value in _partition(a, b, in_window, mem).items():
+        totals, window_gaps = _partition(a, b, in_window, mem, phases, sections)
+        for state, value in totals.items():
             busy[state] += value
+        for key, value in window_gaps.items():
+            gaps[key] += value
     return {
         "requests": len(windows),
         "window_ns": sum(w["end"] - w["start"] for w in windows),
@@ -199,6 +233,7 @@ def analyze(path, prefix=MARKER):
         "kernels": len(kernels),
         "unknown_kernels": sum(k["phase"] == "unknown" for k in kernels),
         "work": [[*key, value] for key, value in sorted(work.items())],
+        "gaps": [[*key, value] for key, value in sorted(gaps.items())],
         "top": [
             [name, family(name), *value]
             for name, value in sorted(top.items(), key=lambda x: -x[1][0])[:TOP]

@@ -75,6 +75,14 @@ def test_attribution_and_window_partition(tmp_path):
         ["unknown", "unknown", "normalization", 6],
     ]
     assert result["kernel_ns"] == 46
+    # Non-kernel time by the innermost covering phase/section; it sums to busy_ns.
+    assert result["gaps"] == [
+        ["decode_1", "no section", "idle", 25],
+        ["decode_1", "no section", "memory", 5],
+        ["no phase", "no section", "idle", 14],
+        ["prefill", "model", "idle", 13],
+        ["prefill", "no section", "idle", 22],
+    ]
 
 
 @pytest.mark.parametrize(

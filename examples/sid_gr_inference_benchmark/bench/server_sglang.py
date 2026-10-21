@@ -1,11 +1,21 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Native SGLang HTTP server plus benchmark endpoints.
+"""Launch SGLang's own HTTP server with benchmark hooks; not a separate server.
 
     BENCH_ENGINE=<engine> python3 -m bench.server_sglang --plan /work/plan.json --port PORT
 
+This builds ServerArgs from the plan, patches a few SGLang methods in the HTTP
+and scheduler processes, then calls SGLang's http_server.launch_server. Requests
+go straight to SGLang's /generate; no proxy or extra hop. The hooks add:
+
 GET /pilot/ready    200 once the server status is Up
-GET /pilot/runtime  packages, attention backends, catalog and counters from the scheduler
+GET /pilot/runtime  packages, attention backends, catalog and counters from the
+                    scheduler, which the client uses to fail a run whose
+                    requests did not take the configured path
+NVTX ranges         with BENCH_PROFILE=1 only, for the profile's phases/sections
+
+Latency runs keep only the counters: one wrapper on ModelRunner.forward and one
+on BeamGroup.finalize, about 0.6 µs per forward, so a few µs per request.
 
 Counters start at zero: model forwards per phase in CUDA-graph or eager mode
 and, for the SIDTrie fork, compact output head, exact normalizer, device-side
