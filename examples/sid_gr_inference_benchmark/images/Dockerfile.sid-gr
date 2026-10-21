@@ -7,7 +7,7 @@
 # Build with `images/build.sh sid-gr CHECKOUT`, which puts the pinned commit's
 # pyproject.toml in the context. Only the dependencies are installed; the
 # benchmark mounts the source.
-FROM lmsysorg/sglang@sha256:ceaf8b16e02d165143633ac228bbb994a05fe77d7e0526cf035ae4bbf4eacc36
+FROM lmsysorg/sglang:v0.5.12.post1-cu130@sha256:ceaf8b16e02d165143633ac228bbb994a05fe77d7e0526cf035ae4bbf4eacc36
 COPY pyproject.toml /tmp/sid-gr-inference/pyproject.toml
 RUN python3 -c "import tomllib; p = tomllib.load(open('/tmp/sid-gr-inference/pyproject.toml', 'rb'))['project']; print(chr(10).join(p['dependencies'] + p['optional-dependencies']['kernels']))" > /tmp/sid-gr-inference/requirements.txt \
     && python3 -m pip install --no-cache-dir -r /tmp/sid-gr-inference/requirements.txt

@@ -4,10 +4,12 @@ The benchmark mounts each engine's source read-only at its pinned commit and put
 it first on `PYTHONPATH`, and the client checks that the server imported it from
 there. An image therefore only has to supply the dependencies, and Nsight Systems.
 
-A release may use its official image, pinned by digest. Code on a dev branch is
-built from that branch's source at the commit pinned in `configs/solutions/`; the
-image is tagged `<owner>-<repo>:<branch>-<commit>` and labeled with the source
-URL, commit and branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
+A release may use its official image, pinned by digest and written
+`name:tag@digest`: Docker pulls the digest, and the tag names the release for
+readers. Code on a dev branch is built from that branch's source at the commit
+pinned in `configs/solutions/`; the image is tagged
+`<owner>-<repo>:<branch>-<commit>` and labeled with the source URL, commit and
+branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
 
 | Engine | Source | Recipe | Tag |
 | --- | --- | --- | --- |
