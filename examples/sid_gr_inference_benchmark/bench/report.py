@@ -111,7 +111,7 @@ def reproduce_rows(manifest):
             f"`{image['id']}`; tags {', '.join(image['tags']) or 'none'}; digests {digests}",
         ],
         ["Image base", base],
-        ["Image recipe", f"`{manifest['dockerfile']}`"],
+        ["Image recipe", f"`{manifest['recipe']}`"],
         ["Model", f"{model['id']} @ `{model['revision']}`; SHA-256 {files}"],
         [
             "Config SHA-256",

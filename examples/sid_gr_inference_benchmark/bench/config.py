@@ -139,9 +139,12 @@ class Source:
 
     url: str
     commit: str  # full commit ID
+    # Branch the commit was taken from; images/build.sh names dev-branch images by it.
+    branch: str | None = None
 
     def __post_init__(self):
         check(self.url.startswith("https://"), "source.url must be an https:// URL")
+        check(self.branch != "", "source.branch must not be empty")
         check(
             SHA1.fullmatch(self.commit),
             "source.commit must be a full 40-character lowercase commit ID",

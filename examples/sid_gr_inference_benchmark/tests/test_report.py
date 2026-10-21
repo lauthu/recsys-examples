@@ -107,7 +107,7 @@ MANIFEST = {
         "sha256": {"config.json": "f" * 64},
     },
     "benchmark_code": "abc123",
-    "dockerfile": "images/Dockerfile.engine",
+    "recipe": "images/Dockerfile.engine",
     "configs": {"scenario": "1" * 64, "solution": "2" * 64},
     "nsys": "NVIDIA Nsight Systems version 2026.4",
 }

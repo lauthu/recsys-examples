@@ -36,7 +36,9 @@ class Engine:
     title: str
     source_label: str  # what --source must be, for error messages
     entry: str  # file that must exist under --source
-    dockerfile: str  # image recipe under images/
+    # How the image is built: a Dockerfile under images/, or, for a dev branch
+    # built from source by images/build.sh, the engine's own recipe.
+    recipe: str
     mount = "/source"  # where --source appears in the container
     fingerprint: tuple[str, ...] = (
         "examples/sid-gr-inference",
@@ -100,7 +102,7 @@ class Engine:
 
 class SidGr(Engine):
     name = "sid-gr"
-    dockerfile = "images/Dockerfile.sid-gr"
+    recipe = "images/Dockerfile.sid-gr"
     title = "SID-GR"
     source_label = "a recsys-examples checkout"
     entry = "examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
@@ -277,7 +279,7 @@ class SGLang(Engine):
 
 class BeamSearchNew(SGLang):
     name = "sglang-beam-search-new"
-    dockerfile = "images/Dockerfile.sglang-beam-search-new"
+    recipe = "images/Dockerfile.sglang-beam-search-new"
     title = "SGLang beam-search-new"
     catalog_file = "catalog.pkl"
 
@@ -309,14 +311,14 @@ class Native(SGLang):
 
 class SGLangPublic(Native):
     name = "sglang"
-    dockerfile = "images/Dockerfile.sglang"
+    recipe = "images/Dockerfile.sglang"
     title = "SGLang (public)"
     catalog_supported = False
 
 
 class SidTrie(Native):
     name = "sglang-sidtrie"
-    dockerfile = "images/Dockerfile.sglang-sidtrie"
+    recipe = "docker/Dockerfile of the source, target framework_final (images/build.sh)"
     title = "SGLang SIDTrie"
     sections = ("server_settings", "trie_config")
     model_view = True

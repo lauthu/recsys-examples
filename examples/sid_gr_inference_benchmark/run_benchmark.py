@@ -327,7 +327,7 @@ def manifest(args, run, before, model, profile):
         **run.manifest,
         "model": model,
         "benchmark_code": before["tools"],
-        "dockerfile": run.engine.dockerfile,
+        "recipe": run.engine.recipe,
         "configs": {
             "scenario": provenance.sha256_file(args.scenario),
             "solution": provenance.sha256_file(run.solution_path),

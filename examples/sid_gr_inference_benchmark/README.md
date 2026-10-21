@@ -37,7 +37,7 @@ run_benchmark.py       host CLI: validates, starts containers, writes the output
 configs/
   scenarios/<model>.yaml    what is measured: model pin, workload, run counts, CPUs, GPU
   solutions/<name>.yaml     how one engine is launched: source pin, environment, server settings
-images/                Dockerfiles, one per dependency set, and build.sh
+images/                Dockerfiles and build.sh; dev branches are built from source
 bench/
   engines.py           one class per engine: everything engine-specific
   config.py            typed Scenario and Solution classes, YAML loading, checkpoint and workload checks
@@ -53,8 +53,9 @@ tests/                 CPU-only tests
 
 Requirements: Linux, Python 3.10+ with PyYAML, Docker with the NVIDIA runtime, the pinned
 Qwen3 checkpoint, each engine's source at its pinned commit and a local image
-built from [images/](images/README.md). The source is mounted read-only, not
-installed, so one image per dependency set is enough.
+built from [images/](images/README.md). The source is mounted read-only and the
+server must import it from the mount, so an image only has to supply the
+dependencies; an image built from source also contains the same commit.
 
 ```bash
 cd examples/sid_gr_inference_benchmark
@@ -104,7 +105,7 @@ A run is pinned by configuration, and the runner refuses to start when a pin doe
 | --- | --- | --- |
 | Engine source | `source.url` and `source.commit` in `configs/solutions/<name>.yaml` | The checkout contains the commit, and every path the engine reads (`python/` for SGLang, `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) is identical at HEAD and at the commit and has no uncommitted changes. A commit that leaves those paths alone passes. |
 | Checkpoint | `model.id`, `model.revision` and `model.sha256` in the scenario | SHA-256 of `config.json` and every `.safetensors` and index file must match; extra or missing files fail. |
-| Image | Recipe in [images/](images/README.md), base image by digest | Recorded, not enforced: a local build gets a new ID each time. |
+| Image | Recipe in [images/](images/README.md); dev branches built from source and tagged with repository, branch and commit | Recorded, not enforced: a local build gets a new ID each time. |
 
 To change a pin, edit its commit or hash in the config; nothing is hard-coded.
 `--allow-dirty` runs although a source differs from its pin, for development; the
@@ -143,7 +144,7 @@ A solution, `configs/solutions/<name>.yaml`, launches one engine:
 | Key | Meaning |
 | --- | --- |
 | `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `sglang-sidtrie` |
-| `source` | `url` and the full 40-character `commit` of the engine source |
+| `source` | `url` and the full 40-character `commit` of the engine source; optional `branch` the commit was taken from, which names a from-source image |
 | `env` | String environment variables for the server, passed verbatim |
 | `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets the model path, host, port and catalog. `cuda_graph_bs_decode` and `cuda_graph_bs_prefill` must match the workload's beam width and context length |
 | `trie_config` | `sglang-sidtrie` only: `token_start` and `codebook_size` of the three SID codebooks |

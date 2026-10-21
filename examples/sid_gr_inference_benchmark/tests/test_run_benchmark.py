@@ -112,6 +112,7 @@ INVALID_SOLUTION = [
     (SID, {"engine": "other"}, "engine must be one of"),
     (SID, {"source.commit": "c6eba91"}, "40-character"),
     (SID, {"source.url": "git@github.com:x/y.git"}, "https://"),
+    (SIDTRIE, {"source.branch": ""}, "source.branch must not be empty"),
     (SID, {"server_settings": {"tp_size": 1}}, r"sections \[\]"),
     (PUBLIC, {"trie_config": {"token_start": 0, "codebook_size": 1}}, "sections"),
     (LEGACY, {"server_settings.enable_beam_search": False}, "enable_beam_search"),
@@ -318,8 +319,12 @@ def test_reference_must_be_a_given_engine(tmp_path):
 
 
 def test_every_engine_names_an_image_recipe_that_exists():
+    build = (runner.ROOT / "images/build.sh").read_text()
     for engine in engines.ENGINES.values():
-        assert (runner.ROOT / engine.dockerfile).is_file(), engine.name
+        if engine.recipe.startswith("images/"):
+            assert (runner.ROOT / engine.recipe).is_file(), engine.name
+        else:  # built from source by build.sh with the engine's own recipe
+            assert f'"$engine" == {engine.name} ' in build, engine.name
 
 
 def finished_run(tmp_path, name):
@@ -344,5 +349,5 @@ def test_manifest_combines_identities_pins_and_hashes(tmp_path):
     found = runner.manifest(args, run, before, {"id": "m"}, {"nsys": "nsys 1"})
     assert found["source"] == run.manifest["source"] and found["model"] == {"id": "m"}
     assert found["benchmark_code"] == "abc123" and found["nsys"] == "nsys 1"
-    assert found["dockerfile"] == "images/Dockerfile.sid-gr"
+    assert found["recipe"] == "images/Dockerfile.sid-gr"
     assert set(found["configs"]) == {"scenario", "solution"}
