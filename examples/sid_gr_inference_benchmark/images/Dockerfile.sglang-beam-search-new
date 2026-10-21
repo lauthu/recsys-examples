@@ -1,5 +1,5 @@
 # Build context: https://github.com/cswuyg/sglang at
-# df191d672f1955d273bf56fe21684b60dcf6a891 (the commit in configs/sglang_beam_search_new.json).
+# df191d672f1955d273bf56fe21684b60dcf6a891 (the commit in configs/solutions/sglang_beam_search_new.yaml).
 # docker build -f images/Dockerfile.sglang-beam-search-new \
 #   -t sid-gr-bench:sglang-beam-search-new "$SGLANG_BEAM_SEARCH_NEW_SOURCE"
 FROM lmsysorg/sglang@sha256:b5c488694d74c13587af6057b90220498c4869571c8e1e3c43dd6f43ae721306

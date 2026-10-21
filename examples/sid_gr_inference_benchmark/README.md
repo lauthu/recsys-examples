@@ -35,12 +35,12 @@ OUTPUT/<engine>/profile.nsys-rep
 ```text
 run_benchmark.py       host CLI: validates, starts containers, writes the outputs
 configs/
-  benchmark.json       what is measured: model pin, workload, run counts, CPUs, GPU
-  <engine>.json        how one engine is launched: source pin, environment, server settings
+  scenarios/<model>.yaml    what is measured: model pin, workload, run counts, CPUs, GPU
+  solutions/<name>.yaml     how one engine is launched: source pin, environment, server settings
 images/                Dockerfiles, one per dependency set, and build.sh
 bench/
   engines.py           one class per engine: everything engine-specific
-  config.py            configuration, checkpoint and workload checks
+  config.py            typed Scenario and Solution classes, YAML loading, checkpoint and workload checks
   provenance.py        source, model and image pins and identities
   client.py            runs inside the container: server, requests, checks
   server_*.py          the servers with benchmark endpoints and NVTX markers
@@ -51,7 +51,7 @@ tests/                 CPU-only tests
 
 ## Run
 
-Requirements: Linux, Python 3.10+, Docker with the NVIDIA runtime, the pinned
+Requirements: Linux, Python 3.10+ with PyYAML, Docker with the NVIDIA runtime, the pinned
 Qwen3 checkpoint, each engine's source at its pinned commit and a local image
 built from [images/](images/README.md). The source is mounted read-only, not
 installed, so one image per dependency set is enough.
@@ -62,18 +62,19 @@ cd examples/sid_gr_inference_benchmark
 # Build the images once (see images/README.md)
 images/build.sh sglang
 
-# One engine: public SGLang
+# One solution: public SGLang
 python3 run_benchmark.py --model /path/to/Qwen3-0.6B --output logs/sglang \
-  --engine configs/sglang.json /path/to/sglang sid-gr-bench:sglang
+  --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang
 
-# Compare engines; public SGLang is the reference unless --reference says otherwise
+# Compare solutions; public SGLang is the reference unless --reference says otherwise
 python3 run_benchmark.py --model /path/to/Qwen3-0.6B --output logs/compare \
-  --engine configs/sglang.json /path/to/sglang sid-gr-bench:sglang \
-  --engine configs/sid_gr.json ../.. sid-gr-bench:sid-gr \
-  --engine configs/sglang_beam_search_new.json /path/to/beam_new sid-gr-bench:sglang-beam-search-new
+  --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang \
+  --solution configs/solutions/sid_gr.yaml ../.. sid-gr-bench:sid-gr \
+  --solution configs/solutions/sglang_beam_search_new.yaml /path/to/beam_new sid-gr-bench:sglang-beam-search-new
 ```
 
-For Qwen3-1.7B use `--benchmark configs/benchmark_qwen3_1_7b.json`.
+The scenario defaults to `configs/scenarios/qwen3_0_6b.yaml`; for Qwen3-1.7B add
+`--scenario configs/scenarios/qwen3_1_7b.yaml`.
 
 `--dry-run` validates the configuration and prints the `docker run` commands; it does not hash the checkpoint or check the pins. The output
 directory must be new or empty. JIT caches go to `.cache/<image>` next to the
@@ -101,8 +102,8 @@ A run is pinned by configuration, and the runner refuses to start when a pin doe
 
 | Pin | Where | Checked |
 | --- | --- | --- |
-| Engine source | `source.url` and `source.commit` in `configs/<engine>.json` | The checkout contains the commit, and every path the engine reads (`python/` for SGLang, `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) is identical at HEAD and at the commit and has no uncommitted changes. A commit that leaves those paths alone passes. |
-| Checkpoint | `model.id`, `model.revision` and `model.sha256` in the benchmark config | SHA-256 of `config.json` and every `.safetensors` and index file must match; extra or missing files fail. |
+| Engine source | `source.url` and `source.commit` in `configs/solutions/<name>.yaml` | The checkout contains the commit, and every path the engine reads (`python/` for SGLang, `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) is identical at HEAD and at the commit and has no uncommitted changes. A commit that leaves those paths alone passes. |
+| Checkpoint | `model.id`, `model.revision` and `model.sha256` in the scenario | SHA-256 of `config.json` and every `.safetensors` and index file must match; extra or missing files fail. |
 | Image | Recipe in [images/](images/README.md), base image by digest | Recorded, not enforced: a local build gets a new ID each time. |
 
 To change a pin, edit its commit or hash in the config; nothing is hard-coded.
@@ -112,14 +113,22 @@ report then states that the pin was not enforced.
 Each `report.md` ends with a Reproduce section and a JSON manifest: benchmark
 code commit, engine source URL, pinned and checked-out commits, image ID, tags,
 repository digests and base labels, recipe, model revision and file hashes,
-SHA-256 of both configs, the Nsight Systems version and the command. Attention
+SHA-256 of the scenario and solution files, the Nsight Systems version and the command. Attention
 backends, CUDA graph use and package versions are read from the running server,
 not inferred. `comparison.md` lists each engine's source commit, image and
 whether its pins were enforced.
 
 ## Configuration
 
-`configs/benchmark.json`, shared by every engine in a run:
+Configuration is YAML in two kinds of files, each loaded into frozen dataclasses
+in [bench/config.py](bench/config.py) (`Scenario`, `Solution` and their parts).
+Unknown or missing keys, wrong types and out-of-range values fail before any
+container starts; YAML duplicate keys fail too. Types are exact: `true` is a
+bool and `1` an int, so `env` values and the `gpu` index must be quoted. The
+container never reads YAML: the runner writes a `plan.json` from the typed
+objects.
+
+A scenario, `configs/scenarios/<model>.yaml`, is shared by every solution in a run:
 
 | Key | Meaning |
 | --- | --- |
@@ -129,20 +138,20 @@ whether its pins were enforced.
 | `cpus` | Disjoint `server` and `client` CPU lists; the container is limited to both |
 | `gpu` | Device index or GPU UUID |
 
-`configs/<engine>.json`, one per engine:
+A solution, `configs/solutions/<name>.yaml`, launches one engine:
 
 | Key | Meaning |
 | --- | --- |
 | `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `sglang-sidtrie` |
 | `source` | `url` and the full 40-character `commit` of the engine source |
 | `env` | String environment variables for the server, passed verbatim |
-| `server_settings` | SGLang `ServerArgs`; the runner sets the model path, host, port and catalog. `cuda_graph_bs_decode` and `cuda_graph_bs_prefill` must match the workload's beam width and context length |
+| `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets the model path, host, port and catalog. `cuda_graph_bs_decode` and `cuda_graph_bs_prefill` must match the workload's beam width and context length |
 | `trie_config` | `sglang-sidtrie` only: `token_start` and `codebook_size` of the three SID codebooks |
 
 The runner derives the request shape (`GR_CONTEXT_LEN`, `GR_BEAM_WIDTH`,
 `GR_DECODE_STEPS`, batch size 1) and the profiler settings; `env` must not set
 them. The report copies `env` and `server_settings` verbatim. To vary an engine
-setting, copy its file; the file name names the engine's directory in the output.
+setting, copy its file; the file name names the solution's directory in the output.
 
 ## Catalog filtering
 

@@ -1,0 +1,38 @@
+# Solution: SGLang beam-search-new branch with its use_beam_search API.
+# Loaded into bench.config.Solution.
+
+engine: sglang-beam-search-new
+
+source:
+  url: https://github.com/cswuyg/sglang
+  commit: "df191d672f1955d273bf56fe21684b60dcf6a891"
+
+# Server environment, passed verbatim. Values are strings: quote numbers.
+env:
+  OMP_NUM_THREADS: "10"
+  MKL_NUM_THREADS: "10"
+  PYTHONUNBUFFERED: "1"
+
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host, port
+# and, with --catalog, beam_search_constraint_dict.
+server_settings:
+  dtype: bfloat16
+  kv_cache_dtype: auto
+  tp_size: 1                        # required: phase markers need one process
+  skip_tokenizer_init: true         # requests send token IDs
+  disable_radix_cache: true         # no prefix reuse between requests
+  random_seed: 42
+  enable_beam_search: true          # required by this engine
+  enable_beam_cascade_attention: true  # beams share the context's attention
+  prefill_attention_backend: flashinfer
+  decode_attention_backend: flashinfer
+  disable_overlap_schedule: true    # required: phase markers need it
+  page_size: 1
+  disable_cuda_graph: false
+  cuda_graph_bs_decode: [256]       # must equal workload.beam_width
+  cuda_graph_bs_prefill: [2048]     # must equal workload.context_length
+  cuda_graph_backend_prefill: breakable
+  max_running_requests: 512
+  mem_fraction_static: 0.7
+  skip_server_warmup: true          # the client sends its own warmups
+  log_level: warning

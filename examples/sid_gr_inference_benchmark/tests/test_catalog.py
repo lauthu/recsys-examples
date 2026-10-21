@@ -5,7 +5,6 @@ import pickle
 import struct
 
 import pytest
-
 from bench import catalog
 
 PATHS = [

@@ -1,14 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import hashlib
 import subprocess
 
 import pytest
-
 from bench import provenance
+from bench.config import Model, Source
 
 COMMIT = "a" * 40
-PIN = {"url": "https://github.com/example/engine", "commit": COMMIT}
+PIN = Source(url="https://github.com/example/engine", commit=COMMIT)
 
 
 def git(path, *args):
@@ -40,19 +41,20 @@ def repo(tmp_path):
 
 
 def pin_at(repo, revision="HEAD"):
-    return {**PIN, "commit": git(repo, "rev-parse", revision)}
+    return Source(url=PIN.url, commit=git(repo, "rev-parse", revision))
 
 
-def test_pin_shapes():
-    provenance.check_pin(PIN)
-    for bad in (
-        {**PIN, "commit": "df191d6"},  # abbreviated
-        {**PIN, "commit": "A" * 40},
-        {**PIN, "url": "git@github.com:x/y.git"},
-        {"url": PIN["url"]},
-    ):
-        with pytest.raises(ValueError):
-            provenance.check_pin(bad)
+@pytest.mark.parametrize(
+    "url, commit",
+    [
+        (PIN.url, "df191d6"),  # abbreviated
+        (PIN.url, "A" * 40),
+        ("git@github.com:x/y.git", COMMIT),
+    ],
+)
+def test_pin_shapes(url, commit):
+    with pytest.raises(ValueError):
+        Source(url=url, commit=commit)
 
 
 def test_the_pinned_commit_passes(repo):
@@ -65,7 +67,7 @@ def test_commits_that_leave_the_engine_paths_alone_still_pass(repo):
     pin = pin_at(repo)
     (repo / "docs.md").write_text("v2\n")
     git(repo, "commit", "-qam", "docs only")
-    assert provenance.verify_source(repo, pin, ["python"])["head"] != pin["commit"]
+    assert provenance.verify_source(repo, pin, ["python"])["head"] != pin.commit
 
 
 def test_changed_engine_code_is_refused(repo):
@@ -107,18 +109,17 @@ def checkpoint(tmp_path):
         (model / name).write_bytes(data)
     for other in ("tokenizer.json", "generation_config.json", "tokenizer_config.json"):
         (model / other).write_text("not part of the pin")
-    pin = {
-        "id": "Org/Model",
-        "revision": COMMIT,
-        "sha256": {k: hashlib.sha256(v).hexdigest() for k, v in files.items()},
-    }
+    pin = Model(
+        id="Org/Model",
+        revision=COMMIT,
+        sha256={k: hashlib.sha256(v).hexdigest() for k, v in files.items()},
+    )
     return model, pin
 
 
 def test_checkpoint_matching_its_pin_is_accepted(tmp_path):
     model, pin = checkpoint(tmp_path)
-    provenance.check_model_pin(pin)
-    assert provenance.verify_model(model, pin)["sha256"] == pin["sha256"]
+    assert provenance.verify_model(model, pin)["sha256"] == pin.sha256
 
 
 def test_changed_weights_are_refused(tmp_path):
@@ -152,4 +153,4 @@ def test_extra_or_missing_weight_files_are_refused(tmp_path):
 def test_model_pins_must_be_complete(tmp_path, change):
     _, pin = checkpoint(tmp_path)
     with pytest.raises(ValueError):
-        provenance.check_model_pin({**pin, **change})
+        dataclasses.replace(pin, **change)

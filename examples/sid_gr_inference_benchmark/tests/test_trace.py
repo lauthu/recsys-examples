@@ -3,7 +3,6 @@
 import sqlite3
 
 import pytest
-
 from bench import trace
 
 PID, THREAD, HTTP = 7, (7 << 24) | 1, (7 << 24) | 2
@@ -12,7 +11,8 @@ PID, THREAD, HTTP = 7, (7 << 24) | 1, (7 << 24) | 2
 def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
     """Two requests; kernels launched inside phase/section ranges on one thread."""
     db = sqlite3.connect(path)
-    db.executescript("""
+    db.executescript(
+        """
         CREATE TABLE StringIds (id INTEGER, value TEXT);
         CREATE TABLE NVTX_EVENTS (start INTEGER, end INTEGER, text TEXT, textId INTEGER, globalTid INTEGER);
         CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (start INTEGER, end INTEGER, deviceId INTEGER,
@@ -21,7 +21,8 @@ def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
             globalTid INTEGER);
         CREATE TABLE CUPTI_ACTIVITY_KIND_MEMCPY (start INTEGER, end INTEGER, deviceId INTEGER);
         CREATE TABLE CUPTI_ACTIVITY_KIND_GRAPH_TRACE (start INTEGER, end INTEGER, deviceId INTEGER);
-    """)
+    """
+    )
     names = ["gemm_kernel", "flash_fwd_kernel", "rmsnorm_kernel", "topk_kernel"]
     db.executemany("INSERT INTO StringIds VALUES (?, ?)", enumerate(names))
     nvtx = [

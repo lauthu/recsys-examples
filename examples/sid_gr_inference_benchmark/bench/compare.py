@@ -44,11 +44,11 @@ def render(contexts, names, reference):
     """contexts are the per-engine report contexts, in command-line order."""
     ref = contexts[names.index(reference)]
     first = contexts[0]
-    workload, catalog = first["config"]["workload"], first["catalog"]
+    workload, catalog = first["scenario"].workload, first["catalog"]
     machine = first["clean"][0]
     scope = (
-        f"{first['model']} · context {workload['context_length']:,} · beam width "
-        f"{workload['beam_width']} · {workload['output_tokens']} output tokens"
+        f"{first['model']} · context {workload.context_length:,} · beam width "
+        f"{workload.beam_width} · {workload.output_tokens} output tokens"
     )
     if catalog:
         scope += f" · catalog of {catalog['items']:,} items"
@@ -67,7 +67,7 @@ def render(contexts, names, reference):
             if name != reference
             else "reference"
         )
-        title = engines.get(ctx["config"]["engine"]).title
+        title = engines.get(ctx["solution"].engine).title
         link = f"[{name}]({name}/report.md)"
         performance.append(
             [
@@ -112,7 +112,7 @@ def render(contexts, names, reference):
 
 {table(["Engine", "Mean ms", "p50 ms", "p99 ms", "Requests/s", "Mean vs reference", "Kernel ms/request", "No GPU activity"], performance, right=range(1, 8))}
 
-Each engine ran the same {first['config']['runs']['requests']} requests, one at a time over HTTP, in {first['config']['runs']['clean']} separate server processes; the reference is `{reference}`. Kernel time and GPU idle share come from each engine's separate Nsight run; see its report for the definitions.
+Each engine ran the same {first['scenario'].runs.requests} requests, one at a time over HTTP, in {first['scenario'].runs.clean} separate server processes; the reference is `{reference}`. Kernel time and GPU idle share come from each engine's separate Nsight run; see its report for the definitions.
 
 ## Output agreement with {reference}
 

@@ -2,13 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """report.md from the run results and the trace summary.
 
-Every number is measured or observed at runtime; engine settings are copied
-verbatim from the configuration rather than interpreted.
+Every number is measured or observed at runtime; solution settings are copied
+verbatim from the configuration rather than interpreted. The context carries the
+typed Scenario and Solution from bench.config.
 """
 
 import json
 from collections import defaultdict
 
+import yaml
 from bench import engines
 from bench.common import summarize
 from bench.sunburst import phase_key
@@ -43,12 +45,9 @@ def latency_rows(clean):
 
 def setup_rows(ctx):
     """Hardware, software and workload; runtime rows are read from the server."""
-    config, clean, catalog = ctx["config"], ctx["clean"], ctx["catalog"]
-    engine, workload, runs = (
-        engines.get(config["engine"]),
-        config["workload"],
-        config["runs"],
-    )
+    solution, clean, catalog = ctx["solution"], ctx["clean"], ctx["catalog"]
+    engine = engines.get(solution.engine)
+    workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
     machine, cpus, runtime = clean[0], ctx["cpus"], clean[0]["runtime"]
     manifest = ctx["manifest"]
     model = manifest["model"]
@@ -56,8 +55,8 @@ def setup_rows(ctx):
     cpu = f"{machine['cpu']}; server CPUs {cpus['server']}, client CPUs "
     attention = runtime["attention"]
     backends = f"prefill {attention['prefill']}; decode {attention['decode']}"
-    inputs = f"synthetic token IDs (seed {workload['seed']}, special tokens excluded)"
-    inputs += f"; {runs['warmups']} warmup + {runs['requests']} measured requests"
+    inputs = f"synthetic token IDs (seed {workload.seed}, special tokens excluded)"
+    inputs += f"; {runs.warmups} warmup + {runs.requests} measured requests"
     rows = [
         ["GPU", f"{machine['gpu']} (driver {machine['driver']})"],
         ["CPU", cpu + cpus["client"]],
@@ -69,7 +68,7 @@ def setup_rows(ctx):
         ["Model", f"{model['id']} @ `{model['revision'][:12]}`, bfloat16"],
         ["Workload", inputs + " per run"],
     ]
-    rows += engine.setup_rows(config)
+    rows += engine.setup_rows(solution)
     if catalog:
         checked = sum(result["catalog_beams"] for result in clean + [ctx["profile"]])
         text = f"{catalog['name']}: {catalog['items']:,} items, sha256 "
@@ -116,16 +115,16 @@ def reproduce_rows(manifest):
         ["Model", f"{model['id']} @ `{model['revision']}`; SHA-256 {files}"],
         [
             "Config SHA-256",
-            f"benchmark `{manifest['configs']['benchmark'][:12]}`, engine `{manifest['configs']['engine'][:12]}`",
+            f"scenario `{manifest['configs']['scenario'][:12]}`, solution `{manifest['configs']['solution'][:12]}`",
         ],
         ["Nsight Systems", manifest["nsys"] or "unknown"],
     ]
 
 
 def render(ctx):
-    config, clean, trace = ctx["config"], ctx["clean"], ctx["trace"]
-    engine = engines.get(config["engine"])
-    workload, runs = config["workload"], config["runs"]
+    solution, clean, trace = ctx["solution"], ctx["clean"], ctx["trace"]
+    engine = engines.get(solution.engine)
+    workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
     requests = trace["requests"]
 
     def per_request(ns):
@@ -140,8 +139,8 @@ def render(ctx):
     idle = trace["busy_ns"]["idle"]
     catalog = ctx["catalog"]
     scope = (
-        f"{ctx['model']} · context {workload['context_length']:,} · beam width "
-        f"{workload['beam_width']} · {workload['output_tokens']} output tokens"
+        f"{ctx['model']} · context {workload.context_length:,} · beam width "
+        f"{workload.beam_width} · {workload.output_tokens} output tokens"
     )
     if catalog:
         scope += f" · catalog of {catalog['items']:,} items"
@@ -171,15 +170,15 @@ def render(ctx):
         for name, family, ns, launches in trace["top"]
     ]
     setup = setup_rows(ctx)
-    settings = {"env": config["env"]}
-    if "server_settings" in config:
-        settings["server_settings"] = config["server_settings"]
+    settings = {"env": solution.env}
+    if solution.server_settings is not None:
+        settings["server_settings"] = solution.server_settings
 
     return f"""# {engine.title} HTTP beam-search benchmark
 
 {scope}
 
-- **Latency:** mean {total['mean']:.3f} ms, p99 {total['p99']:.3f} ms over {total['n']:,} requests ({runs['clean']} server process{'es' if runs['clean'] > 1 else ''} × {runs['requests']}), {throughput:.2f} requests/s at concurrency 1.
+- **Latency:** mean {total['mean']:.3f} ms, p99 {total['p99']:.3f} ms over {total['n']:,} requests ({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests}), {throughput:.2f} requests/s at concurrency 1.
 - **GPU profile:** {per_request(kernel_ns):.3f} ms of kernel time per request; the largest section is {top_phase} `{top_section}` ({per_request(top_ns):.3f} ms, {100 * top_ns / kernel_ns:.1f}%). No GPU activity is traced for {per_request(idle):.3f} ms ({100 * idle / window_ns:.1f}%) of the {per_request(window_ns):.3f} ms server window.
 
 ## Latency
@@ -190,7 +189,7 @@ The client times each request from JSON encoding to the parsed response, one req
 
 ## GPU profile
 
-A separate server process ran under Nsight Systems; the capture holds {requests} requests sent after {runs['warmups']} warmups. Trace: [profile.nsys-rep](profile.nsys-rep).
+A separate server process ran under Nsight Systems; the capture holds {requests} requests sent after {runs.warmups} warmups. Trace: [profile.nsys-rep](profile.nsys-rep).
 
 ![GPU kernel time per request](sunburst.svg)
 
@@ -210,10 +209,10 @@ The server window is the request handler (NVTX `bench/request`). Kernel time add
 
 {table(["", ""], setup)}
 
-<details><summary>Engine settings passed to the server</summary>
+<details><summary>Solution settings passed to the server</summary>
 
-```json
-{json.dumps(settings, indent=2)}
+```yaml
+{yaml.safe_dump(settings, sort_keys=False).rstrip()}
 ```
 
 </details>

@@ -20,7 +20,9 @@ TOP = 12  # kernels listed in the report
 # Kernel symbol substrings (lowercase) per operation family; the first match wins.
 # Only what a kernel name reveals: GEMMs of different layers (QKV, MLP, LM head)
 # look alike, so they share "linear"; phase and section say where a kernel ran.
-FAMILIES = [(line.split()[0], line.split()[1:]) for line in """
+FAMILIES = [
+    (line.split()[0], line.split()[1:])
+    for line in """
     attention_merge  mergestate merge_state combine
     attention        attention flash_fwd flashfwd batchdecodewith batchprefillwith
     linear           gemm gemv splitkreduce split_k_reduce
@@ -37,7 +39,8 @@ FAMILIES = [(line.split()[0], line.split()[1:]) for line in """
     reduction        reduce scan
     math             exp_kernel log_kernel pow_kernel sqrt_kernel
     elementwise      elementwise functor
-    """.strip().splitlines()]
+    """.strip().splitlines()
+]
 
 
 def family(name):

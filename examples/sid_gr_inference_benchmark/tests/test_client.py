@@ -7,7 +7,6 @@ import subprocess
 import sys
 
 import pytest
-
 from bench import client, engines
 from bench.common import read_json, write_json
 

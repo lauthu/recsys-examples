@@ -20,7 +20,7 @@ images/build.sh sid-gr /path/to/sglang_beam_search   # at af4e3f4
 ```
 
 Images are tagged `sid-gr-bench:ENGINE`; pass that tag as the `IMAGE` of
-`--engine`. The runner never pulls or builds images. It records each image's ID,
+`--solution`. The runner never pulls or builds images. It records each image's ID,
 tags, repository digests and base-image labels in the report. A local build gets a
 new ID every time, so the recipe and the pinned base digest are the reproducible
 parts, together with the source commit and the package versions the report reads

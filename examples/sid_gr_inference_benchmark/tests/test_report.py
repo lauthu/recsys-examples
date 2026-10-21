@@ -4,11 +4,12 @@ import json
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
+from types import SimpleNamespace
 
 import pytest
-
 from bench import report, sunburst
 from bench.common import quantile, summarize
+from bench.config import Runs, Solution, Source, Workload
 
 WORK = [
     ["prefill", "model", "linear", 6_000_000],
@@ -107,7 +108,7 @@ MANIFEST = {
     },
     "benchmark_code": "abc123",
     "dockerfile": "images/Dockerfile.engine",
-    "configs": {"benchmark": "1" * 64, "engine": "2" * 64},
+    "configs": {"scenario": "1" * 64, "solution": "2" * 64},
     "nsys": "NVIDIA Nsight Systems version 2026.4",
 }
 
@@ -138,19 +139,21 @@ def context(engine, **overrides):
         }
         for i in (1, 2)
     ]
-    config = {
-        "engine": engine,
-        "env": {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "true"},
-        "workload": {
-            "context_length": 2048,
-            "beam_width": 256,
-            "output_tokens": 3,
-            "seed": 42,
-        },
-        "runs": {"clean": 2, "requests": 4, "warmups": 1, "profile_requests": 2},
-    }
+    scenario = SimpleNamespace(
+        workload=Workload(
+            context_length=2048, beam_width=256, output_tokens=3, seed=42
+        ),
+        runs=Runs(clean=2, requests=4, warmups=1, profile_requests=2),
+    )
+    solution = Solution(
+        engine=engine,
+        source=Source(url="https://github.com/example/engine", commit="c" * 40),
+        env={"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "true"},
+        server_settings=None if engine == "sid-gr" else {"page_size": 1},
+    )
     ctx = {
-        "config": config,
+        "scenario": scenario,
+        "solution": solution,
         "clean": clean,
         "profile": {**clean[0], "catalog_beams": 4},
         "trace": TRACE,
@@ -197,6 +200,13 @@ def test_report_prints_the_pins_that_reproduce_the_run():
     assert "Qwen/Qwen3-0.6B @ `eeeeeeeeeeee`" in text
     assert "NVIDIA Nsight Systems version 2026.4" in text
     assert '"benchmark_code": "abc123"' in text  # the JSON copy
+
+
+def test_report_copies_the_solution_settings_as_yaml():
+    text = report.render(context("sglang-sidtrie"))
+    assert "```yaml\nenv:\n  SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: 'true'\n" in text
+    assert "server_settings:\n  page_size: 1\n```" in text
+    assert "scenario `111111111111`, solution `222222222222`" in text
 
 
 def test_report_flags_an_unenforced_pin():

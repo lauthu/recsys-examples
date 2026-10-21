@@ -1,5 +1,5 @@
 # Build context: https://github.com/vedantjh2/sglang at
-# 646a7f5ce6f94be84237c50cd41bb2e7beca7788 (the commit in configs/sglang_sidtrie.json).
+# 646a7f5ce6f94be84237c50cd41bb2e7beca7788 (the commit in configs/solutions/sglang_sidtrie.yaml).
 # docker build -f images/Dockerfile.sglang-sidtrie \
 #   -t sid-gr-bench:sglang-sidtrie "$SGLANG_SIDTRIE_SOURCE"
 #

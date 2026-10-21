@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Benchmark HTTP beam-search engines on one workload, each in Docker.
+"""Benchmark HTTP beam-search solutions on one scenario, each in Docker.
 
-Every clean run and the profiled run is a fresh container and server process.
-Each engine's directory receives report.md, sunburst.svg and profile.nsys-rep;
-with several engines, OUTPUT also gets comparison.md. Intermediate files are
+A scenario (configs/scenarios/*.yaml) fixes the model, workload and runs; a
+solution (configs/solutions/*.yaml) fixes how one engine is launched. Every clean run and the profiled run is a fresh container and server process.
+Each solution's directory receives report.md, sunburst.svg and profile.nsys-rep;
+with several solutions, OUTPUT also gets comparison.md. Intermediate files are
 kept in .work only when a run fails.
 """
 
@@ -18,12 +19,19 @@ import signal
 import subprocess
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from bench import catalog, compare, provenance, report, sunburst, trace
 from bench.common import read_json, write_json
-from bench.config import load_benchmark, load_engine, load_model, make_workload
+from bench.config import (
+    Scenario,
+    Solution,
+    load_model,
+    load_scenario,
+    load_solution,
+    make_workload,
+)
 from bench.engines import fail
 
 ROOT = Path(__file__).resolve().parent
@@ -37,15 +45,16 @@ CACHE_ENV = """XDG_CACHE_HOME HF_HOME TORCH_HOME TORCH_EXTENSIONS_DIR TRITON_CAC
 
 @dataclass
 class Run:
-    """One engine to measure: its config, source checkout, image and output."""
+    """One solution to measure: its configs, source checkout, image and output."""
 
-    name: str
+    name: str  # the solution file name without .yaml
     engine: object
-    config: dict  # benchmark and engine configuration merged, as the report shows it
+    scenario: Scenario
+    solution: Solution
     source: Path
     image: str
     output: Path
-    config_path: Path | None = None
+    solution_path: Path | None = None
     manifest: dict | None = None  # source and image identity, set before the runs
 
     @property
@@ -96,7 +105,7 @@ def input_state(args, run):
 
 
 def docker_command(args, run, cache, image, name, phase):
-    engine, config = run.engine, run.config
+    engine, scenario = run.engine, run.scenario
     model = "/model-source" if engine.model_view else "/model"
     mounts = [(BENCH, "/benchmark-tools/bench", True), (run.work, "/work", False)]
     mounts += [(cache, "/cache", False), (run.source, engine.mount, True)]
@@ -107,9 +116,9 @@ def docker_command(args, run, cache, image, name, phase):
     env.update(HOME="/cache/home", USER="benchmark", LOGNAME="benchmark")
     env.update(PYTHONPATH="/benchmark-tools", PYTHONDONTWRITEBYTECODE="1")
     env.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
-    cpus = cpu_list(config["cpus"]["server"] + config["cpus"]["client"])
+    cpus = cpu_list(scenario.cpus.server + scenario.cpus.client)
     argv = ["docker", "run", "--rm", "--init", "--name", name, "--label", LABEL]
-    argv += ["--network", "none", "--gpus", f"device={config['gpu']}"]
+    argv += ["--network", "none", "--gpus", f"device={scenario.gpu}"]
     argv += ["--cpuset-cpus", cpus, "--user", f"{os.getuid()}:{os.getgid()}"]
     argv += ["--shm-size", "4g", "--cap-add", "SYS_PTRACE"]
     argv += ["--security-opt", "seccomp=unconfined"]
@@ -136,16 +145,16 @@ def run_container(argv, name, log):
 
 def prepare(args, run, model_config, workload_rows):
     """Write plan.json, the workload and the engine's catalog files."""
-    engine, config, work = run.engine, run.config, run.work
-    workload, runs = config["workload"], config["runs"]
+    engine, solution, work = run.engine, run.solution, run.work
+    workload, runs = run.scenario.workload, run.scenario.runs
     vocab = model_config["vocab_size"]
     plan_catalog, info = None, None
     if args.catalog:
         data = args.catalog.read_bytes()
         paths, info = catalog.parse(
             data,
-            output_tokens=workload["output_tokens"],
-            beam_width=workload["beam_width"],
+            output_tokens=workload.output_tokens,
+            beam_width=workload.beam_width,
             vocab_size=vocab,
         )
         info["name"] = args.catalog.name
@@ -157,11 +166,11 @@ def prepare(args, run, model_config, workload_rows):
             for item in args.model.iterdir():
                 if item.name != engine.catalog_file:
                     (view / item.name).symlink_to(f"/model-source/{item.name}")
-            native = engine.convert_catalog(paths, config, vocab)
+            native = engine.convert_catalog(paths, solution, vocab)
             (view / engine.catalog_file).write_bytes(native)
         elif engine.catalog_file:
             source = f"/work/{engine.catalog_file}"
-            native = engine.convert_catalog(paths, config, vocab)
+            native = engine.convert_catalog(paths, solution, vocab)
             (work / engine.catalog_file).write_bytes(native)
         jsonl = "/work/catalog.jsonl"
         plan_catalog = dict(path=jsonl, server_path=jsonl, server_source=source)
@@ -169,11 +178,13 @@ def prepare(args, run, model_config, workload_rows):
     elif engine.catalog_required:
         fail(f"{engine.name} needs --catalog")
     write_json(work / "workload.json", workload_rows)
-    plan = {"engine": engine.name, "workload": workload, "vocab_size": vocab}
-    plan.update({key: runs[key] for key in ("warmups", "requests", "profile_requests")})
-    plan.update(env=config["env"], server_settings=config.get("server_settings"))
-    cpus = config["cpus"]
-    plan.update(server_cpus=cpus["server"], client_cpus=cpus["client"])
+    # The container reads this generated JSON; it never sees the YAML files.
+    plan = {"engine": engine.name, "workload": asdict(workload), "vocab_size": vocab}
+    plan.update(warmups=runs.warmups, requests=runs.requests)
+    plan.update(profile_requests=runs.profile_requests)
+    plan.update(env=solution.env, server_settings=solution.server_settings)
+    cpus = run.scenario.cpus
+    plan.update(server_cpus=cpus.server, client_cpus=cpus.client)
     plan.update(workload_path="/work/workload.json", catalog=plan_catalog)
     write_json(work / "plan.json", plan)
     return info
@@ -182,16 +193,19 @@ def prepare(args, run, model_config, workload_rows):
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--engine",
+        "--solution",
         nargs=3,
         action="append",
         required=True,
         metavar=("CONFIG", "SOURCE", "IMAGE"),
-        help="engine config, its source checkout and a local image with its "
-        "dependencies and nsys; repeat to compare engines (see --reference)",
+        help="solution YAML, its engine source checkout and a local image with its "
+        "dependencies and nsys; repeat to compare solutions (see --reference)",
     )
     parser.add_argument(
-        "--benchmark", type=Path, default=ROOT / "configs/benchmark.json"
+        "--scenario",
+        type=Path,
+        default=ROOT / "configs/scenarios/qwen3_0_6b.yaml",
+        help="scenario YAML: model pin, workload, runs, CPUs and GPU",
     )
     parser.add_argument("--model", type=Path, required=True, help="bf16 checkpoint")
     parser.add_argument("--catalog", type=Path, help="JSONL items that constrain beams")
@@ -201,8 +215,8 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--reference",
-        help="engine config name the comparison measures against "
-        "(default: sglang if given, else the first engine)",
+        help="solution name (file name without .yaml) the comparison measures "
+        "against (default: sglang if given, else the first solution)",
     )
     parser.add_argument(
         "--allow-dirty",
@@ -212,41 +226,42 @@ def parse_args(argv):
     )
     parser.add_argument("--dry-run", action="store_true", help="print docker commands")
     args = parser.parse_args(argv)
-    for name in ("benchmark", "model", "catalog", "output", "cache_dir"):
+    for name in ("scenario", "model", "catalog", "output", "cache_dir"):
         if getattr(args, name):
             setattr(args, name, getattr(args, name).expanduser().resolve())
     return args
 
 
-def build_runs(args, benchmark):
+def build_runs(args, scenario):
     runs = []
-    for config_path, source, image in args.engine:
-        config_path = Path(config_path).expanduser().resolve()
-        engine, engine_config = load_engine(config_path, benchmark["workload"])
+    for solution_path, source, image in args.solution:
+        solution_path = Path(solution_path).expanduser().resolve()
+        engine, solution = load_solution(solution_path, scenario.workload)
         source = Path(source).expanduser().resolve()
         if not (source / engine.entry).is_file():
             fail(f"{source} is not {engine.source_label}: no {engine.entry}")
         if args.catalog and not engine.catalog_supported:
             fail(f"{engine.title} cannot constrain beams to a catalog; drop --catalog")
-        name = config_path.stem
-        output = args.output if len(args.engine) == 1 else args.output / name
-        config = {**benchmark, **engine_config}
-        runs.append(Run(name, engine, config, source, image, output, config_path))
+        name = solution_path.stem
+        output = args.output if len(args.solution) == 1 else args.output / name
+        runs.append(
+            Run(name, engine, scenario, solution, source, image, output, solution_path)
+        )
     if len({run.name for run in runs}) != len(runs):
-        fail("--engine configs need distinct file names")
+        fail("--solution configs need distinct file names")
     if args.reference and args.reference not in {run.name for run in runs}:
-        fail(f"--reference {args.reference} is not one of the --engine configs")
+        fail(f"--reference {args.reference} is not one of the --solution configs")
     return runs
 
 
 def main(argv=None):
     args = parse_args(argv)
-    benchmark = load_benchmark(args.benchmark)
-    model_config = load_model(args.model, benchmark["workload"])
-    runs = build_runs(args, benchmark)
+    scenario = load_scenario(args.scenario)
+    model_config = load_model(args.model, scenario.workload)
+    runs = build_runs(args, scenario)
     if args.output.exists() and any(args.output.iterdir()):
         fail(f"output directory {args.output} is not empty")
-    phases = [f"clean_{i}" for i in range(1, benchmark["runs"]["clean"] + 1)]
+    phases = [f"clean_{i}" for i in range(1, scenario.runs.clean + 1)]
     phases.append("profile")
     if args.dry_run:
         for run in runs:
@@ -263,19 +278,19 @@ def main(argv=None):
         run.manifest = {
             "source": provenance.verify_source(
                 run.source,
-                run.config["source"],
+                run.solution.source,
                 run.engine.fingerprint,
                 args.allow_dirty,
             ),
             "image": provenance.image_info(run.image),
         }
         run.image = run.manifest["image"]["id"]
-    model = provenance.verify_model(args.model, benchmark["model"])
+    model = provenance.verify_model(args.model, scenario.model)
     running = ["docker", "ps", "-q", "--filter", f"label={LABEL}"]
     busy = subprocess.run(running, capture_output=True, text=True, check=True).stdout
     if busy.split():
         fail(f"benchmark containers {busy.split()} are running; they would interfere")
-    rows = make_workload(benchmark, model_config)
+    rows = make_workload(scenario, model_config)
     finished = []
     for run in runs:
         print(f"=== {run.name}", flush=True)
@@ -287,7 +302,7 @@ def main(argv=None):
 
 
 def measure(args, run, phases, model_config, rows, model):
-    """Run every phase for one engine and write its three output files."""
+    """Run every phase for one solution and write its three output files."""
     image = run.image
     cache = args.cache_dir or args.output.parent / ".cache" / image.split(":")[-1][:12]
     (cache / "home").mkdir(parents=True, exist_ok=True)
@@ -314,15 +329,15 @@ def manifest(args, run, before, model, profile):
         "benchmark_code": before["tools"],
         "dockerfile": run.engine.dockerfile,
         "configs": {
-            "benchmark": provenance.sha256_file(args.benchmark),
-            "engine": provenance.sha256_file(run.config_path),
+            "scenario": provenance.sha256_file(args.scenario),
+            "solution": provenance.sha256_file(run.solution_path),
         },
         "nsys": profile.get("nsys"),
     }
 
 
 def write_outputs(args, run, phases, catalog_info, before, model):
-    work, config = run.work, run.config
+    work, cpus = run.work, run.scenario.cpus
     summary = trace.analyze(work / "profile/trace.sqlite")
     title = f"{run.engine.title} · {model['id'].split('/')[-1]}"
     subtitle = f"GPU kernel time per request, mean of {summary['requests']} profiled"
@@ -332,7 +347,8 @@ def write_outputs(args, run, phases, catalog_info, before, model):
     shutil.move(work / "profile/trace.nsys-rep", run.output / "profile.nsys-rep")
     clean = [read_json(work / phase / "result.json") for phase in phases[:-1]]
     context = {
-        "config": config,
+        "scenario": run.scenario,
+        "solution": run.solution,
         "clean": clean,
         "profile": read_json(work / "profile/result.json"),
         "trace": summary,
@@ -341,7 +357,7 @@ def write_outputs(args, run, phases, catalog_info, before, model):
         "manifest": manifest(
             args, run, before, model, read_json(work / "profile/result.json")
         ),
-        "cpus": {key: cpu_list(config["cpus"][key]) for key in ("server", "client")},
+        "cpus": {"server": cpu_list(cpus.server), "client": cpu_list(cpus.client)},
         "command": shlex.join(["python3", *sys.argv]),
         # The first clean run's beams per request, for the cross-engine comparison.
         "outputs": read_json(work / phases[0] / "outputs.json"),

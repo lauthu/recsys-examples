@@ -7,7 +7,9 @@ of branching on its name. To add an engine, subclass `Engine`, fill in the
 attributes and methods below and list it in `ENGINES`; nothing else changes.
 Standard library only: this module is imported on the host and in the container.
 
-Host side   config keys and validation, catalog and model preparation, mounts.
+Host side   solution sections and checks, catalog and model preparation, mounts;
+            these methods get the typed Solution and Workload from bench.config.
+Container   these methods get plan.json, which the runner generates from them.
 Server side launch command, readiness and profiler endpoints, request payload.
 Response    beam parsing, per-run observed checks, setup rows for the report.
 """
@@ -40,11 +42,8 @@ class Engine:
         "examples/sid-gr-inference",
         "corelib/gr_decode_atten",
     )
-    keys: tuple[str, ...] = (
-        "engine",
-        "source",
-        "env",
-    )  # exactly the keys an engine config has
+    # Optional solution sections this engine requires; it rejects the others.
+    sections: tuple[str, ...] = ()
     ready = "/pilot/ready"
     model_view = False  # the engine serves a generated copy of the checkpoint
     catalog_supported = True
@@ -53,10 +52,10 @@ class Engine:
     catalog_file: str | None = None
 
     # ---- host side -------------------------------------------------------
-    def validate(self, config, workload):
-        """Engine-specific configuration checks; raise ValueError."""
+    def validate(self, solution, workload):
+        """Engine-specific checks of a Solution against the Workload; raise ValueError."""
 
-    def convert_catalog(self, paths, config, vocab_size):
+    def convert_catalog(self, paths, solution, vocab_size):
         """Bytes of the engine's native catalog file (only if catalog_file is set)."""
         raise NotImplementedError
 
@@ -94,7 +93,7 @@ class Engine:
     def graph_usage(self, clean):
         raise NotImplementedError
 
-    def setup_rows(self, config):
+    def setup_rows(self, solution):
         """Extra (label, text) rows for the report's setup table."""
         return []
 
@@ -188,10 +187,10 @@ class SGLang(Engine):
     entry = "python/sglang/srt/entrypoints/http_server.py"
     mount = "/sglang"
     fingerprint: tuple[str, ...] = ("python",)
-    keys: tuple[str, ...] = ("engine", "source", "env", "server_settings")
+    sections: tuple[str, ...] = ("server_settings",)
 
-    def validate(self, config, workload):
-        settings = config["server_settings"]
+    def validate(self, solution, workload):
+        settings = solution.server_settings
         managed = {"model_path", "host", "port", "beam_search_constraint_dict"}
         if managed & settings.keys():
             fail(f"server_settings must not set {sorted(managed & settings.keys())}")
@@ -201,8 +200,8 @@ class SGLang(Engine):
             fail("server_settings need tp_size 1 and disable_overlap_schedule true")
         # Graph sizes are fixed by the workload; a mismatch silently runs eager.
         for key, expected in (
-            ("cuda_graph_bs_decode", workload["beam_width"]),
-            ("cuda_graph_bs_prefill", workload["context_length"]),
+            ("cuda_graph_bs_decode", workload.beam_width),
+            ("cuda_graph_bs_prefill", workload.context_length),
         ):
             if key in settings and settings[key] != [expected]:
                 fail(f"server_settings.{key} must be [{expected}] for this workload")
@@ -282,12 +281,12 @@ class BeamSearchNew(SGLang):
     title = "SGLang beam-search-new"
     catalog_file = "catalog.pkl"
 
-    def validate(self, config, workload):
-        super().validate(config, workload)
-        if not config["server_settings"].get("enable_beam_search"):
+    def validate(self, solution, workload):
+        super().validate(solution, workload)
+        if not solution.server_settings.get("enable_beam_search"):
             fail("sglang-beam-search-new needs server_settings.enable_beam_search true")
 
-    def convert_catalog(self, paths, config, vocab_size):
+    def convert_catalog(self, paths, solution, vocab_size):
         return catalogs.sglang_trie(paths)
 
     def sampling(self, workload):
@@ -319,32 +318,32 @@ class SidTrie(Native):
     name = "sglang-sidtrie"
     dockerfile = "images/Dockerfile.sglang-sidtrie"
     title = "SGLang SIDTrie"
-    keys = ("engine", "source", "env", "server_settings", "trie_config")
+    sections = ("server_settings", "trie_config")
     model_view = True
     catalog_required = True
     catalog_file = SIDTRIE_FILE
 
-    def validate(self, config, workload):
-        super().validate(config, workload)
+    def validate(self, solution, workload):
+        super().validate(solution, workload)
         legacy = {"enable_beam_search", "enable_beam_cascade_attention"}
-        legacy &= config["server_settings"].keys()
+        legacy &= solution.server_settings.keys()
         if legacy:
             fail(
                 f"sglang-sidtrie uses the native beam_width API; remove {sorted(legacy)}"
             )
-        if workload["output_tokens"] != 3:
+        if workload.output_tokens != 3:
             fail("sglang-sidtrie needs workload.output_tokens 3 (three SID codebooks)")
-        if config["env"].get(SHARED, "false") not in ("true", "false"):
+        if solution.env.get(SHARED, "false") not in ("true", "false"):
             fail(f'{SHARED} must be "true" or "false"')
-        trie = config["trie_config"]
-        if not isinstance(trie, dict) or set(trie) != {"token_start", "codebook_size"}:
-            fail("trie_config needs exactly the keys ['codebook_size', 'token_start']")
-        for key, minimum in (("token_start", 0), ("codebook_size", 1)):
-            if type(trie[key]) is not int or trie[key] < minimum:
-                fail(f"trie_config.{key} must be an integer >= {minimum}")
 
-    def convert_catalog(self, paths, config, vocab_size):
-        return catalogs.sidtrie(paths, **config["trie_config"], vocab_size=vocab_size)
+    def convert_catalog(self, paths, solution, vocab_size):
+        trie = solution.trie_config
+        return catalogs.sidtrie(
+            paths,
+            token_start=trie.token_start,
+            codebook_size=trie.codebook_size,
+            vocab_size=vocab_size,
+        )
 
     def server(self, plan, port, profile):
         argv, env = super().server(plan, port, profile)
@@ -386,9 +385,9 @@ class SidTrie(Native):
         if problems:
             raise RuntimeError("SIDTrie check failed: " + "; ".join(problems))
 
-    def setup_rows(self, config):
+    def setup_rows(self, solution):
         text = "compact trie output head, full-vocabulary normalizer and device beam "
-        state = "on" if self.shared(config["env"]) else "off"
+        state = "on" if self.shared(solution.env) else "off"
         return [
             (
                 "SIDTrie (observed)",

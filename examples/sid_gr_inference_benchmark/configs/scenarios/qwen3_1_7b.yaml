@@ -1,0 +1,31 @@
+# Scenario: what is measured. Every solution in one run gets this file.
+# Loaded into bench.config.Scenario; unknown keys and wrong types fail.
+
+model:
+  id: Qwen/Qwen3-1.7B
+  # https://huggingface.co/Qwen/Qwen3-1.7B/tree/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+  revision: "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
+  # The local checkpoint must match these files exactly.
+  sha256:
+    config.json: "1ddb5b89ebc90dcb417a45c213d818577e65976454d29385c8f6140771d95197"
+    model-00001-of-00002.safetensors: "169ad53ec313c3a34b06c0809216e4fc072cce444a5d4ff2b59690d064130ed5"
+    model-00002-of-00002.safetensors: "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"
+    model.safetensors.index.json: "0d660e94b165eb912669a5249dff44b83188c4777a07ddb9611fb78d91b0578d"
+
+workload:
+  context_length: 2048  # prompt tokens per request
+  beam_width: 256
+  output_tokens: 3      # one from prefill, two decode steps
+  seed: 42              # seeds the synthetic token IDs
+
+runs:
+  clean: 3              # separate server processes measured for latency
+  requests: 200         # measured requests per process
+  warmups: 10           # unmeasured requests before them
+  profile_requests: 3   # requests captured by the profiled process
+
+cpus:                   # disjoint; the container is limited to both
+  server: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  client: [10]
+
+gpu: "0"                # one device index or a GPU UUID
