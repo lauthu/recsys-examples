@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 import json
+import re
 from argparse import Namespace
 
 import pytest
@@ -318,13 +319,14 @@ def test_reference_must_be_a_given_engine(tmp_path):
         runner.main(argv)
 
 
-def test_every_engine_names_an_image_recipe_that_exists():
+def test_every_engine_has_an_image_recipe_and_a_build_case():
     build = (runner.ROOT / "images/build.sh").read_text()
+    cases = re.findall(r"^  ([\w| -]+)\)$", build, re.M)
+    built = {name.strip() for case in cases for name in case.split("|")}
+    assert built == set(engines.ENGINES)
     for engine in engines.ENGINES.values():
         if engine.recipe.startswith("images/"):
             assert (runner.ROOT / engine.recipe).is_file(), engine.name
-        else:  # built from source by build.sh with the engine's own recipe
-            assert f'"$engine" == {engine.name} ' in build, engine.name
 
 
 def finished_run(tmp_path, name):

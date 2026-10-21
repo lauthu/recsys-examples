@@ -7,6 +7,7 @@ engine: sid-gr
 source:
   url: https://github.com/NVIDIA/recsys-examples
   commit: "c6eba911231d69d8cabaab94626bcb5a25c5a719"
+  branch: main   # the image tag names it
 
 # Server environment, passed verbatim. Values are strings: quote numbers.
 env:

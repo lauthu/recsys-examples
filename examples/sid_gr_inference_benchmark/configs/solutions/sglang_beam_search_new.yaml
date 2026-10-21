@@ -6,6 +6,7 @@ engine: sglang-beam-search-new
 source:
   url: https://github.com/cswuyg/sglang
   commit: "df191d672f1955d273bf56fe21684b60dcf6a891"
+  branch: feature/beam_search_update_0801   # the image tag names it
 
 # Server environment, passed verbatim. Values are strings: quote numbers.
 env:

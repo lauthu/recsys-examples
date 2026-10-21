@@ -56,13 +56,16 @@ Requirements: Linux, Python 3.10+ with PyYAML, Docker with the NVIDIA runtime, t
 Qwen3 checkpoint, each engine's source at its pinned commit and a local image
 built from [images/](images/README.md). The source is mounted read-only and the
 server must import it from the mount, so an image only has to supply the
-dependencies; an image built from source also contains the same commit.
+dependencies. A dev branch's image is built from its pinned commit and tagged
+with repository, branch and commit.
 
 ```bash
 cd examples/sid_gr_inference_benchmark
 
 # Build the images once (see images/README.md)
 images/build.sh sglang
+images/build.sh sid-gr ../..
+images/build.sh sglang-beam-search-new /path/to/beam_new
 
 # One solution: public SGLang
 python3 run_benchmark.py --model /path/to/Qwen3-0.6B --output logs/sglang \
@@ -71,8 +74,10 @@ python3 run_benchmark.py --model /path/to/Qwen3-0.6B --output logs/sglang \
 # Compare solutions; public SGLang is the reference unless --reference says otherwise
 python3 run_benchmark.py --model /path/to/Qwen3-0.6B --output logs/compare \
   --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang \
-  --solution configs/solutions/sid_gr.yaml ../.. sid-gr-bench:sid-gr \
-  --solution configs/solutions/sglang_beam_search_new.yaml /path/to/beam_new sid-gr-bench:sglang-beam-search-new
+  --solution configs/solutions/sid_gr.yaml ../.. \
+    nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d \
+  --solution configs/solutions/sglang_beam_search_new.yaml /path/to/beam_new \
+    cswuyg-sglang:feature-beam_search_update_0801-df191d672f19
 ```
 
 The scenario defaults to `configs/scenarios/qwen3_0_6b.yaml`; for Qwen3-1.7B add

@@ -26,6 +26,10 @@ from bench.common import call
 SIDTRIE_FILE = "trie_output_head.safetensors"
 SID_GR_SCRIPT = "/source/examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
 SHARED = "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION"
+# Image recipe of the SGLang dev branches, which images/build.sh builds from source.
+FROM_SOURCE = (
+    "docker/Dockerfile of the source, target framework_final (images/build.sh)"
+)
 # Settings the container only sees through the plan, never from the image.
 AMBIENT = ("GR_", "SGLANG_", "MODEL_")
 
@@ -282,7 +286,7 @@ class SGLang(Engine):
 
 class BeamSearchNew(SGLang):
     name = "sglang-beam-search-new"
-    recipe = "images/Dockerfile.sglang-beam-search-new"
+    recipe = FROM_SOURCE
     title = "SGLang beam-search-new"
     catalog_file = "catalog.pkl"
 
@@ -343,7 +347,7 @@ class SGLangPublic(Native):
 
 class SidTrie(Native):
     name = "sglang-sidtrie"
-    recipe = "docker/Dockerfile of the source, target framework_final (images/build.sh)"
+    recipe = FROM_SOURCE
     title = "SGLang SIDTrie"
     sections = ("server_settings", "trie_config")
     model_view = True
