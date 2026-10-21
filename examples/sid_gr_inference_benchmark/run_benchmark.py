@@ -106,11 +106,12 @@ def input_state(args, run):
 
 def docker_command(args, run, cache, image, name, phase):
     engine, scenario = run.engine, run.scenario
-    model = "/model-source" if engine.model_view else "/model"
+    view = engine.model_view and args.catalog
+    model = "/model-source" if view else "/model"
     mounts = [(BENCH, "/benchmark-tools/bench", True), (run.work, "/work", False)]
     mounts += [(cache, "/cache", False), (run.source, engine.mount, True)]
     mounts += [(args.model, model, True)]
-    if engine.model_view:  # links to /model-source plus the generated trie head
+    if view:  # links to /model-source plus the generated trie head
         mounts.append((run.work / "model", "/model", True))
     env = {key: f"/cache/{key.lower()}" for key in CACHE_ENV}
     env.update(HOME="/cache/home", USER="benchmark", LOGNAME="benchmark")
@@ -175,8 +176,6 @@ def prepare(args, run, model_config, workload_rows):
         jsonl = "/work/catalog.jsonl"
         plan_catalog = dict(path=jsonl, server_path=jsonl, server_source=source)
         plan_catalog["items"] = info["items"]
-    elif engine.catalog_required:
-        fail(f"{engine.name} needs --catalog")
     write_json(work / "workload.json", workload_rows)
     # The container reads this generated JSON; it never sees the YAML files.
     plan = {"engine": engine.name, "workload": asdict(workload), "vocab_size": vocab}

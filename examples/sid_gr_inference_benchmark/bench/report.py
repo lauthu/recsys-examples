@@ -75,7 +75,7 @@ def setup_rows(ctx):
         ["Model", f"{model['id']} @ `{model['revision'][:12]}`, bfloat16"],
         ["Workload", inputs],
     ]
-    rows += engine.setup_rows(solution)
+    rows += engine.setup_rows(solution, catalog)
     if catalog:
         checked = sum(result["catalog_beams"] for result in clean + [ctx["profile"]])
         text = f"{catalog['name']}: {catalog['items']:,} items, sha256 "

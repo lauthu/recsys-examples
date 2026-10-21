@@ -200,7 +200,8 @@ def test_vedantjh2_checks(shared, changes, message):
         "vedantjh2.shared_attention": 0,
         **changes,
     }
-    plan = {"env": {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": shared}}
+    env = {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": shared}
+    plan = {"env": env, "catalog": {"items": 256}}
     engine = engines.get("vedantjh2-sglang")
     if message is None:
         engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
@@ -209,6 +210,27 @@ def test_vedantjh2_checks(shared, changes, message):
             engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
     with pytest.raises(RuntimeError, match="length penalty"):
         engine.check_counters(plan, counters, 4, {"length_penalty": 0.5})
+
+
+@pytest.mark.parametrize(
+    "name", ["vedantjh2.compact_decode", "vedantjh2.exact_normalizer", None]
+)
+def test_vedantjh2_without_a_catalog_must_not_run_the_trie_head(name):
+    counters = {
+        "forward.decode.graph": 8,
+        "forward.decode.eager": 0,
+        "vedantjh2.compact_decode": 0,
+        "vedantjh2.exact_normalizer": 0,
+        "vedantjh2.device_history": 0,
+        "vedantjh2.shared_attention": 0,
+    }
+    plan = {"env": {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"}, "catalog": None}
+    engine = engines.get("vedantjh2-sglang")
+    if name is None:
+        engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+        return
+    with pytest.raises(RuntimeError, match="trie output head ran without a catalog"):
+        engine.check_counters(plan, {**counters, name: 8}, 4, {"length_penalty": 1.0})
 
 
 def test_public_sglang_uses_native_beam_width_and_checks_the_length_penalty():

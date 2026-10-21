@@ -222,7 +222,12 @@ def make_run(tmp_path, name, output=None):
 def test_docker_command_isolates_labels_and_mounts(tmp_path):
     run = make_run(tmp_path, VEDANTJH2, tmp_path)
     argv = runner.docker_command(
-        arguments(tmp_path), run, tmp_path / "c", "img", "bench-x", "profile"
+        arguments(tmp_path, write_catalog(tmp_path)),
+        run,
+        tmp_path / "c",
+        "img",
+        "bench-x",
+        "profile",
     )
     joined = " ".join(argv)
     assert argv[:8] == [
@@ -288,11 +293,18 @@ def test_prepare_converts_the_catalog_to_each_engines_native_form(tmp_path):
         assert (run.work / native).is_file()
 
 
-def test_vedantjh2_requires_a_catalog(tmp_path):
-    run = make_run(tmp_path, VEDANTJH2)
+def test_vedantjh2_without_a_catalog_serves_the_checkpoint_as_is(tmp_path):
+    run = make_run(tmp_path, VEDANTJH2, tmp_path)
     run.work.mkdir(parents=True)
-    with pytest.raises(ValueError, match="needs --catalog"):
-        runner.prepare(arguments(tmp_path), run, {"vocab_size": 5000}, [])
+    runner.prepare(arguments(tmp_path), run, {"vocab_size": 5000}, [])
+    assert read_json(run.work / "plan.json")["catalog"] is None
+    assert not (run.work / "model").exists()
+    argv = runner.docker_command(
+        arguments(tmp_path), run, tmp_path / "c", "img", "bench-x", "clean_1"
+    )
+    joined = " ".join(argv)
+    assert f"src={tmp_path}/model,dst=/model,readonly" in joined
+    assert "/model-source" not in joined
 
 
 def fake_sources(tmp_path):

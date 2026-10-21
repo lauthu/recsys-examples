@@ -54,9 +54,9 @@ class Engine:
     # Optional solution sections this engine requires; it rejects the others.
     sections: tuple[str, ...] = ()
     ready = "/pilot/ready"
-    model_view = False  # the engine serves a generated copy of the checkpoint
+    # With a catalog, the engine serves a generated copy of the checkpoint.
+    model_view = False
     catalog_supported = True
-    catalog_required = False
     # The catalog's native storage format: generated file name, or None to read JSONL.
     catalog_file: str | None = None
 
@@ -102,7 +102,7 @@ class Engine:
     def graph_usage(self, clean):
         raise NotImplementedError
 
-    def setup_rows(self, solution):
+    def setup_rows(self, solution, catalog):
         """Extra (label, text) rows for the report's setup table."""
         return []
 
@@ -364,7 +364,6 @@ class Vedantjh2SGLang(Native):
     title = "vedantjh2/sglang (trie-head)"
     sections = ("server_settings", "trie_config")
     model_view = True
-    catalog_required = True
     catalog_file = TRIE_HEAD_FILE
 
     def validate(self, solution, workload):
@@ -401,7 +400,8 @@ class Vedantjh2SGLang(Native):
         return env.get(SHARED, "false") == "true"
 
     def check_counters(self, plan, counters, requests, runtime):
-        """Every measured request must take the trie-head path that was requested."""
+        """Every measured request must take the path that was requested: the
+        trie output head exactly when there is a catalog."""
         decode = counters["forward.decode.graph"] + counters["forward.decode.eager"]
         shared = self.shared(plan["env"])
         problems = []
@@ -409,16 +409,21 @@ class Vedantjh2SGLang(Native):
             super().check_counters(plan, counters, requests, runtime)
         except RuntimeError as exc:
             problems.append(str(exc))
-        if decode <= 0 or counters["vedantjh2.compact_decode"] != decode:
-            problems.append(
-                "not every decode forward used the compact trie output head"
-            )
-        if counters["vedantjh2.exact_normalizer"] != decode:
-            problems.append(
-                "not every decode forward kept the full-vocabulary normalizer"
-            )
-        if counters["vedantjh2.device_history"] != requests:
-            problems.append("not every request finalized beams with device history")
+        trie = ("compact_decode", "exact_normalizer", "device_history")
+        if not plan["catalog"]:
+            if any(counters[f"vedantjh2.{name}"] for name in trie):
+                problems.append("the trie output head ran without a catalog")
+        else:
+            if decode <= 0 or counters["vedantjh2.compact_decode"] != decode:
+                problems.append(
+                    "not every decode forward used the compact trie output head"
+                )
+            if counters["vedantjh2.exact_normalizer"] != decode:
+                problems.append(
+                    "not every decode forward kept the full-vocabulary normalizer"
+                )
+            if counters["vedantjh2.device_history"] != requests:
+                problems.append("not every request finalized beams with device history")
         if shared and (
             counters["forward.decode.graph"]
             or counters["vedantjh2.shared_attention"] < counters["forward.decode.eager"]
@@ -431,13 +436,17 @@ class Vedantjh2SGLang(Native):
         if problems:
             raise RuntimeError("vedantjh2-sglang check failed: " + "; ".join(problems))
 
-    def setup_rows(self, solution):
-        text = "compact trie output head, full-vocabulary normalizer and device beam "
+    def setup_rows(self, solution, catalog):
+        if catalog:
+            text = "compact trie output head, full-vocabulary normalizer and device "
+            text += "beam history on every measured request"
+        else:
+            text = "off: no catalog"
         state = "on" if self.shared(solution.env) else "off"
         return [
             (
                 "Trie output head (observed)",
-                f"{text}history on every measured request; shared-context attention {state}",
+                f"{text}; shared-context attention {state}",
             )
         ]
 

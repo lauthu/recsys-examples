@@ -209,6 +209,12 @@ def test_vedantjh2_report_states_observed_paths_and_catalog():
     assert "shared-context attention on" in text
     assert "all 20 returned beams are catalog items" in text
     assert "catalog of 300 items" in text
+    assert "| Trie output head (observed) | compact trie output head" in text
+    text = report.render(context("vedantjh2-sglang"))
+    row = (
+        "| Trie output head (observed) | off: no catalog; shared-context attention on |"
+    )
+    assert row in text
 
 
 def test_report_states_the_observed_overlap_scheduler():

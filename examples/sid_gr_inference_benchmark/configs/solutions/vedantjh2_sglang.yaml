@@ -1,5 +1,5 @@
-# Solution: the vedantjh2/sglang fork, native beam_width API with a trie output head.
-# Loaded into bench.config.Solution. Needs --catalog.
+# Solution: the vedantjh2/sglang fork, native beam_width API; with --catalog it
+# decodes through its trie output head. Loaded into bench.config.Solution.
 
 engine: vedantjh2-sglang
 
@@ -37,7 +37,7 @@ server_settings:
   skip_server_warmup: true          # the client sends its own warmups
   log_level: warning
 
-# Catalog token layout: the token at depth d lies in
+# Catalog token layout, used with --catalog: the token at depth d lies in
 # [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
 trie_config:
   token_start: 1000

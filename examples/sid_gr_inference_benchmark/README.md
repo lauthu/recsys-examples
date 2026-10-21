@@ -9,7 +9,7 @@ the same seeded requests, the same checks and the same three outputs.
 | `sid-gr` | [SID-GR](../sid-gr-inference) | `n` beams |
 | `sglang` | Public [SGLang](https://github.com/sgl-project/sglang) v0.5.22 or newer | native `beam_width`; no catalog support |
 | `sglang-beam-search-new` | SGLang [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891) | `use_beam_search` |
-| `vedantjh2-sglang` | SGLang [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788) | native `beam_width` with a trie output head |
+| `vedantjh2-sglang` | SGLang [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788) | native `beam_width`; with a catalog, a trie output head |
 
 ## Outputs
 
@@ -179,7 +179,9 @@ gets the same paths in its native form: SID-GR loads the JSONL, SGLang
 beam-search-new a generated token-trie pickle, and vedantjh2-sglang a generated
 `trie_output_head.safetensors` placed next to links to the original checkpoint.
 For vedantjh2-sglang, the token at depth `d` must lie in
-`[token_start + d * codebook_size, token_start + (d + 1) * codebook_size)`.
+`[token_start + d * codebook_size, token_start + (d + 1) * codebook_size)`;
+without a catalog it serves the checkpoint as is, and the run fails if its trie
+output head runs anyway.
 
 The run fails unless the server reports the catalog as loaded and every returned
 beam is a catalog item. Public SGLang has no catalog support, so `--catalog` rejects it. SID-GR normalizes scores over the allowed tokens; both
