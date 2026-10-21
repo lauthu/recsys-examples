@@ -1,29 +1,28 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Launch SGLang's own HTTP server with benchmark hooks; not a separate server.
+"""Start SGLang's own HTTP server with the benchmark's declared patches.
 
     BENCH_ENGINE=<engine> python3 -m bench.server_sglang --plan /work/plan.json --port PORT
 
-This builds ServerArgs from the plan, patches a few SGLang methods in the HTTP
-and scheduler processes, then calls SGLang's http_server.launch_server. Requests
-go straight to SGLang's /generate; no proxy or extra hop. The hooks add:
+Compared with the image's native server (`python3 -m sglang.launch_server`):
 
-GET /pilot/ready    200 once the server status is Up
-GET /pilot/runtime  packages, attention backends, catalog and counters from the
-                    scheduler, which the client uses to fail a run whose
-                    requests did not take the configured path
-NVTX ranges         with BENCH_PROFILE=1 only, for the profile's phases/sections
+Same
+  - The server: SGLang's http_server.launch_server, run from the mounted source.
+    Requests go to SGLang's own /generate; there is no proxy or extra hop.
+  - ServerArgs: `server_settings` from the solution file verbatim, plus
+    model_path, host, port and, for beam-search-new with a catalog,
+    beam_search_constraint_dict.
 
-Latency runs keep only the counters: one wrapper on ModelRunner.forward and one
-on BeamGroup.finalize, about 0.6 µs per forward, so a few µs per request.
+Different, and nothing else
+  - ROUTES: two added GET routes (/pilot/ready, /pilot/runtime) and, when
+    profiling, wrappers on /generate, /start_profile and /stop_profile.
+  - PATCHES: the scheduler-process methods listed there. Hooks follow the rules
+    in bench/patching.py: original arguments and results, no GPU sync.
+  - Latency runs keep only the "always" entries, which count forwards and read
+    state (about 0.6 us per forward). "profile" entries exist only in the
+    profiled process and push NVTX ranges only while a capture is active.
 
-Counters start at zero: model forwards per phase in CUDA-graph or eager mode
-and, for the SIDTrie fork, compact output head, exact normalizer, device-side
-beam history and shared-context attention calls. ModelRunner.forward runs in
-Python for graph replays too, so forward counters see every forward; kernel
-wrappers such as shared-context attention only run in eager mode.
-With BENCH_PROFILE=1, NVTX ranges bench/request|phase|section are pushed only
-while a native /start_profile capture (activities=["CUDA_PROFILER"]) is active.
+server.log lists every applied patch at startup.
 """
 
 import argparse
@@ -35,33 +34,144 @@ import os
 import threading
 from pathlib import Path
 
+from bench.patching import Patch, apply
+
+ENGINE = os.environ.get("BENCH_ENGINE")
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
-SIDTRIE = os.environ.get("BENCH_ENGINE") == "sglang-sidtrie"
-# Public SGLang and the SIDTrie fork share the native BeamCoordinator beam API.
-NATIVE = os.environ.get("BENCH_ENGINE") in ("sglang", "sglang-sidtrie")
+SIDTRIE = ENGINE == "sglang-sidtrie"
+NATIVE = ("sglang", "sglang-sidtrie")  # the native BeamCoordinator beam API
+LEGACY = ("sglang-beam-search-new",)  # the use_beam_search API
 PACKAGES = (
     "sglang-kernel torch triton flashinfer-python nvidia-cutlass-dsl transformers"
 )
 COUNTERS = """forward.prefill.graph forward.prefill.eager forward.decode.graph
     forward.decode.eager sidtrie.compact_decode sidtrie.exact_normalizer
     sidtrie.device_history sidtrie.shared_attention"""
+
+
+# ---- every difference from the native server ------------------------------
+def patches():
+    """Scheduler-process patches, installed before SGLang builds the Scheduler."""
+    scheduler = "sglang.srt.managers.scheduler:Scheduler"
+    batch = "sglang.srt.managers.schedule_batch:ScheduleBatch"
+    profiler = (
+        "sglang.srt.managers.scheduler_components.profiler_manager"
+        ":SchedulerProfilerManager"
+    )
+    coordinator = "sglang.srt.beam_search.coordinator:BeamCoordinator"
+    return [
+        # Always: counters and state for /pilot/runtime.
+        Patch(
+            f"{scheduler}.get_internal_state",
+            add_runtime,
+            "adds the runtime snapshot that /pilot/runtime returns",
+        ),
+        Patch(
+            "sglang.srt.model_executor.model_runner:ModelRunner.forward",
+            count_forward,
+            "counts forwards by phase and graph/eager mode (and SIDTrie's "
+            "decode path); NVTX section `model` when profiling",
+        ),
+        Patch(
+            "sglang.srt.beam_search.beam_group:BeamGroup.finalize",
+            record_finalize,
+            "records length_penalty and device beam history; NVTX section "
+            "`beam_history` when profiling",
+            engines=NATIVE,
+        ),
+        Patch(
+            "sglang.srt.beam_search.shared_context_attention_kernel"
+            ":shared_context_attention",
+            section("shared_context_attention", counter="sidtrie.shared_attention"),
+            "counts shared-context attention calls; NVTX section when profiling",
+            engines=("sglang-sidtrie",),
+        ),
+        # Profile only: capture state, then NVTX phases and sections.
+        Patch(
+            f"{profiler}._start_profile",
+            capture_started,
+            "notes that a capture started",
+            profile_only=True,
+        ),
+        Patch(
+            f"{profiler}._stop_profile",
+            capture_stopped,
+            "notes that the capture stopped",
+            profile_only=True,
+        ),
+        *(
+            Patch(
+                target,
+                batch_scope(mode, label),
+                f"NVTX phase range and section `{label}`",
+                profile_only=True,
+            )
+            for target, mode, label in (
+                (f"{batch}.prepare_for_extend", "prefill", "input_preparation"),
+                (f"{batch}.prepare_for_decode", "decode", "input_preparation"),
+                (f"{scheduler}.run_batch", "run", "scheduler_forward"),
+                (f"{scheduler}.process_batch_result", "result", "result_processing"),
+            )
+        ),
+        *(
+            Patch(
+                f"{coordinator}.{method}",
+                section(label),
+                f"NVTX section `{label}`",
+                profile_only=True,
+                engines=NATIVE,
+            )
+            for method, label in (
+                ("select_leader_prefill", "beam_selection"),
+                ("select_and_relay_decode", "beam_selection"),
+                ("commit_prefill", "beam_commit"),
+                ("commit_decode", "beam_commit"),
+                ("_spawn_member_rows", "beam_kv"),
+                ("_reclaim_orphans", "beam_kv"),
+            )
+        ),
+        Patch(
+            "sglang.srt.beam_search.trie_output_head:BeamTrieOutputHead.project_mixed",
+            section("trie_output_head"),
+            "NVTX section `trie_output_head`",
+            profile_only=True,
+            engines=("sglang-sidtrie",),
+        ),
+        *(
+            Patch(
+                f"{scheduler}.{method}",
+                section(label),
+                f"NVTX section `{label}`",
+                profile_only=True,
+                engines=LEGACY,
+            )
+            for method, label in (
+                ("process_beam_search_prefill_result", "beam_selection"),
+                ("process_beam_search_decode_result", "beam_selection"),
+                ("_handle_beam_kv_cache", "beam_kv"),
+            )
+        ),
+    ]
+
+
+def routes(http_server):
+    """HTTP-process changes: (path, hook or None to add, profile_only, adds)."""
+    return [
+        ("/pilot/ready", ready_route(http_server), False, "added: 200 once Up"),
+        ("/pilot/runtime", runtime_route(http_server), False, "added: snapshot"),
+        ("/generate", request_range, True, "NVTX request range"),
+        ("/start_profile", capture_route(True), True, "notes the capture start"),
+        ("/stop_profile", capture_route(False), True, "notes the capture stop"),
+    ]
+
+
+# ---- state the hooks share --------------------------------------------------
 _counts = dict.fromkeys(COUNTERS.split(), 0)
 _observed: dict[str, object] = {}
 _capturing = False
 _context = threading.local()  # request ID of the batch running on this thread
 _decode_steps: dict[str, int] = {}
 _batch_phase: dict[int, tuple[str, str]] = {}
-
-
-def _class(value):
-    return type(value).__name__ if value is not None else None
-
-
-def _version(name):
-    try:
-        return importlib.metadata.version(name)
-    except importlib.metadata.PackageNotFoundError:
-        return None
 
 
 @contextlib.contextmanager
@@ -78,17 +188,9 @@ def nvtx(kind, rid, label=None):
         torch.cuda.nvtx.range_pop()
 
 
-def wrap(owner, name, make):
-    original = getattr(owner, name, None)
-    if not callable(original):
-        raise RuntimeError(
-            f"unsupported SGLang revision: {owner.__name__}.{name} is missing"
-        )
-    setattr(owner, name, functools.wraps(original)(make(original)))
-
-
+# ---- always-on hooks ---------------------------------------------------------
 def section(label, counter=None):
-    """NVTX section around a call; optionally count calls (in every run)."""
+    """Count calls (if counter is given); NVTX section while capturing."""
 
     def make(original):
         def wrapped(*args, **kwargs):
@@ -102,6 +204,196 @@ def section(label, counter=None):
         return wrapped
 
     return make
+
+
+def add_runtime(original):
+    def wrapped(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        result.internal_state["bench"] = runtime(self)
+        return result
+
+    return wrapped
+
+
+def count_forward(original):
+    traced = section("model")(original)
+
+    def wrapped(self, batch, *args, **kwargs):
+        result = traced(self, batch, *args, **kwargs)
+        kind = "decode" if batch.forward_mode.is_decode() else "prefill"
+        mode = "graph" if result.can_run_graph else "eager"
+        _counts[f"forward.{kind}.{mode}"] += 1
+        if SIDTRIE and kind == "decode":
+            output = getattr(result, "logits_output", None)
+            trie = getattr(batch, "beam_trie_levels", None)
+            normalizer = getattr(output, "beam_normalizer", None)
+            _counts["sidtrie.compact_decode"] += trie is not None
+            _counts["sidtrie.exact_normalizer"] += normalizer is not None
+        return result
+
+    return wrapped
+
+
+def record_finalize(original):
+    traced = section("beam_history")(original)
+
+    def wrapped(self, *args, **kwargs):
+        result = traced(self, *args, **kwargs)
+        _counts["sidtrie.device_history"] += bool(
+            getattr(self, "device_history", False)
+        )
+        _observed["length_penalty"] = self.length_penalty
+        return result
+
+    return wrapped
+
+
+# ---- profile-only hooks ------------------------------------------------------
+def capture_started(original):
+    def wrapped(self, *args, **kwargs):
+        global _capturing
+        result = original(self, *args, **kwargs)
+        _capturing = bool(self.profile_in_progress)
+        return result
+
+    return wrapped
+
+
+def capture_stopped(original):
+    def wrapped(self, *args, **kwargs):
+        global _capturing
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            _capturing = False
+
+    return wrapped
+
+
+def batch_phase(batch, advance=False, preparation=None):
+    """(request ID, "prefill" | "decode_<k>") for a batch holding one request."""
+    ids = {str(req.rid) for req in getattr(batch, "reqs", ())}
+    if len(ids) != 1:
+        return None, None
+    rid = ids.pop()
+    decode = preparation == "decode" or (
+        preparation is None and batch.forward_mode.is_decode()
+    )
+    step = _decode_steps.get(rid, 0) + 1 if decode else 0
+    label = f"decode_{step}" if decode else "prefill"
+    if advance:
+        _decode_steps[rid] = step
+        _batch_phase[id(batch)] = (rid, label)
+    return rid, label
+
+
+def batch_scope(mode, label):
+    """NVTX phase and section around a batch step; mode says how to find it."""
+
+    def make(original):
+        def wrapped(self, *args, **kwargs):
+            # ScheduleBatch methods run on the batch; Scheduler methods take it.
+            on_batch = mode in ("prefill", "decode")
+            batch = self if on_batch else args[0] if args else kwargs["batch"]
+            if mode == "result":
+                fallback = (batch_phase(batch)[0], "result")
+                rid, phase = _batch_phase.get(id(batch), fallback)
+            else:
+                preparation = None if mode == "run" else mode
+                rid, phase = batch_phase(batch, mode == "run", preparation)
+            previous, _context.rid = getattr(_context, "rid", None), rid
+            try:
+                with nvtx("phase", rid, phase), nvtx("section", rid, label):
+                    return original(self, *args, **kwargs)
+            finally:
+                _context.rid = previous
+
+        return wrapped
+
+    return make
+
+
+# ---- HTTP routes -------------------------------------------------------------
+def ready_route(http_server):
+    from fastapi.responses import JSONResponse
+
+    async def ready():
+        manager = http_server._global_state.tokenizer_manager
+        up = (
+            str(manager.server_status) == "ServerStatus.Up"
+            and not manager.gracefully_exit
+        )
+        return JSONResponse({"ready": up}, status_code=200 if up else 503)
+
+    return ready
+
+
+def runtime_route(http_server):
+    from fastapi.responses import JSONResponse
+
+    async def runtime_snapshot():
+        states = await http_server._global_state.tokenizer_manager.get_internal_state()
+        return JSONResponse({"pid": os.getpid(), **states[0]["bench"]})
+
+    return runtime_snapshot
+
+
+def request_range(original):
+    async def wrapped(*args, **kwargs):
+        obj = kwargs.get("obj", args[0] if args else None)
+        with nvtx("request", getattr(obj, "rid", None)):
+            return await original(*args, **kwargs)
+
+    return wrapped
+
+
+def capture_route(active):
+    def make(original):
+        async def wrapped(*args, **kwargs):
+            global _capturing
+            try:
+                return await original(*args, **kwargs)
+            finally:
+                _capturing = active
+
+        return wrapped
+
+    return make
+
+
+def install_routes(http_server):
+    wrappers = {}
+    for path, hook, profile_only, adds in routes(http_server):
+        if profile_only and not PROFILE:
+            continue
+        if path.startswith("/pilot/"):
+            http_server.app.add_api_route(path, hook, methods=["GET"])
+        else:
+            wrappers[path] = hook
+        kind = "profile" if profile_only else "always"
+        print(f"[bench] route {path} ({kind}): {adds}", flush=True)
+    for route in http_server.app.routes:
+        make = wrappers.pop(getattr(route, "path", None), None)
+        if make:
+            wrapped = functools.wraps(route.endpoint)(make(route.endpoint))
+            dependency = route.dependant  # codespell:ignore dependant
+            route.endpoint = dependency.call = wrapped
+    if wrappers:
+        raise RuntimeError(
+            f"unsupported SGLang revision: routes {sorted(wrappers)} are missing"
+        )
+
+
+# ---- runtime snapshot (/pilot/runtime) ----------------------------------------
+def _class(value):
+    return type(value).__name__ if value is not None else None
+
+
+def _version(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def catalog_status(scheduler):
@@ -123,6 +415,7 @@ def catalog_status(scheduler):
 
 
 def runtime(scheduler):
+    """Facts read from the running scheduler; the client checks and reports them."""
     import sglang
 
     runner = scheduler.tp_worker.model_runner
@@ -140,239 +433,20 @@ def runtime(scheduler):
         "catalog": catalog_status(scheduler),
         "length_penalty": _observed.get("length_penalty"),
         "counters": dict(_counts),
+        "patches": [patch.target for patch in applied],
     }
 
 
-def batch_phase(batch, advance=False, preparation=None):
-    """(request ID, "prefill" | "decode_<k>") for a batch holding one request."""
-    ids = {str(req.rid) for req in getattr(batch, "reqs", ())}
-    if len(ids) != 1:
-        return None, None
-    rid = ids.pop()
-    decode = preparation == "decode" or (
-        preparation is None and batch.forward_mode.is_decode()
-    )
-    step = _decode_steps.get(rid, 0) + 1 if decode else 0
-    label = f"decode_{step}" if decode else "prefill"
-    if advance:
-        _decode_steps[rid] = step
-        _batch_phase[id(batch)] = (rid, label)
-    return rid, label
-
-
-def install_native_hooks():
-    """Beam hooks shared by public SGLang and the SIDTrie fork."""
-    from sglang.srt.beam_search.beam_group import BeamGroup
-    from sglang.srt.beam_search.coordinator import BeamCoordinator
-
-    def finalize(original):
-        traced = section("beam_history")(original)
-
-        def wrapped(self, *args, **kwargs):
-            result = traced(self, *args, **kwargs)
-            _counts["sidtrie.device_history"] += bool(
-                getattr(self, "device_history", False)
-            )
-            _observed["length_penalty"] = self.length_penalty
-            return result
-
-        return wrapped
-
-    wrap(BeamGroup, "finalize", finalize)
-    if PROFILE:
-        for method, label in (
-            ("select_leader_prefill", "beam_selection"),
-            ("select_and_relay_decode", "beam_selection"),
-            ("commit_prefill", "beam_commit"),
-            ("commit_decode", "beam_commit"),
-            ("_spawn_member_rows", "beam_kv"),
-            ("_reclaim_orphans", "beam_kv"),
-        ):
-            wrap(BeamCoordinator, method, section(label))
-
-
-def install_sidtrie_hooks():
-    from sglang.srt.beam_search import shared_context_attention_kernel as kernel
-    from sglang.srt.beam_search.trie_output_head import BeamTrieOutputHead
-
-    attention = section("shared_context_attention", counter="sidtrie.shared_attention")
-    wrap(kernel, "shared_context_attention", attention)
-    if PROFILE:
-        wrap(BeamTrieOutputHead, "project_mixed", section("trie_output_head"))
-
-
-def install_scheduler_hooks():
-    from sglang.srt.managers.scheduler import Scheduler
-    from sglang.srt.model_executor.model_runner import ModelRunner
-
-    def internal_state(original):
-        def wrapped(self, *args, **kwargs):
-            result = original(self, *args, **kwargs)
-            result.internal_state["bench"] = runtime(self)
-            return result
-
-        return wrapped
-
-    def forward(original):
-        traced = section("model")(original)
-
-        def wrapped(self, batch, *args, **kwargs):
-            result = traced(self, batch, *args, **kwargs)
-            kind = "decode" if batch.forward_mode.is_decode() else "prefill"
-            mode = "graph" if result.can_run_graph else "eager"
-            _counts[f"forward.{kind}.{mode}"] += 1
-            if SIDTRIE and kind == "decode":
-                output = getattr(result, "logits_output", None)
-                trie = getattr(batch, "beam_trie_levels", None)
-                normalizer = getattr(output, "beam_normalizer", None)
-                _counts["sidtrie.compact_decode"] += trie is not None
-                _counts["sidtrie.exact_normalizer"] += normalizer is not None
-            return result
-
-        return wrapped
-
-    wrap(Scheduler, "get_internal_state", internal_state)
-    wrap(ModelRunner, "forward", forward)
-    if NATIVE:
-        install_native_hooks()
-    if SIDTRIE:
-        install_sidtrie_hooks()
-    if PROFILE:
-        install_profile_hooks()
-
-
-def install_profile_hooks():
-    """NVTX phases and sections; ranges are pushed only during a capture."""
-    from sglang.srt.managers.schedule_batch import ScheduleBatch
-    from sglang.srt.managers.scheduler import Scheduler
-    from sglang.srt.managers.scheduler_components.profiler_manager import (
-        SchedulerProfilerManager,
-    )
-
-    def start(original):
-        def wrapped(self, *args, **kwargs):
-            global _capturing
-            result = original(self, *args, **kwargs)
-            _capturing = bool(self.profile_in_progress)
-            return result
-
-        return wrapped
-
-    def stop(original):
-        def wrapped(self, *args, **kwargs):
-            global _capturing
-            try:
-                return original(self, *args, **kwargs)
-            finally:
-                _capturing = False
-
-        return wrapped
-
-    def batch_scope(mode, label):
-        def make(original):
-            def wrapped(self, *args, **kwargs):
-                # ScheduleBatch methods run on the batch; Scheduler methods take it.
-                on_batch = mode in ("prefill", "decode")
-                batch = self if on_batch else args[0] if args else kwargs["batch"]
-                if mode == "result":
-                    fallback = (batch_phase(batch)[0], "result")
-                    rid, phase = _batch_phase.get(id(batch), fallback)
-                else:
-                    preparation = None if mode == "run" else mode
-                    rid, phase = batch_phase(batch, mode == "run", preparation)
-                previous, _context.rid = getattr(_context, "rid", None), rid
-                try:
-                    with nvtx("phase", rid, phase), nvtx("section", rid, label):
-                        return original(self, *args, **kwargs)
-                finally:
-                    _context.rid = previous
-
-            return wrapped
-
-        return make
-
-    wrap(SchedulerProfilerManager, "_start_profile", start)
-    wrap(SchedulerProfilerManager, "_stop_profile", stop)
-    for owner, method, mode, label in (
-        (ScheduleBatch, "prepare_for_extend", "prefill", "input_preparation"),
-        (ScheduleBatch, "prepare_for_decode", "decode", "input_preparation"),
-        (Scheduler, "run_batch", "run", "scheduler_forward"),
-        (Scheduler, "process_batch_result", "result", "result_processing"),
-    ):
-        wrap(owner, method, batch_scope(mode, label))
-    if not NATIVE:
-        for method, label in (
-            ("process_beam_search_prefill_result", "beam_selection"),
-            ("process_beam_search_decode_result", "beam_selection"),
-            ("_handle_beam_kv_cache", "beam_kv"),
-        ):
-            wrap(Scheduler, method, section(label))
+# ---- launch --------------------------------------------------------------------
+applied: list[Patch] = []  # in the scheduler process, where runtime() runs
 
 
 def run_scheduler_process(*args, **kwargs):
-    """Spawn target: patch the scheduler process before it builds the Scheduler."""
-    install_scheduler_hooks()
+    """Spawn target: patch the scheduler process, then run SGLang's own."""
+    applied.extend(apply(patches(), ENGINE, PROFILE))
     from sglang.srt.managers.scheduler import run_scheduler_process as native
 
     return native(*args, **kwargs)
-
-
-def install_http_hooks(http_server):
-    from fastapi.responses import JSONResponse
-
-    async def ready():
-        manager = http_server._global_state.tokenizer_manager
-        up = (
-            str(manager.server_status) == "ServerStatus.Up"
-            and not manager.gracefully_exit
-        )
-        return JSONResponse({"ready": up}, status_code=200 if up else 503)
-
-    async def runtime_route():
-        states = await http_server._global_state.tokenizer_manager.get_internal_state()
-        return JSONResponse({"pid": os.getpid(), **states[0]["bench"]})
-
-    http_server.app.add_api_route("/pilot/ready", ready, methods=["GET"])
-    http_server.app.add_api_route("/pilot/runtime", runtime_route, methods=["GET"])
-    if not PROFILE:
-        return
-
-    def request(original):
-        async def wrapped(*args, **kwargs):
-            obj = kwargs.get("obj", args[0] if args else None)
-            with nvtx("request", getattr(obj, "rid", None)):
-                return await original(*args, **kwargs)
-
-        return wrapped
-
-    def capture(active):
-        def make(original):
-            async def wrapped(*args, **kwargs):
-                global _capturing
-                try:
-                    return await original(*args, **kwargs)
-                finally:
-                    _capturing = active
-
-            return wrapped
-
-        return make
-
-    hooks = {
-        "/generate": request,
-        "/start_profile": capture(True),
-        "/stop_profile": capture(False),
-    }
-    for route in http_server.app.routes:
-        make = hooks.pop(getattr(route, "path", None), None)
-        if make:
-            wrapped = functools.wraps(route.endpoint)(make(route.endpoint))
-            dependency = route.dependant  # codespell:ignore dependant
-            route.endpoint = dependency.call = wrapped
-    if hooks:
-        raise RuntimeError(
-            f"unsupported SGLang revision: routes {sorted(hooks)} are missing"
-        )
 
 
 def main():
@@ -393,7 +467,7 @@ def main():
     server_args = ServerArgs(**settings)
     if server_args.tp_size != 1 or not server_args.disable_overlap_schedule:
         raise ValueError("NVTX phases need tp_size=1 and disable_overlap_schedule=true")
-    install_http_hooks(http_server)
+    install_routes(http_server)
     try:
         http_server.launch_server(
             server_args, run_scheduler_process_func=run_scheduler_process

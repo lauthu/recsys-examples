@@ -181,6 +181,12 @@ def render(ctx):
         for name, family, ns, launches in trace["top"]
     ]
     setup = setup_rows(ctx)
+    latency_patches = clean[0]["runtime"].get("patches", [])
+    profile_patches = ctx["profile"]["runtime"].get("patches", [])
+    added = [p for p in profile_patches if p not in latency_patches]
+    patch_lines = "\n".join(f"- `{p}`" for p in latency_patches) or "- none"
+    patch_lines += "\n\nThe profiled run also patched:\n\n"
+    patch_lines += "\n".join(f"- `{p}`" for p in added) or "- nothing else"
     settings = {"env": solution.env}
     if solution.server_settings is not None:
         settings["server_settings"] = solution.server_settings
@@ -225,6 +231,14 @@ The server window is the request handler (NVTX `bench/request`). Times are per r
 ```yaml
 {yaml.safe_dump(settings, sort_keys=False).rstrip()}
 ```
+
+</details>
+
+<details><summary>Changes to the engine's own HTTP server (observed)</summary>
+
+The launcher runs the engine's own server and patches only these methods, as reported by the server; each hook calls the original unchanged. `PATCHES` in `bench/server_*.py` says what each one adds. The latency runs patched:
+
+{patch_lines}
 
 </details>
 

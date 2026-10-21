@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""PYTHON_BIN for scripts/serve_qwen3_gr_http.sh: runs the native SID-GR server
-in this process with benchmark hooks; not a separate server or proxy.
+"""Run SID-GR's own HTTP server with the benchmark's declared patches.
 
-GET  /pilot/runtime        packages, resolved attention backends, CUDA graph counters
-POST /pilot/profile/start  cudaProfilerStart (BENCH_PROFILE=1 only)
-POST /pilot/profile/stop   cudaProfilerStop
+scripts/serve_qwen3_gr_http.sh execs $PYTHON_BIN; the runner points it here:
 
-With BENCH_PROFILE=1, NVTX ranges bench/request|phase|section are pushed only
-while a capture is active. They mark CPU launch scopes and never synchronize.
+    server_sid_gr.py .../tools/serve_qwen3_gr_http.py [args]
+
+Compared with the native server (serve_qwen3_gr_http.sh with plain python3):
+
+Same
+  - The server: serve_qwen3_gr_http.py from the mounted source, run unchanged in
+    this process with runpy, with the arguments and environment the script
+    builds. Requests go to SID-GR's own handlers; there is no proxy or extra hop.
+
+Different, and nothing else
+  - PATCHES: the methods listed there. Hooks follow the rules in
+    bench/patching.py: original arguments and results, no GPU sync.
+  - The one "always" entry adds three routes and leaves every other route to
+    the original dispatcher (about 85 ns per request):
+        GET  /pilot/runtime        packages, attention backends, CUDA graph counters
+        POST /pilot/profile/start  cudaProfilerStart (BENCH_PROFILE=1 only)
+        POST /pilot/profile/stop   cudaProfilerStop
+  - "profile" entries exist only in the profiled process (BENCH_PROFILE=1) and
+    push NVTX ranges bench/request|phase|section only while a capture is active.
+
+The server log lists every applied patch at startup.
 """
 
 import contextlib
-import functools
 import importlib.metadata
 import os
 import runpy
@@ -22,12 +37,103 @@ import threading
 from collections import Counter
 from pathlib import Path
 
+from bench.patching import Patch, apply  # PYTHONPATH has /benchmark-tools
+
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
 PACKAGES = (
     "torch triton flashinfer-python nvidia-cutlass-dsl quack-kernels transformers"
 )
+
+
+# ---- every difference from the native server ------------------------------
+def patches():
+    adapter = "gr_inference.gr_serving.http:GRHTTPServingAdapter"
+    executor = "gr_inference.gr_serving.continuous:GRContinuousServingExecutor"
+    return [
+        Patch(
+            f"{adapter}._dispatch",
+            pilot_routes,
+            "adds /pilot/runtime and /pilot/profile/start|stop; other routes "
+            "go to the original dispatcher",
+        ),
+        Patch(
+            f"{adapter}._handle_sglang_generate",
+            request_range,
+            "NVTX request range",
+            profile_only=True,
+        ),
+        Patch(
+            f"{executor}._run_prefill",
+            phase_range(decode=False),
+            "NVTX phase `prefill`",
+            profile_only=True,
+        ),
+        Patch(
+            f"{executor}._run_decode_batch",
+            phase_range(decode=True),
+            "NVTX phase `decode_<step>`",
+            profile_only=True,
+        ),
+        Patch(
+            f"{executor}._profile_section",
+            named_section,
+            "NVTX section named by SID-GR's own profile sections",
+            profile_only=True,
+        ),
+        Patch(
+            f"{executor}._forward_prefill",
+            section("model.forward_prefill"),
+            "NVTX section `model.forward_prefill`",
+            profile_only=True,
+        ),
+        Patch(
+            f"{executor}._store_single_prefill_result",
+            section("prefill.initialize_generation"),
+            "NVTX section `prefill.initialize_generation`",
+            profile_only=True,
+        ),
+    ]
+
+
+# ---- state the hooks share --------------------------------------------------
 _capturing = False
 _scope = threading.local()  # request IDs of the phase running on this thread
+
+
+@contextlib.contextmanager
+def nvtx(kind, label):
+    if not _capturing or label is None:
+        yield
+        return
+    import torch
+
+    torch.cuda.nvtx.range_push(f"bench/{kind}:{label}")
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
+def section_label(name):
+    rid = getattr(_scope, "rid", None)
+    return None if rid is None else f"{rid}:{name}"
+
+
+# ---- always-on hook: the /pilot routes ---------------------------------------
+def pilot_routes(original):
+    from gr_inference.gr_serving.http import GRHTTPResponse
+
+    def wrapped(self, method, route, payload):
+        if (method, route) == ("GET", ("pilot", "runtime")):
+            return GRHTTPResponse(200, runtime(self))
+        if method == "POST" and route in (
+            ("pilot", "profile", "start"),
+            ("pilot", "profile", "stop"),
+        ):
+            return GRHTTPResponse(200, profile(self, route[2] == "start"))
+        return original(self, method, route, payload)
+
+    return wrapped
 
 
 def _executor(adapter):
@@ -52,6 +158,7 @@ def _version(name):
 
 
 def runtime(adapter):
+    """Facts read from the running executor; the client checks and reports them."""
     with _idle(adapter):
         executor = _executor(adapter)
         backends = Counter()
@@ -85,6 +192,7 @@ def runtime(adapter):
                 "decode_cuda_graph_fallback_eager_count"
             ),
         },
+        "patches": [patch.target for patch in applied],
     }
 
 
@@ -108,39 +216,17 @@ def profile(adapter, start):
     return {"capturing": _capturing}
 
 
-@contextlib.contextmanager
-def nvtx(kind, label):
-    if not _capturing or label is None:
-        yield
-        return
-    import torch
+# ---- profile-only hooks ------------------------------------------------------
+def request_range(original):
+    def wrapped(self, payload):
+        with nvtx("request", payload.get("rid") or payload.get("request_id")):
+            return original(self, payload)
 
-    torch.cuda.nvtx.range_push(f"bench/{kind}:{label}")
-    try:
-        yield
-    finally:
-        torch.cuda.nvtx.range_pop()
+    return wrapped
 
 
-def section_label(name):
-    rid = getattr(_scope, "rid", None)
-    return None if rid is None else f"{rid}:{name}"
-
-
-def wrap(owner, name, make):
-    original = getattr(owner, name)
-    setattr(owner, name, functools.wraps(original)(make(original)))
-
-
-def install_markers(adapter_class, executor_class):
-    def request(original):
-        def wrapped(self, payload):
-            with nvtx("request", payload.get("rid") or payload.get("request_id")):
-                return original(self, payload)
-
-        return wrapped
-
-    def phase(original, decode):
+def phase_range(decode):
+    def make(original):
         def wrapped(self, *args):
             ids = args[0].request_ids if decode else args[0]
             rid = ",".join(map(str, ids))
@@ -154,53 +240,31 @@ def install_markers(adapter_class, executor_class):
 
         return wrapped
 
-    def named_section(original):  # _profile_section(name) returns a context manager
-        @contextlib.contextmanager
-        def wrapped(self, name):
-            with original(self, name), nvtx("section", section_label(name)):
-                yield
+    return make
+
+
+def named_section(original):  # _profile_section(name) returns a context manager
+    @contextlib.contextmanager
+    def wrapped(self, name):
+        with original(self, name), nvtx("section", section_label(name)):
+            yield
+
+    return wrapped
+
+
+def section(label):
+    def make(original):
+        def wrapped(self, *args, **kwargs):
+            with nvtx("section", section_label(label)):
+                return original(self, *args, **kwargs)
 
         return wrapped
 
-    def section(label):
-        def make(original):
-            def wrapped(self, *args, **kwargs):
-                with nvtx("section", section_label(label)):
-                    return original(self, *args, **kwargs)
-
-            return wrapped
-
-        return make
-
-    wrap(adapter_class, "_handle_sglang_generate", request)
-    wrap(executor_class, "_run_prefill", lambda f: phase(f, decode=False))
-    wrap(executor_class, "_run_decode_batch", lambda f: phase(f, decode=True))
-    wrap(executor_class, "_profile_section", named_section)
-    wrap(executor_class, "_forward_prefill", section("model.forward_prefill"))
-    initialize = section("prefill.initialize_generation")
-    wrap(executor_class, "_store_single_prefill_result", initialize)
+    return make
 
 
-def install():
-    from gr_inference.gr_serving.continuous import GRContinuousServingExecutor
-    from gr_inference.gr_serving.http import GRHTTPResponse, GRHTTPServingAdapter
-
-    def dispatch(original):
-        def wrapped(self, method, route, payload):
-            if (method, route) == ("GET", ("pilot", "runtime")):
-                return GRHTTPResponse(200, runtime(self))
-            if method == "POST" and route in (
-                ("pilot", "profile", "start"),
-                ("pilot", "profile", "stop"),
-            ):
-                return GRHTTPResponse(200, profile(self, route[2] == "start"))
-            return original(self, method, route, payload)
-
-        return wrapped
-
-    wrap(GRHTTPServingAdapter, "_dispatch", dispatch)
-    if PROFILE:
-        install_markers(GRHTTPServingAdapter, GRContinuousServingExecutor)
+# ---- launch --------------------------------------------------------------------
+applied: list[Patch] = []
 
 
 def main():
@@ -209,9 +273,13 @@ def main():
         raise SystemExit(
             "usage: server_sid_gr.py .../tools/serve_qwen3_gr_http.py [args]"
         )
+    # Running this file puts bench/ first on sys.path; drop it so bench/trace.py
+    # or bench/config.py cannot shadow a module SID-GR imports.
+    here = Path(__file__).resolve().parent
+    sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != here]
     sys.path[:0] = [str(entrypoint.parent), str(entrypoint.parent.parent / "src")]
     sys.argv = [str(entrypoint), *sys.argv[2:]]
-    install()
+    applied.extend(apply(patches(), "sid-gr", PROFILE))
     runpy.run_path(str(entrypoint), run_name="__main__")
 
 

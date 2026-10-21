@@ -125,6 +125,7 @@ def context(engine, **overrides):
         "packages": {"torch": "2.9.1"},
         "attention": {"prefill": "A x28", "decode": "B"},
         "cuda_graphs": {"prefill": True, "decode": False},
+        "patches": ["m:Runner.forward"],
     }
     clean = [
         {
@@ -162,7 +163,11 @@ def context(engine, **overrides):
         "scenario": scenario,
         "solution": solution,
         "clean": clean,
-        "profile": {**clean[0], "catalog_beams": 4},
+        "profile": {
+            **clean[0],
+            "catalog_beams": 4,
+            "runtime": {**runtime, "patches": ["m:Runner.forward", "m:Batch.run"]},
+        },
         "trace": TRACE,
         "catalog": None,
         "model": "Qwen3-0.6B",
@@ -217,6 +222,13 @@ def test_report_copies_the_solution_settings_as_yaml():
     assert "```yaml\nenv:\n  SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: 'true'\n" in text
     assert "server_settings:\n  page_size: 1\n```" in text
     assert "scenario `111111111111`, solution `222222222222`" in text
+
+
+def test_report_lists_the_observed_server_patches():
+    text = report.render(context("sglang"))
+    assert "Changes to the engine's own HTTP server (observed)" in text
+    assert "latency runs patched:\n\n- `m:Runner.forward`\n\nThe profiled run" in text
+    assert "The profiled run also patched:\n\n- `m:Batch.run`" in text
 
 
 def test_report_flags_an_unenforced_pin():

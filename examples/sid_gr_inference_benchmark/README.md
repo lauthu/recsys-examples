@@ -43,7 +43,8 @@ bench/
   config.py            typed Scenario and Solution classes, YAML loading, checkpoint and workload checks
   provenance.py        source, model and image pins and identities
   client.py            runs inside the container: server, requests, checks
-  server_*.py          the servers with benchmark endpoints and NVTX markers
+  server_*.py          launch the engine's own HTTP server; PATCHES lists every change
+  patching.py          the Patch table entry and how patches are applied and logged
   catalog.py           the shared item catalog: parsing and beam membership checks
   trace.py sunburst.py report.py compare.py    outputs
 tests/                 CPU-only tests
@@ -191,7 +192,10 @@ listed in `ENGINES`, plus a config file with its `source` pin and an `images/` r
 The engine needs an HTTP server with a beam-search request, a way to start and
 stop `cudaProfilerApi` captures, and NVTX ranges named `bench/request:<rid>`,
 `bench/phase:<rid>:<phase>` and `bench/section:<rid>:<name>` around the request,
-its phases and its sections, as in [server_sglang.py](bench/server_sglang.py).
+its phases and its sections. A launcher such as
+[server_sglang.py](bench/server_sglang.py) runs the engine's own server and adds
+these as `Patch` entries in its `PATCHES` table; each report lists the patches
+the server applied.
 Without phase and section ranges the profile still reports kernel time, but
 attributes it to `unknown`. Engines without an HTTP server, such as vLLM-GR,
 TensorRT-LLM and FlashRec, first need a thin server around their beam API.
