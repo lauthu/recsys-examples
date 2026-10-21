@@ -9,7 +9,7 @@ requests, the same checks and the same three outputs.
 | `sid-gr` | [SID-GR](../sid-gr-inference) | `n` beams |
 | `sglang` | Public [SGLang](https://github.com/sgl-project/sglang) v0.5.22 or newer | native `beam_width`; no catalog support |
 | `sglang-beam-search-new` | SGLang [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891) | `use_beam_search` |
-| `sglang-sidtrie` | SGLang [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788) | native `beam_width` with a trie output head |
+| `vedantjh2-sglang` | SGLang [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788) | native `beam_width` with a trie output head |
 
 ## Outputs
 
@@ -149,11 +149,11 @@ A solution, `configs/solutions/<name>.yaml`, launches one engine:
 
 | Key | Meaning |
 | --- | --- |
-| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `sglang-sidtrie` |
+| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang` |
 | `source` | `url` and the full 40-character `commit` of the engine source; optional `branch` the commit was taken from, which names a from-source image |
 | `env` | String environment variables for the server, passed verbatim |
 | `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets the model path, host, port and catalog. `cuda_graph_bs_decode` and `cuda_graph_bs_prefill` must match the workload's beam width and context length |
-| `trie_config` | `sglang-sidtrie` only: `token_start` and `codebook_size` of the three SID codebooks |
+| `trie_config` | `vedantjh2-sglang` only: `token_start` and `codebook_size` of the three SID codebooks |
 
 The runner derives the request shape (`GR_CONTEXT_LEN`, `GR_BEAM_WIDTH`,
 `GR_DECODE_STEPS`, batch size 1) and the profiler settings; `env` must not set
@@ -173,9 +173,9 @@ Token IDs are model token IDs. Item IDs and token paths must be unique, every
 path has exactly `output_tokens` tokens, and the catalog needs at least
 `beam_width` distinct first tokens so every beam survives each step. Each engine
 gets the same paths in its native form: SID-GR loads the JSONL, SGLang
-beam-search-new a generated token-trie pickle, and SIDTrie a generated
+beam-search-new a generated token-trie pickle, and vedantjh2-sglang a generated
 `trie_output_head.safetensors` placed next to links to the original checkpoint.
-For SIDTrie, the token at depth `d` must lie in
+For vedantjh2-sglang, the token at depth `d` must lie in
 `[token_start + d * codebook_size, token_start + (d + 1) * codebook_size)`.
 
 The run fails unless the server reports the catalog as loaded and every returned

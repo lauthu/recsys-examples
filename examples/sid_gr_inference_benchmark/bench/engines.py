@@ -23,7 +23,7 @@ import sys
 
 from bench.common import call
 
-SIDTRIE_FILE = "trie_output_head.safetensors"
+TRIE_HEAD_FILE = "trie_output_head.safetensors"
 SID_GR_SCRIPT = "/source/examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
 SHARED = "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION"
 # Image recipe of the SGLang dev branches, which images/build.sh builds from source.
@@ -325,7 +325,7 @@ class BeamSearchNew(SGLang):
 
 
 class Native(SGLang):
-    """SGLang's native `beam_width` API: public SGLang and the SIDTrie fork."""
+    """SGLang's native `beam_width` API: public SGLang and the vedantjh2 fork."""
 
     def sampling(self, workload):
         return {"beam_width": workload["beam_width"]}
@@ -345,14 +345,14 @@ class SGLangPublic(Native):
     catalog_supported = False
 
 
-class SidTrie(Native):
-    name = "sglang-sidtrie"
+class Vedantjh2SGLang(Native):
+    name = "vedantjh2-sglang"
     recipe = FROM_SOURCE
-    title = "SGLang SIDTrie"
+    title = "vedantjh2/sglang (trie-head)"
     sections = ("server_settings", "trie_config")
     model_view = True
     catalog_required = True
-    catalog_file = SIDTRIE_FILE
+    catalog_file = TRIE_HEAD_FILE
 
     def validate(self, solution, workload):
         super().validate(solution, workload)
@@ -360,10 +360,12 @@ class SidTrie(Native):
         legacy &= solution.server_settings.keys()
         if legacy:
             fail(
-                f"sglang-sidtrie uses the native beam_width API; remove {sorted(legacy)}"
+                f"vedantjh2-sglang uses the native beam_width API; remove {sorted(legacy)}"
             )
         if workload.output_tokens != 3:
-            fail("sglang-sidtrie needs workload.output_tokens 3 (three SID codebooks)")
+            fail(
+                "vedantjh2-sglang needs workload.output_tokens 3 (three SID codebooks)"
+            )
         if solution.env.get(SHARED, "false") not in ("true", "false"):
             fail(f'{SHARED} must be "true" or "false"')
 
@@ -386,7 +388,7 @@ class SidTrie(Native):
         return env.get(SHARED, "false") == "true"
 
     def check_counters(self, plan, counters, requests, runtime):
-        """Every measured request must take the native SIDTrie path that was requested."""
+        """Every measured request must take the trie-head path that was requested."""
         decode = counters["forward.decode.graph"] + counters["forward.decode.eager"]
         shared = self.shared(plan["env"])
         problems = []
@@ -394,41 +396,41 @@ class SidTrie(Native):
             super().check_counters(plan, counters, requests, runtime)
         except RuntimeError as exc:
             problems.append(str(exc))
-        if decode <= 0 or counters["sidtrie.compact_decode"] != decode:
+        if decode <= 0 or counters["vedantjh2.compact_decode"] != decode:
             problems.append(
                 "not every decode forward used the compact trie output head"
             )
-        if counters["sidtrie.exact_normalizer"] != decode:
+        if counters["vedantjh2.exact_normalizer"] != decode:
             problems.append(
                 "not every decode forward kept the full-vocabulary normalizer"
             )
-        if counters["sidtrie.device_history"] != requests:
+        if counters["vedantjh2.device_history"] != requests:
             problems.append("not every request finalized beams with device history")
         if shared and (
             counters["forward.decode.graph"]
-            or counters["sidtrie.shared_attention"] < counters["forward.decode.eager"]
+            or counters["vedantjh2.shared_attention"] < counters["forward.decode.eager"]
         ):
             problems.append(
                 "shared-context attention did not run in every decode forward"
             )
-        if not shared and counters["sidtrie.shared_attention"]:
+        if not shared and counters["vedantjh2.shared_attention"]:
             problems.append("shared-context attention ran although it is disabled")
         if problems:
-            raise RuntimeError("SIDTrie check failed: " + "; ".join(problems))
+            raise RuntimeError("vedantjh2-sglang check failed: " + "; ".join(problems))
 
     def setup_rows(self, solution):
         text = "compact trie output head, full-vocabulary normalizer and device beam "
         state = "on" if self.shared(solution.env) else "off"
         return [
             (
-                "SIDTrie (observed)",
+                "Trie output head (observed)",
                 f"{text}history on every measured request; shared-context attention {state}",
             )
         ]
 
 
 def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
-    """trie_output_head.safetensors for the SGLang SIDTrie output head.
+    """trie_output_head.safetensors for the vedantjh2-sglang trie output head.
 
     Depth d of a three-token path must lie in codebook range
     [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
@@ -441,7 +443,7 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
     tree = {}
     for path in paths:
         if len(path) != 3:
-            raise ValueError("SIDTrie paths must have exactly three tokens")
+            raise ValueError("trie output head paths must have exactly three tokens")
         codes = [
             token - token_start - depth * codebook_size
             for depth, token in enumerate(path)
@@ -506,7 +508,7 @@ class _Counts(dict):
 
 ENGINES = {
     engine.name: engine
-    for engine in (SidGr(), SGLangPublic(), BeamSearchNew(), SidTrie())
+    for engine in (SidGr(), SGLangPublic(), BeamSearchNew(), Vedantjh2SGLang())
 }
 
 

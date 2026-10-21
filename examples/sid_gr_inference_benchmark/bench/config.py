@@ -20,7 +20,7 @@ from typing import Any
 import yaml
 from bench import engines
 from bench.common import read_json
-from bench.engines import SIDTRIE_FILE, fail
+from bench.engines import TRIE_HEAD_FILE, fail
 
 SHA1 = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -153,7 +153,7 @@ class Source:
 
 @dataclass(frozen=True)
 class TrieConfig:
-    """SIDTrie token layout: depth d uses [token_start + d * size, ... + size)."""
+    """Trie output head layout: depth d uses [token_start + d * size, ... + size)."""
 
     token_start: int
     codebook_size: int
@@ -171,7 +171,7 @@ class Solution:
     env: dict[str, str]  # server environment, passed verbatim
     # SGLang ServerArgs, passed verbatim; SGLang validates names and values.
     server_settings: dict[str, Any] | None = None
-    trie_config: TrieConfig | None = None  # sglang-sidtrie only
+    trie_config: TrieConfig | None = None  # vedantjh2-sglang only
 
     def __post_init__(self):
         engines.get(self.engine)
@@ -279,7 +279,7 @@ def load_model(model, workload):
     if config.get("torch_dtype", config.get("dtype")) != "bfloat16":
         fail("the model checkpoint must be bfloat16")
     names = [p.name for p in model.iterdir() if p.suffix == ".safetensors"]
-    if not set(names) - {SIDTRIE_FILE}:
+    if not set(names) - {TRIE_HEAD_FILE}:
         fail(f"{model} has no safetensors weights")
     length = workload.context_length + workload.output_tokens
     if length > config.get("max_position_embeddings", length):

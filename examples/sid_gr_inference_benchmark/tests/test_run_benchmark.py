@@ -11,8 +11,8 @@ from bench import config as configs
 from bench import engines
 from bench.common import read_json
 
-CONFIGS = ("sid_gr", "sglang", "sglang_beam_search_new", "sglang_sidtrie")
-SID, PUBLIC, LEGACY, SIDTRIE = CONFIGS
+CONFIGS = ("sid_gr", "sglang", "sglang_beam_search_new", "vedantjh2_sglang")
+SID, PUBLIC, LEGACY, VEDANTJH2 = CONFIGS
 SCENARIOS = ("qwen3_0_6b", "qwen3_1_7b")
 
 
@@ -63,7 +63,7 @@ def test_shipped_configs_load_into_typed_classes():
         engine, found = configs.load_solution(path(name), shipped().workload)
         assert isinstance(found, configs.Solution) and engine.name == found.engine
         assert isinstance(found.source, configs.Source)
-    trie = configs.load_solution(path(SIDTRIE), shipped().workload)[1].trie_config
+    trie = configs.load_solution(path(VEDANTJH2), shipped().workload)[1].trie_config
     assert trie == configs.TrieConfig(token_start=1000, codebook_size=1000)
 
 
@@ -113,7 +113,7 @@ INVALID_SOLUTION = [
     (SID, {"engine": "other"}, "engine must be one of"),
     (SID, {"source.commit": "c6eba91"}, "40-character"),
     (SID, {"source.url": "git@github.com:x/y.git"}, "https://"),
-    (SIDTRIE, {"source.branch": ""}, "source.branch must not be empty"),
+    (VEDANTJH2, {"source.branch": ""}, "source.branch must not be empty"),
     (SID, {"server_settings": {"tp_size": 1}}, r"sections \[\]"),
     (PUBLIC, {"trie_config": {"token_start": 0, "codebook_size": 1}}, "sections"),
     (LEGACY, {"server_settings.enable_beam_search": False}, "enable_beam_search"),
@@ -123,10 +123,10 @@ INVALID_SOLUTION = [
     (PUBLIC, {"server_settings.cuda_graph_bs_decode": [128]}, r"must be \[256\]"),
     (LEGACY, {"server_settings.cuda_graph_bs_decode": [128]}, r"must be \[256\]"),
     (LEGACY, {"server_settings.cuda_graph_bs_prefill": [1024]}, r"must be \[2048\]"),
-    (SIDTRIE, {"server_settings.enable_beam_search": True}, "beam_width API"),
-    (SIDTRIE, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
-    (SIDTRIE, {"trie_config.codebook_size": 0}, "codebook_size must be >= 1"),
-    (SIDTRIE, {"trie_config.depth": 3}, "trie_config has unknown keys"),
+    (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
+    (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
+    (VEDANTJH2, {"trie_config.codebook_size": 0}, "codebook_size must be >= 1"),
+    (VEDANTJH2, {"trie_config.depth": 3}, "trie_config has unknown keys"),
 ]
 
 
@@ -145,12 +145,12 @@ def test_sglang_solutions_need_server_settings(tmp_path):
         configs.load_solution(write(tmp_path, value), shipped().workload)
 
 
-def test_sidtrie_needs_three_output_tokens(tmp_path):
+def test_vedantjh2_needs_three_output_tokens(tmp_path):
     workload = configs.Workload(
         context_length=2048, beam_width=256, output_tokens=4, seed=0
     )
     with pytest.raises(ValueError, match="three SID codebooks"):
-        configs.load_solution(path(SIDTRIE), workload)
+        configs.load_solution(path(VEDANTJH2), workload)
 
 
 def test_workload_is_seeded_and_skips_special_tokens(tmp_path):
@@ -174,7 +174,7 @@ def arguments(tmp_path, catalog=None):
     (model / "config.json").write_text(
         json.dumps({"torch_dtype": "bfloat16", "vocab_size": 5000})
     )
-    for name in ("model.safetensors", engines.SIDTRIE_FILE):
+    for name in ("model.safetensors", engines.TRIE_HEAD_FILE):
         (model / name).write_text("")
     return Namespace(model=model, catalog=catalog)
 
@@ -187,7 +187,7 @@ def make_run(tmp_path, name, output=None):
 
 
 def test_docker_command_isolates_labels_and_mounts(tmp_path):
-    run = make_run(tmp_path, SIDTRIE, tmp_path)
+    run = make_run(tmp_path, VEDANTJH2, tmp_path)
     argv = runner.docker_command(
         arguments(tmp_path), run, tmp_path / "c", "img", "bench-x", "profile"
     )
@@ -227,19 +227,20 @@ def prepare(tmp_path, name):
     return run, info
 
 
-def test_prepare_writes_plan_and_sidtrie_model_view(tmp_path):
-    run, info = prepare(tmp_path, SIDTRIE)
+def test_prepare_writes_plan_and_vedantjh2_model_view(tmp_path):
+    run, info = prepare(tmp_path, VEDANTJH2)
     assert info["items"] == 256 and info["name"] == "items.jsonl"
     plan = read_json(run.work / "plan.json")
     assert plan["catalog"]["server_source"] == "/model/trie_output_head.safetensors"
     assert plan["requests"] == 200 and len(read_json(run.work / "workload.json")) == 210
     # The container gets plain JSON generated from the typed configs.
     assert plan["workload"] == raw("qwen3_0_6b")["workload"]
-    assert plan["server_settings"] == raw(SIDTRIE)["server_settings"]
+    assert plan["server_settings"] == raw(VEDANTJH2)["server_settings"]
     assert plan["server_cpus"] == list(range(10)) and plan["client_cpus"] == [10]
     view = run.work / "model"
     assert (view / "config.json").readlink().as_posix() == "/model-source/config.json"
-    assert not (view / engines.SIDTRIE_FILE).is_symlink()  # generated, not the original
+    # The trie output head is generated, not linked to the original checkpoint.
+    assert not (view / engines.TRIE_HEAD_FILE).is_symlink()
 
 
 def test_prepare_converts_the_catalog_to_each_engines_native_form(tmp_path):
@@ -254,8 +255,8 @@ def test_prepare_converts_the_catalog_to_each_engines_native_form(tmp_path):
         assert (run.work / native).is_file()
 
 
-def test_sidtrie_requires_a_catalog(tmp_path):
-    run = make_run(tmp_path, SIDTRIE)
+def test_vedantjh2_requires_a_catalog(tmp_path):
+    run = make_run(tmp_path, VEDANTJH2)
     run.work.mkdir(parents=True)
     with pytest.raises(ValueError, match="needs --catalog"):
         runner.prepare(arguments(tmp_path), run, {"vocab_size": 5000}, [])

@@ -197,9 +197,9 @@ def test_sid_gr_report_with_a_disabled_graph_runner():
     assert "gatherTopK<float>(a \\| b)" in text  # a pipe must not split the row
 
 
-def test_sidtrie_report_states_observed_paths_and_catalog():
+def test_vedantjh2_report_states_observed_paths_and_catalog():
     catalog = {"name": "items.jsonl", "items": 300, "sha256": "f" * 64}
-    text = report.render(context("sglang-sidtrie", catalog=catalog))
+    text = report.render(context("vedantjh2-sglang", catalog=catalog))
     assert "prefill: 8 of 8 forwards as graph replays" in text
     assert "decode: 0 of 16 forwards as graph replays" in text
     assert "shared-context attention on" in text
@@ -218,7 +218,7 @@ def test_report_prints_the_pins_that_reproduce_the_run():
 
 
 def test_report_copies_the_solution_settings_as_yaml():
-    text = report.render(context("sglang-sidtrie"))
+    text = report.render(context("vedantjh2-sglang"))
     assert "```yaml\nenv:\n  SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: 'true'\n" in text
     assert "server_settings:\n  page_size: 1\n```" in text
     assert "scenario `111111111111`, solution `222222222222`" in text

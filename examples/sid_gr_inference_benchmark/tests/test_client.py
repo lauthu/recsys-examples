@@ -131,7 +131,7 @@ def test_profile_control_accepts_sglang_plain_text(tmp_path):
     server = subprocess.Popen(fake_server(tmp_path, port))
     try:
         client.wait_ready(server, port, "/ready", timeout=30)
-        for engine in ("sid-gr", "sglang-sidtrie"):
+        for engine in ("sid-gr", "vedantjh2-sglang"):
             for start in (True, False):
                 engines.get(engine).profile(port, start)
     finally:
@@ -142,43 +142,43 @@ def test_profile_control_accepts_sglang_plain_text(tmp_path):
 def test_sglang_scores_are_converted_to_cumulative_logprob():
     beam = {"output_ids": [1, 2, 3], "meta_info": {"sequence_score": -0.5}}
     response = {"meta_info": {"id": "r", "beam_results": [beam]}}
-    engine = engines.get("sglang-sidtrie")
+    engine = engines.get("vedantjh2-sglang")
     assert engine.beams(response, "r") == [([1, 2, 3], -1.5)]
     with pytest.raises(ValueError, match="does not belong"):
         engine.beams(response, "other")
 
 
-SIDTRIE_CASES = [
+VEDANTJH2_CASES = [
     ("false", {}, None),
     (
         "true",
         {
             "forward.decode.graph": 0,
             "forward.decode.eager": 8,
-            "sidtrie.shared_attention": 224,
+            "vedantjh2.shared_attention": 224,
         },
         None,
     ),
-    ("true", {"sidtrie.shared_attention": 224}, "shared-context"),
-    ("false", {"sidtrie.shared_attention": 1}, "disabled"),
-    ("false", {"sidtrie.exact_normalizer": 7}, "normalizer"),
-    ("false", {"sidtrie.device_history": 3}, "device history"),
+    ("true", {"vedantjh2.shared_attention": 224}, "shared-context"),
+    ("false", {"vedantjh2.shared_attention": 1}, "disabled"),
+    ("false", {"vedantjh2.exact_normalizer": 7}, "normalizer"),
+    ("false", {"vedantjh2.device_history": 3}, "device history"),
 ]
 
 
-@pytest.mark.parametrize("shared, changes, message", SIDTRIE_CASES)
-def test_sidtrie_checks(shared, changes, message):
+@pytest.mark.parametrize("shared, changes, message", VEDANTJH2_CASES)
+def test_vedantjh2_checks(shared, changes, message):
     counters = {
         "forward.decode.graph": 8,
         "forward.decode.eager": 0,
-        "sidtrie.compact_decode": 8,
-        "sidtrie.exact_normalizer": 8,
-        "sidtrie.device_history": 4,
-        "sidtrie.shared_attention": 0,
+        "vedantjh2.compact_decode": 8,
+        "vedantjh2.exact_normalizer": 8,
+        "vedantjh2.device_history": 4,
+        "vedantjh2.shared_attention": 0,
         **changes,
     }
     plan = {"env": {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": shared}}
-    engine = engines.get("sglang-sidtrie")
+    engine = engines.get("vedantjh2-sglang")
     if message is None:
         engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
     else:

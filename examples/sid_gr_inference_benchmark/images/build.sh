@@ -4,7 +4,7 @@
 # Build one engine's image: images/build.sh ENGINE [CHECKOUT]
 #   sglang                  a release: the official image, pinned by digest
 #   sglang-beam-search-new  dev branches, built from source with the fork's own
-#   sglang-sidtrie            docker/Dockerfile; CHECKOUT is the fork at its pin
+#   vedantjh2-sglang          docker/Dockerfile; CHECKOUT is the fork at its pin
 #   sid-gr                  Dockerfile.sid-gr plus the dependencies of SID-GR's
 #                             pinned commit; CHECKOUT is a recsys-examples clone
 # Images of pinned source are tagged <owner>-<repo>:<branch>-<commit> and
@@ -34,7 +34,7 @@ case "$engine" in
   sglang)
     exec docker build -f "$here/Dockerfile.sglang" -t sid-gr-bench:sglang "$here"
     ;;
-  sglang-beam-search-new | sglang-sidtrie)
+  sglang-beam-search-new | vedantjh2-sglang)
     # The recipe SGLang releases with (target framework_final) installs the
     # checkout itself, so it must be clean at the pinned commit.
     pin

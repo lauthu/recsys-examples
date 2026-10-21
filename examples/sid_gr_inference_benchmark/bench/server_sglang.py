@@ -38,15 +38,15 @@ from bench.patching import Patch, apply
 
 ENGINE = os.environ.get("BENCH_ENGINE")
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
-SIDTRIE = ENGINE == "sglang-sidtrie"
-NATIVE = ("sglang", "sglang-sidtrie")  # the native BeamCoordinator beam API
+VEDANTJH2 = ENGINE == "vedantjh2-sglang"
+NATIVE = ("sglang", "vedantjh2-sglang")  # the native BeamCoordinator beam API
 LEGACY = ("sglang-beam-search-new",)  # the use_beam_search API
 PACKAGES = (
     "sglang-kernel torch triton flashinfer-python nvidia-cutlass-dsl transformers"
 )
 COUNTERS = """forward.prefill.graph forward.prefill.eager forward.decode.graph
-    forward.decode.eager sidtrie.compact_decode sidtrie.exact_normalizer
-    sidtrie.device_history sidtrie.shared_attention"""
+    forward.decode.eager vedantjh2.compact_decode vedantjh2.exact_normalizer
+    vedantjh2.device_history vedantjh2.shared_attention"""
 
 
 # ---- every difference from the native server ------------------------------
@@ -69,8 +69,8 @@ def patches():
         Patch(
             "sglang.srt.model_executor.model_runner:ModelRunner.forward",
             count_forward,
-            "counts forwards by phase and graph/eager mode (and SIDTrie's "
-            "decode path); NVTX section `model` when profiling",
+            "counts forwards by phase and graph/eager mode (and the vedantjh2 fork's "
+            "trie-head decode path); NVTX section `model` when profiling",
         ),
         Patch(
             "sglang.srt.beam_search.beam_group:BeamGroup.finalize",
@@ -82,9 +82,9 @@ def patches():
         Patch(
             "sglang.srt.beam_search.shared_context_attention_kernel"
             ":shared_context_attention",
-            section("shared_context_attention", counter="sidtrie.shared_attention"),
+            section("shared_context_attention", counter="vedantjh2.shared_attention"),
             "counts shared-context attention calls; NVTX section when profiling",
-            engines=("sglang-sidtrie",),
+            engines=("vedantjh2-sglang",),
         ),
         # Profile only: capture state, then NVTX phases and sections.
         Patch(
@@ -135,7 +135,7 @@ def patches():
             section("trie_output_head"),
             "NVTX section `trie_output_head`",
             profile_only=True,
-            engines=("sglang-sidtrie",),
+            engines=("vedantjh2-sglang",),
         ),
         *(
             Patch(
@@ -223,12 +223,12 @@ def count_forward(original):
         kind = "decode" if batch.forward_mode.is_decode() else "prefill"
         mode = "graph" if result.can_run_graph else "eager"
         _counts[f"forward.{kind}.{mode}"] += 1
-        if SIDTRIE and kind == "decode":
+        if VEDANTJH2 and kind == "decode":
             output = getattr(result, "logits_output", None)
             trie = getattr(batch, "beam_trie_levels", None)
             normalizer = getattr(output, "beam_normalizer", None)
-            _counts["sidtrie.compact_decode"] += trie is not None
-            _counts["sidtrie.exact_normalizer"] += normalizer is not None
+            _counts["vedantjh2.compact_decode"] += trie is not None
+            _counts["vedantjh2.exact_normalizer"] += normalizer is not None
         return result
 
     return wrapped
@@ -239,7 +239,7 @@ def record_finalize(original):
 
     def wrapped(self, *args, **kwargs):
         result = traced(self, *args, **kwargs)
-        _counts["sidtrie.device_history"] += bool(
+        _counts["vedantjh2.device_history"] += bool(
             getattr(self, "device_history", False)
         )
         _observed["length_penalty"] = self.length_penalty
@@ -397,7 +397,7 @@ def _version(name):
 
 
 def catalog_status(scheduler):
-    if SIDTRIE:
+    if VEDANTJH2:
         trie = getattr(
             getattr(scheduler, "beam_coordinator", None), "trie_constraint", None
         )

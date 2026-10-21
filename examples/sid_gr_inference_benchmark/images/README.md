@@ -15,13 +15,13 @@ branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
 | --- | --- | --- | --- |
 | `sglang` | release v0.5.22 | [Dockerfile.sglang](Dockerfile.sglang): the official image, by digest | `sid-gr-bench:sglang` |
 | `sglang-beam-search-new` | [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891), `feature/beam_search_update_0801` | the source's `docker/Dockerfile`, target `framework_final` | `cswuyg-sglang:feature-beam_search_update_0801-df191d672f19` |
-| `sglang-sidtrie` | [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788), `trie-head` | the source's `docker/Dockerfile`, target `framework_final` | `vedantjh2-sglang:trie-head-646a7f5ce6f9` |
+| `vedantjh2-sglang` | [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788), `trie-head` | the source's `docker/Dockerfile`, target `framework_final` | `vedantjh2-sglang:trie-head-646a7f5ce6f9` |
 | `sid-gr` | [NVIDIA/recsys-examples@c6eba91](https://github.com/NVIDIA/recsys-examples/tree/c6eba911231d69d8cabaab94626bcb5a25c5a719), `main` | [Dockerfile.sid-gr](Dockerfile.sid-gr): an SGLang release plus the dependencies the commit declares | `nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d` |
 
 ```bash
 images/build.sh sglang
 images/build.sh sglang-beam-search-new /path/to/cswuyg-sglang   # clean, at the pin
-images/build.sh sglang-sidtrie /path/to/vedantjh2-sglang        # clean, at the pin
+images/build.sh vedantjh2-sglang /path/to/vedantjh2-sglang        # clean, at the pin
 images/build.sh sid-gr ../..                                    # any clone with the commit
 ```
 
@@ -61,7 +61,7 @@ Read from the images built on 2026-10-21:
 | --- | --- | --- | --- | --- | --- | --- |
 | `sglang` | 2.14.1+cu130 | 0.7.1 | 4.8.0 | 0.6.5 | 0.4.9 | 2026.4.1 |
 | `sglang-beam-search-new` | 2.11.0+cu130 | 0.6.15.post1 | 4.6.0 | 0.6.3 | 0.4.5 | 2026.4.1 |
-| `sglang-sidtrie` | 2.13.0+cu130 | 0.6.18 | 4.6.2 | 0.6.4 | 0.4.6.post1 | 2026.4.1 |
+| `vedantjh2-sglang` | 2.13.0+cu130 | 0.6.18 | 4.6.2 | 0.6.4 | 0.4.6.post1 | 2026.4.1 |
 | `sid-gr` | 2.11.0+cu130 | 0.6.11.post1 | 4.5.1 | 0.4.1 | 0.4.2.post2 | 2026.2.1 |
 
 Measurements before 2026-10-21 ran SID-GR and beam-search-new in images layered on

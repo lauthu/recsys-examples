@@ -1,7 +1,7 @@
-# Solution: SGLang SIDTrie fork, native beam_width API with a trie output head.
+# Solution: the vedantjh2/sglang fork, native beam_width API with a trie output head.
 # Loaded into bench.config.Solution. Needs --catalog.
 
-engine: sglang-sidtrie
+engine: vedantjh2-sglang
 
 source:
   url: https://github.com/vedantjh2/sglang

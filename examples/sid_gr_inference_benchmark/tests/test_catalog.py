@@ -86,10 +86,10 @@ def test_sglang_trie_contains_every_path():
     assert sorted(walk(data["tree"])) == sorted(map(tuple, PATHS))
 
 
-def test_sidtrie_round_trip():
+def test_vedantjh2_round_trip():
     solution = SimpleNamespace(trie_config=TrieConfig(1000, 1000))
     paths = {tuple(p): i for i, p in enumerate(PATHS)}
-    data = engines.get("sglang-sidtrie").convert_catalog(paths, solution, 5000)
+    data = engines.get("vedantjh2-sglang").convert_catalog(paths, solution, 5000)
     size = struct.unpack("<Q", data[:8])[0]
     header = json.loads(data[8 : 8 + size])
     assert size % 8 == 0 and header["__metadata__"]["token_start"] == "1000"
@@ -117,7 +117,7 @@ def test_sidtrie_round_trip():
     assert sorted(rebuilt) == sorted(map(tuple, PATHS))
 
 
-def test_sidtrie_rejects_tokens_outside_codebooks():
+def test_vedantjh2_rejects_tokens_outside_codebooks():
     with pytest.raises(ValueError, match="codebook ranges"):
         engines.trie_output_head(
             {(1000, 1999, 3000): 0},

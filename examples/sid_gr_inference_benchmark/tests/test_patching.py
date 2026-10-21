@@ -46,10 +46,10 @@ def test_apply_keeps_arguments_and_results_and_logs(fake_engine, capsys):
 def test_selection_by_engine_and_run_kind():
     always = Patch("m:f", None, "")
     profiling = Patch("m:g", None, "", profile_only=True)
-    sidtrie = Patch("m:h", None, "", engines=("sglang-sidtrie",))
-    table = [always, profiling, sidtrie]
+    vedantjh2 = Patch("m:h", None, "", engines=("vedantjh2-sglang",))
+    table = [always, profiling, vedantjh2]
     assert selected(table, "sglang", profile=False) == [always]
-    assert selected(table, "sglang-sidtrie", profile=True) == table
+    assert selected(table, "vedantjh2-sglang", profile=True) == table
 
 
 def test_a_missing_target_stops_the_server(fake_engine):
@@ -76,7 +76,7 @@ def test_latency_runs_patch_only_counters_and_routes():
         "Scheduler.get_internal_state",
         "ModelRunner.forward",
     ]
-    assert always(server_sglang, "sglang-sidtrie") == [
+    assert always(server_sglang, "vedantjh2-sglang") == [
         "Scheduler.get_internal_state",
         "ModelRunner.forward",
         "BeamGroup.finalize",
