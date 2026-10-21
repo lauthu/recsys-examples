@@ -306,6 +306,21 @@ def measure(args, run, phases, model_config, rows, model):
     return summary
 
 
+def manifest(args, run, before, model, profile):
+    """Everything needed to reproduce the run, printed at the end of the report."""
+    return {
+        **run.manifest,
+        "model": model,
+        "benchmark_code": before["tools"],
+        "dockerfile": run.engine.dockerfile,
+        "configs": {
+            "benchmark": provenance.sha256_file(args.benchmark),
+            "engine": provenance.sha256_file(run.config_path),
+        },
+        "nsys": profile.get("nsys"),
+    }
+
+
 def write_outputs(args, run, phases, catalog_info, before, model):
     work, config = run.work, run.config
     summary = trace.analyze(work / "profile/trace.sqlite")
@@ -336,9 +351,9 @@ def write_outputs(args, run, phases, catalog_info, before, model):
 
 
 def write_comparison(args, runs, finished):
-    text = compare.render(
-        [item["context"] for item in finished], [r.name for r in runs]
-    )
+    names = [run.name for run in runs]
+    reference = args.reference or ("sglang" if "sglang" in names else names[0])
+    text = compare.render(finished, names, reference)
     (args.output / "comparison.md").write_text(text)
 
 

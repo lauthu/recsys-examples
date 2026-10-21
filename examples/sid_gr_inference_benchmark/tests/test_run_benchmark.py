@@ -268,3 +268,29 @@ def test_every_shipped_engine_config_pins_its_source():
 def test_every_engine_names_an_image_recipe_that_exists():
     for engine in engines.ENGINES.values():
         assert (runner.ROOT / engine.dockerfile).is_file(), engine.name
+
+
+def finished_run(tmp_path, name):
+    from tests.test_compare import with_outputs
+
+    run = runner.Run(name, None, {}, tmp_path, "id", tmp_path / name)
+    return run, with_outputs("sglang" if name == PUBLIC else "sid-gr", [[1, 2, 3]], 9.0)
+
+
+def test_comparison_is_written_against_public_sglang_by_default(tmp_path):
+    args = Namespace(output=tmp_path, reference=None)
+    pairs = [finished_run(tmp_path, SID), finished_run(tmp_path, PUBLIC)]
+    runner.write_comparison(args, [p[0] for p in pairs], [p[1] for p in pairs])
+    assert "Output agreement with sglang" in (tmp_path / "comparison.md").read_text()
+
+
+def test_manifest_combines_identities_pins_and_hashes(tmp_path):
+    args = runner.parse_args(command(tmp_path, SID))
+    run = runner.build_runs(args, configs.load_benchmark(args.benchmark))[0]
+    run.manifest = {"source": {"commit": "a" * 40}, "image": {"id": "sha256:1"}}
+    before = {"tools": "abc123"}
+    found = runner.manifest(args, run, before, {"id": "m"}, {"nsys": "nsys 1"})
+    assert found["source"] == run.manifest["source"] and found["model"] == {"id": "m"}
+    assert found["benchmark_code"] == "abc123" and found["nsys"] == "nsys 1"
+    assert found["dockerfile"] == "images/Dockerfile.sid-gr"
+    assert set(found["configs"]) == {"benchmark", "engine"}
