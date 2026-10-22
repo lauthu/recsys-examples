@@ -145,6 +145,14 @@ PROFILED = {
 }
 
 
+def levels(*concurrency, latency=(10.0, 12.0, 14.0, 16.0)):
+    """A run's measured levels, each with the same latencies."""
+    return [
+        {"concurrency": k, "latency_ms": list(latency), "duration_s": 0.05}
+        for k in concurrency
+    ]
+
+
 def context(engine, **overrides):
     runtime = {
         "packages": {"torch": "2.9.1"},
@@ -156,8 +164,8 @@ def context(engine, **overrides):
     clean = [
         {
             "run": f"clean_{i}",
-            "latency_ms": [10.0, 12.0, 14.0, 16.0],
-            "duration_s": 0.05,
+            "order": [1],
+            "levels": levels(1),
             "gpu": "GPU",
             "driver": "1.0",
             "cpu": "CPU",
@@ -210,8 +218,17 @@ def context(engine, **overrides):
             "server_settings": {"dtype": "bfloat16", "port": "PORT"},
         },
         "command": "python3 run_benchmark.py",
+        "lengths": [2048] * 4,
     }
     return {**ctx, **overrides}
+
+
+def at(ctx, workload, *concurrency):
+    """ctx measured at these concurrency levels under this workload."""
+    ctx["scenario"] = SimpleNamespace(workload=workload, runs=ctx["scenario"].runs)
+    for result in ctx["clean"]:
+        result["levels"] = levels(*concurrency)
+    return ctx
 
 
 def test_sid_gr_report_with_a_disabled_graph_runner():
@@ -265,12 +282,53 @@ def test_report_states_the_requests_in_flight():
     assert "decode: 0 of 16 forwards as graph replays, 256 rows each" in text
     ctx = context("sglang")
     workload = dataclasses.replace(ctx["scenario"].workload, concurrency=4)
-    ctx["scenario"] = SimpleNamespace(workload=workload, runs=ctx["scenario"].runs)
-    text = report.render(ctx)
+    text = report.render(at(ctx, workload, 4))
     assert "at concurrency 4." in text
     assert "1 warmup + 4 measured requests per run, 4 in flight |" in text
     assert "4 requests are in flight, as each of 4 clients sends its next" in text
     assert "one at a time after 1 warmups, so it shows one request's GPU time" in text
+
+
+def test_report_tables_every_concurrency_level():
+    ctx = context("sglang")
+    workload = dataclasses.replace(ctx["scenario"].workload, concurrency=[2, 1])
+    text = report.render(at(ctx, workload, 1, 2))
+    assert (
+        "- **Latency and throughput** over 2 server processes × 4 requests per level"
+        in text
+    )
+    assert (
+        "concurrency 1: mean 13.000 ms, p99 16.000 ms, 80.00 requests/s; concurrency 2:"
+        in text
+    )
+    assert "| Concurrency | Run | Requests | Mean ms |" in text
+    assert (
+        "| 1 | clean_1 | 4 | 13.000 |" in text
+        and "| 2 | **All** | 8 | 13.000 |" in text
+    )
+    assert "measured requests per run and level, 1 and 2 in flight |" in text
+    assert "each server process measures concurrency 1 and 2 in turn" in text
+    assert "so it shows one request's GPU time" in text
+
+
+def test_report_shows_latency_by_prompt_length():
+    ctx = context("sglang", lengths=[100, 200, 300, 500])
+    workload = dataclasses.replace(
+        ctx["scenario"].workload, context_length=500, min_context_length=100
+    )
+    text = report.render(at(ctx, workload, 1))
+    assert "Qwen3-0.6B · prompts of 100 to 500 tokens · beam width 256" in text
+    assert "prompt lengths drawn uniformly from 100 to 500 tokens;" in text
+    section = text.split("### Latency by prompt length")[1].split("## GPU profile")[0]
+    assert "| Prompt tokens | Requests | Mean ms at concurrency 1 |" in section
+    assert (
+        "| 100–199 | 1 | 10.000 |" in section and "| 400–500 | 1 | 16.000 |" in section
+    )
+    # The profiled requests are the first measured ones.
+    assert (
+        "the capture holds 2 requests sent one at a time after 1 warmups (prompts of 100 and 200 tokens)"
+        in text
+    )
 
 
 def test_report_prints_the_pins_that_reproduce_the_run():

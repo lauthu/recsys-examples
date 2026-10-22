@@ -41,7 +41,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         counters = {"prefill.graph_replays": served[0], "decode.graph_replays": 2 * served[0],
-                    "decode.eager_fallbacks": None}
+                    "decode.eager_fallbacks": None,
+                    "prefill.graph_captures": served[0] if mode == "captures" else 0}
         catalog = {"source": "/work/catalog.jsonl", "item_count": len(paths)}
         runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1],
                    "dtype": "bfloat16"}
@@ -81,7 +82,14 @@ def fake_server(tmp_path, port, mode="valid"):
     return [sys.executable, str(script), str(port), mode, json.dumps(PATHS)]
 
 
-def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1, dtype="bfloat16"):
+def run_fake(
+    tmp_path,
+    monkeypatch,
+    mode="valid",
+    concurrency=1,
+    dtype="bfloat16",
+    name="clean_1",
+):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
     write_json(
@@ -97,6 +105,9 @@ def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1, dtype="bfloat16
     plan = {
         "engine": "sid-gr",
         "workload": {**WORKLOAD, "concurrency": concurrency},
+        "levels": sorted(
+            concurrency if isinstance(concurrency, list) else [concurrency]
+        ),
         "warmups": 2,
         "requests": 3,
         "profile_requests": 1,
@@ -120,22 +131,28 @@ def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1, dtype="bfloat16
     monkeypatch.setattr(
         client, "machine", lambda: {"gpu": "G", "driver": "D", "cpu": "C"}
     )
-    client.run(plan, "clean_1", False, work=tmp_path)
-    return read_json(tmp_path / "clean_1/result.json")
+    client.run(plan, name, False, work=tmp_path)
+    return read_json(tmp_path / name / "result.json")
 
 
 def test_clean_run_measures_checks_and_counts(tmp_path, monkeypatch):
     result = run_fake(tmp_path, monkeypatch)
-    assert len(result["latency_ms"]) == 3 and all(ms > 0 for ms in result["latency_ms"])
+    (level,) = result["levels"]
+    assert level["concurrency"] == 1 and result["order"] == [1]
+    assert len(level["latency_ms"]) == 3 and all(ms > 0 for ms in level["latency_ms"])
     # Counters cover only the measured requests; a disabled runner (None) has no delta.
-    assert result["counters"] == {"prefill.graph_replays": 3, "decode.graph_replays": 6}
+    assert result["counters"] == {
+        "prefill.graph_replays": 3,
+        "decode.graph_replays": 6,
+        "prefill.graph_captures": 0,
+    }
     assert result["catalog_beams"] == 12 and result["gpu"] == "G"
     # The server's own settings and environment, and how it was started.
     assert result["config"]["settings"] == {"beam_width": 4}
     assert result["config"]["environment"] == {"GR_X": "1"}
     assert result["server_command"][:2] == ["taskset", "--cpu-list"]
     # Every measured request's validated beams are kept for the comparison.
-    outputs = read_json(tmp_path / "clean_1/outputs.json")
+    outputs = read_json(tmp_path / "clean_1/outputs.json")["1"]
     assert sorted(outputs) == ["request-2", "request-3", "request-4"]
     assert outputs["request-2"][1] == [PATHS[1], -1.0]
     assert "outputs" not in result
@@ -143,11 +160,45 @@ def test_clean_run_measures_checks_and_counts(tmp_path, monkeypatch):
 
 def test_clients_keep_concurrency_requests_in_flight(tmp_path, monkeypatch):
     result = run_fake(tmp_path, monkeypatch, mode="slow", concurrency=3)
-    assert result["concurrency"] == 3 and result["runtime"]["max_in_flight"] == 3
-    assert len(result["latency_ms"]) == 3
+    assert result["order"] == [3] and result["runtime"]["max_in_flight"] == 3
+    assert len(result["levels"][0]["latency_ms"]) == 3
     # Responses stay with their requests whatever order they finish in.
-    outputs = read_json(tmp_path / "clean_1/outputs.json")
+    outputs = read_json(tmp_path / "clean_1/outputs.json")["3"]
     assert sorted(outputs) == ["request-2", "request-3", "request-4"]
+
+
+def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
+    levels = [1, 2, 3]
+    result = run_fake(tmp_path, monkeypatch, concurrency=levels, name="clean_2")
+    # clean_2 starts at the second level, so no level always runs first.
+    assert result["order"] == [2, 3, 1]
+    assert [level["concurrency"] for level in result["levels"]] == [2, 3, 1]
+    assert all(len(level["latency_ms"]) == 3 for level in result["levels"])
+    # Each level's warmups fall between snapshots: 3 levels x 3 measured requests.
+    assert result["counters"]["prefill.graph_replays"] == 9
+    assert result["catalog_beams"] == 3 * 3 * 4
+    outputs = read_json(tmp_path / "clean_2/outputs.json")
+    assert sorted(outputs) == ["1", "2", "3"]
+    assert all(
+        sorted(level) == ["request-2", "request-3", "request-4"]
+        for level in outputs.values()
+    )
+
+
+def test_level_order_rotates_between_clean_runs():
+    levels = [1, 2, 4]
+    assert client.level_order(levels, "clean_1") == [1, 2, 4]
+    assert client.level_order(levels, "clean_2") == [2, 4, 1]
+    assert client.level_order(levels, "clean_3") == [4, 1, 2]
+    assert client.level_order(levels, "clean_4") == [1, 2, 4]
+    assert client.level_order(levels, "profile") == [1]
+
+
+def test_sid_gr_fails_when_it_captures_prefill_graphs_while_measured(
+    tmp_path, monkeypatch
+):
+    with pytest.raises(RuntimeError, match="captured 3 prefill CUDA graphs"):
+        run_fake(tmp_path, monkeypatch, mode="captures")
 
 
 def test_invalid_beams_fail_the_run(tmp_path, monkeypatch):

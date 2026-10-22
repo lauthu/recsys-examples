@@ -4,6 +4,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import random
 import re
 from argparse import Namespace
 
@@ -16,7 +17,7 @@ from bench.common import read_json
 
 CONFIGS = ("sid_gr", "sglang", "sglang_beam_search_new", "vedantjh2_sglang")
 SID, PUBLIC, LEGACY, VEDANTJH2 = CONFIGS
-SCENARIOS = ("qwen3_0_6b", "qwen3_1_7b")
+SCENARIOS = ("qwen3_0_6b", "qwen3_1_7b", "qwen3_0_6b_load")
 
 
 def path(name):
@@ -84,6 +85,8 @@ def test_every_solution_runs_with_any_scenario(tmp_path):
     larger["workload.output_tokens"] = 5
     scenarios = [configs.load_scenario(path(name)) for name in SCENARIOS]
     scenarios.append(configs.load_scenario(write(tmp_path, scenario(**larger))))
+    load = {"workload.concurrency": [1, 2, 4, 8], "workload.min_context_length": 16}
+    scenarios.append(configs.load_scenario(write(tmp_path, scenario(**load))))
     for found in scenarios:
         for name in CONFIGS:
             configs.load_solution(path(name), found)
@@ -96,6 +99,12 @@ INVALID_SCENARIO = [
     ({"workload.output_tokens": 1}, "workload.output_tokens must be >= 2"),
     ({"workload.beam_width": 1.5}, "workload.beam_width must be int, not float"),
     ({"workload.concurrency": 0}, "workload.concurrency must be >= 1"),
+    ({"workload.concurrency": []}, "workload.concurrency must be >= 1"),
+    ({"workload.concurrency": [2, 2]}, "a list of distinct such levels"),
+    ({"workload.concurrency": True}, "workload.concurrency must be int or list"),
+    ({"workload.concurrency": [1, "2"]}, r"workload.concurrency\[1\] must be int"),
+    ({"workload.min_context_length": 0}, "between 1 and context_length"),
+    ({"workload.min_context_length": 4096}, "between 1 and context_length"),
     ({"runs.clean": "3"}, "runs.clean must be int, not str"),
     ({"model.revision": "main"}, "40-character Hub commit"),
     ({"model.dtype": "half"}, "model.dtype must be one of bfloat16, float16"),
@@ -174,6 +183,7 @@ def test_adapters_size_batches_for_the_requests_in_flight():
     workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
     workload.update(concurrency=3, seed=7)
     plan = {"workload": workload, "env": {}, "catalog": None, "server_cpus": [4, 5]}
+    plan["levels"] = [3]
     plan["dtype"] = "bfloat16"
     # Every beam holds a request slot; beam-search-new also keeps the request's.
     assert adapters.get("sglang").server_args(plan, 8000) == {
@@ -196,10 +206,31 @@ def test_adapters_size_batches_for_the_requests_in_flight():
     assert env["OMP_NUM_THREADS"] == "1" and env["MKL_NUM_THREADS"] == "2"
 
 
+def test_one_deployment_serves_every_concurrency_level():
+    workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
+    workload.update(concurrency=[1, 3], seed=7)
+    plan = {"workload": workload, "levels": [1, 3], "env": {}, "catalog": None}
+    plan.update(server_cpus=[4, 5], dtype="bfloat16")
+    settings = adapters.get("vedantjh2-sglang").server_args(plan, 8000)
+    assert settings["cuda_graph_bs_decode"] == [256, 512, 768]
+    assert settings["max_running_requests"] == 3 * 257
+    env = adapters.get("sid-gr").server(plan, 8000, profile=False)[1]
+    assert env["GR_MAX_BATCH_SIZE"] == "3" and env["GR_CONTEXT_LEN"] == "2048"
+
+
+def test_variable_lengths_get_prefill_graphs_within_one_and_a_half_times():
+    workload = {"context_length": 2048, "min_context_length": 256}
+    sizes = adapters.prefill_tokens(workload, 2)
+    assert sizes == [256, 384, 576, 864, 1296, 1944, 2916, 4096]
+    assert all(b <= 1.5 * a for a, b in zip(sizes, sizes[1:]))
+    assert adapters.prefill_tokens({"context_length": 2048}, 2) == [2048, 4096]
+
+
 def test_sglang_adapters_set_only_the_settings_solutions_may_not():
     workload = {"context_length": 8, "beam_width": 2, "output_tokens": 3}
     plan = {"workload": {**workload, "concurrency": 1, "seed": 0}, "dtype": "float16"}
     plan["catalog"] = {"server_source": "/work/catalog.pkl"}
+    plan["levels"] = [1]
     for adapter in adapters.ADAPTERS.values():
         settings = adapter.server_args(plan, 8000)
         assert settings is None or settings.keys() <= adapter.managed_settings
@@ -255,6 +286,24 @@ def test_workload_is_seeded_and_skips_special_tokens(tmp_path):
     assert rows == configs.make_workload(value, model)
     assert len(rows) == 210 and rows[10]["request_id"] == "request-10"
     assert {t for row in rows for t in row["input_ids"]} <= set(range(3, 50))
+
+
+def test_variable_prompt_lengths_are_seeded_and_bounded(tmp_path):
+    changes = {"workload.context_length": 64, "workload.min_context_length": 8}
+    value = configs.load_scenario(write(tmp_path, scenario(**changes)))
+    model = {"vocab_size": 50, "bos_token_id": 0, "eos_token_id": [1, 2]}
+    rows = configs.make_workload(value, model)
+    assert rows == configs.make_workload(value, model)
+    lengths = [len(row["input_ids"]) for row in rows]
+    assert min(lengths) >= 8 and max(lengths) <= 64 and len(set(lengths)) > 20
+    # Fixed lengths keep the token sequence they always had.
+    fixed = configs.load_scenario(
+        write(tmp_path, scenario(**{"workload.context_length": 64}))
+    )
+    old = random.Random(fixed.workload.seed)
+    allowed = list(range(3, 50))
+    first = old.choices(allowed, k=64)
+    assert configs.make_workload(fixed, model)[0]["input_ids"] == first
 
 
 def test_cpu_list():
@@ -348,7 +397,11 @@ def test_prepare_writes_plan_and_vedantjh2_model_view(tmp_path):
     assert plan["catalog"]["server_source"] == "/model/trie_output_head.safetensors"
     assert plan["requests"] == 200 and len(read_json(run.work / "workload.json")) == 210
     # The container gets plain JSON generated from the typed configs.
-    assert plan["workload"] == raw("qwen3_0_6b")["workload"]
+    assert plan["workload"] == {
+        **raw("qwen3_0_6b")["workload"],
+        "min_context_length": None,
+    }
+    assert plan["levels"] == [1]
     assert plan["server_settings"] == raw(VEDANTJH2)["server_settings"]
     assert plan["server_cpus"] == list(range(10)) and plan["client_cpus"] == [10]
     assert plan["dtype"] == "bfloat16"

@@ -39,12 +39,71 @@ def latency_row(name, latencies, duration):
     return [name, stats["n"], *values, f"{stats['n'] / duration:.2f}"], stats
 
 
+def level_runs(clean):
+    """{concurrency: [(run, latencies, duration)]}, ascending, over the clean runs."""
+    levels = defaultdict(list)
+    for result in clean:
+        for level in result["levels"]:
+            entry = (result["run"], level["latency_ms"], level["duration_s"])
+            levels[level["concurrency"]].append(entry)
+    return dict(sorted(levels.items()))
+
+
+def pooled(runs):
+    """(stats, requests/s) of one level's runs, pooled."""
+    stats = summarize([ms for _, latencies, _ in runs for ms in latencies])
+    return stats, stats["n"] / sum(duration for _, _, duration in runs)
+
+
 def latency_rows(clean):
-    rows = [latency_row(r["run"], r["latency_ms"], r["duration_s"])[0] for r in clean]
-    pooled = [ms for result in clean for ms in result["latency_ms"]]
-    duration = sum(result["duration_s"] for result in clean)
-    row, total = latency_row("**All**", pooled, duration)
-    return rows + [row], total, total["n"] / duration
+    """Each run's row and the pooled one per level; the level column only when
+    there are several."""
+    levels, rows = level_runs(clean), []
+    for concurrency, runs in levels.items():
+        prefix = [concurrency] if len(levels) > 1 else []
+        rows += [prefix + latency_row(*run)[0] for run in runs]
+        all_ms = [ms for _, latencies, _ in runs for ms in latencies]
+        duration = sum(d for _, _, d in runs)
+        rows.append(prefix + latency_row("**All**", all_ms, duration)[0])
+    return rows, {k: pooled(runs) for k, runs in levels.items()}
+
+
+def listing(values):
+    """1; 1 and 2; 1, 2 and 4."""
+    values = [f"{value:,}" for value in values]
+    return (
+        values[0] if len(values) == 1 else ", ".join(values[:-1]) + " and " + values[-1]
+    )
+
+
+def prompt_text(workload):
+    """The prompt lengths, for the scope line of reports and comparisons."""
+    if workload.min_context_length is None:
+        return f"context {workload.context_length:,}"
+    low, high = workload.min_context_length, workload.context_length
+    return f"prompts of {low:,} to {high:,} tokens"
+
+
+def length_bins(workload):
+    """Four equal-width [low, high) bins over the prompt lengths; the last includes
+    context_length."""
+    low, high = workload.min_context_length, workload.context_length + 1
+    edges = [low + (high - low) * i // 4 for i in range(5)]
+    return [(a, b) for a, b in zip(edges, edges[1:]) if b > a]
+
+
+def length_rows(clean, lengths, workload):
+    """Mean latency per prompt-length bin (rows) and concurrency level (columns),
+    pooled over the clean runs; every level sends the same prompts in order."""
+    levels, rows = level_runs(clean), []
+    for low, high in length_bins(workload):
+        inside = [i for i, n in enumerate(lengths) if low <= n < high]
+        cells = []
+        for runs in levels.values():
+            ms = [latencies[i] for _, latencies, _ in runs for i in inside]
+            cells.append(f"{summarize(ms)['mean']:.3f}" if ms else "–")
+        rows.append([f"{low:,}–{high - 1:,}", len(inside), *cells])
+    return rows
 
 
 def setup_rows(ctx):
@@ -60,8 +119,14 @@ def setup_rows(ctx):
     attention = runtime["attention"]
     backends = f"prefill {attention['prefill']}; decode {attention['decode']}"
     inputs = f"synthetic token IDs (seed {workload.seed}, special tokens excluded)"
+    if workload.min_context_length is not None:
+        inputs += (
+            f", prompt lengths drawn uniformly from {workload.min_context_length:,}"
+        )
+        inputs += f" to {workload.context_length:,} tokens"
+    several = len(workload.levels) > 1
     inputs += f"; {runs.warmups} warmup + {runs.requests} measured requests per run"
-    inputs += f", {workload.concurrency} in flight"
+    inputs += f"{' and level' if several else ''}, {listing(workload.levels)} in flight"
     rows = [
         ["GPU", f"{machine['gpu']} (driver {machine['driver']})"],
         ["CPU", cpu + cpus["client"]],
@@ -233,7 +298,7 @@ def render(ctx):
     def per_request(ns):
         return ns / requests / 1e6
 
-    latency, total, throughput = latency_rows(clean)
+    latency, levels = latency_rows(clean)
     sections, gaps = defaultdict(int), defaultdict(int)
     for phase, section, _, ns in trace["work"]:
         sections[(phase, section)] += ns
@@ -245,7 +310,7 @@ def render(ctx):
     idle = trace["busy_ns"]["idle"]
     catalog = ctx["catalog"]
     scope = (
-        f"{ctx['model']} · context {workload.context_length:,} · beam width "
+        f"{ctx['model']} · {prompt_text(workload)} · beam width "
         f"{workload.beam_width} · {workload.output_tokens} output tokens"
     )
     if catalog:
@@ -289,17 +354,66 @@ def render(ctx):
     patch_lines = "\n".join(f"- `{p}`" for p in latency_patches) or "- none"
     patch_lines += "\n\nThe profiled run also patched:\n\n"
     patch_lines += "\n".join(f"- `{p}`" for p in added) or "- nothing else"
-    in_flight = (
-        "requests go one at a time"
-        if workload.concurrency == 1
-        else f"{workload.concurrency} requests are in flight, as each of "
-        f"{workload.concurrency} clients sends its next one when its last returns"
-    )
+    top = workload.levels[-1]
+    if len(levels) > 1:
+        in_flight = (
+            f"each server process measures concurrency {listing(workload.levels)} in "
+            "turn, rotating their order between processes, and at concurrency k each "
+            "of k clients sends its next request when its last returns"
+        )
+    elif top == 1:
+        in_flight = "requests go one at a time"
+    else:
+        in_flight = (
+            f"{top} requests are in flight, as each of {top} clients sends its next "
+            "one when its last returns"
+        )
     sequential = (
         ""
-        if workload.concurrency == 1
+        if top == 1
         else ", so it shows one request's GPU time, not how the latency runs batch"
     )
+    if workload.min_context_length is not None:
+        sizes = listing(ctx["lengths"][:requests])
+        sequential = f" (prompts of {sizes} tokens){sequential}"
+    measured = f"({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests})"
+    if len(levels) > 1:
+        summary = "; ".join(
+            f"concurrency {k}: mean {s['mean']:.3f} ms, p99 {s['p99']:.3f} ms, "
+            f"{rate:.2f} requests/s"
+            for k, (s, rate) in levels.items()
+        )
+        summary = f"- **Latency and throughput** over {measured.strip('()')} requests per level: {summary}."
+    else:
+        ((stats, rate),) = levels.values()
+        summary = (
+            f"- **Latency:** mean {stats['mean']:.3f} ms, p99 {stats['p99']:.3f} ms over "
+            f"{stats['n']:,} requests {measured}, {rate:.2f} requests/s at concurrency {top}."
+        )
+    headers = [
+        "Run",
+        "Requests",
+        "Mean ms",
+        "p50 ms",
+        "p95 ms",
+        "p99 ms",
+        "Max ms",
+        "Requests/s",
+    ]
+    if len(levels) > 1:
+        headers = ["Concurrency", *headers]
+    latency_table = table(headers, latency, right=range(len(headers) - 7, len(headers)))
+    by_length = ""
+    if workload.min_context_length is not None:
+        rows = length_rows(clean, ctx["lengths"][: runs.requests], workload)
+        columns = ["Prompt tokens", "Requests"]
+        columns += [f"Mean ms at concurrency {k}" for k in levels]
+        by_length = (
+            "\n\n### Latency by prompt length\n\n"
+            + table(columns, rows, right=range(1, len(columns)))
+            + "\n\nEach level sends the same prompts; a bin's mean pools its requests "
+            "over the server processes."
+        )
     settings = {"env": solution.env}
     if solution.server_settings is not None:
         settings["server_settings"] = solution.server_settings
@@ -308,14 +422,14 @@ def render(ctx):
 
 {scope}
 
-- **Latency:** mean {total['mean']:.3f} ms, p99 {total['p99']:.3f} ms over {total['n']:,} requests ({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests}), {throughput:.2f} requests/s at concurrency {workload.concurrency}.
+{summary}
 - **GPU profile:** {per_request(kernel_ns):.3f} ms of kernel time per request; the largest section is {top_phase} `{top_section}` ({per_request(top_ns):.3f} ms, {100 * top_ns / kernel_ns:.1f}%). No GPU activity is traced for {per_request(idle):.3f} ms ({100 * idle / window_ns:.1f}%) of the {per_request(window_ns):.3f} ms server window.
 
 ## Latency
 
-{table(["Run", "Requests", "Mean ms", "p50 ms", "p95 ms", "p99 ms", "Max ms", "Requests/s"], latency, right=range(1, 8))}
+{latency_table}
 
-The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.
+The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.{by_length}
 
 ## GPU profile
 

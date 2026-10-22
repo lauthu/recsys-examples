@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-from bench import compare
-from tests.test_report import MANIFEST, context
+import dataclasses
+import xml.etree.ElementTree as ET
+
+from bench import chart, compare
+from tests.test_report import MANIFEST, at, context, levels
 
 A, B, C, D = ([n, 2, 3] for n in (1, 2, 3, 4))
 
@@ -35,11 +38,20 @@ def test_parity_separates_order_membership_and_score():
     assert found["score_delta"] == 1.0  # A: -0.0 versus -1.0
 
 
-def with_outputs(engine, paths, mean_ms):
+def with_outputs(engine, paths, mean_ms, concurrency=(1,)):
+    """mean_ms: one latency for every level, or {level: latency}."""
     ctx = context(engine)
+    if len(concurrency) > 1:
+        workload = dataclasses.replace(
+            ctx["scenario"].workload, concurrency=list(concurrency)
+        )
+        at(ctx, workload, *concurrency)
+    per_level = (
+        mean_ms if isinstance(mean_ms, dict) else dict.fromkeys(concurrency, mean_ms)
+    )
     for run in ctx["clean"]:
-        run["latency_ms"] = [mean_ms] * 4
-    ctx["outputs"] = {"r": beams(*paths)}
+        run["levels"] = [levels(k, latency=[per_level[k]] * 4)[0] for k in concurrency]
+    ctx["outputs"] = {str(k): {"r": beams(*paths)} for k in concurrency}
     ctx["manifest"] = MANIFEST
     return ctx
 
@@ -63,3 +75,46 @@ def test_the_reference_can_be_any_engine():
     assert "Output agreement with sglang" in text
     assert "| -33.3% |" in text and "| reference |" in text  # sid_gr is faster
     assert "## Versions" in text and "example/engine `cccccccccccc`" in text
+
+
+def test_comparison_with_several_levels_tables_each_and_charts_them():
+    first = with_outputs("sglang", [A, B], {1: 10.0, 4: 20.0}, concurrency=(1, 4))
+    second = with_outputs("vedantjh2-sglang", [B, A], 20.0, concurrency=(1, 4))
+    names = ["sglang", "vedantjh2"]
+    text = compare.render([first, second], names, "sglang")
+    assert "### Concurrency 1" in text and "### Concurrency 4" in text
+    # Against the reference at the same level: +100% at 1, +0% at 4.
+    level_4 = text.split("### Concurrency 4")[1].split("## ")[0]
+    assert text.count("| +100.0% |") == 1 and "| +0.0% |" in level_4
+    assert "## Throughput and p99 by concurrency" in text
+    assert "| sglang | 80.00 · 10.0 ms | 80.00 · 20.0 ms |" in text
+    assert "| vedantjh2 | 4 | 0.0% | 100.0% (100.0%) | 0.0% |" in text
+    assert "![p99 latency against throughput](throughput.svg)" in text
+    svg = compare.chart_svg([first, second], names)
+    root = ET.fromstring(svg.split("\n", 1)[1])
+    lines = root.findall(".//{http://www.w3.org/2000/svg}polyline")
+    assert len(lines) == 2 and "each line runs through concurrency 1 and 4" in svg
+    assert "vedantjh2 · concurrency 4: 80.00 requests/s, p99 20.0 ms" in svg
+
+
+def test_one_level_has_no_chart():
+    ctx = with_outputs("sglang", [A, B], 10.0)
+    assert compare.chart_svg([ctx], ["sglang"]) is None
+    text = compare.render([ctx], ["sglang"], "sglang")
+    assert "Throughput and p99" not in text and "throughput.svg" not in text
+
+
+def test_chart_assigns_colors_in_order_and_never_cycles():
+    curves = {f"e{i}": [(1, 10.0 + i, 20.0), (2, 15.0 + i, 30.0)] for i in range(8)}
+    svg = chart.render(curves, "t", "s")
+    assert 'class="line l7"' in svg and "l8" not in svg
+    curves["e8"] = curves["e0"]  # a ninth engine has no slot of its own
+    assert chart.render(curves, "t", "s") is None
+
+
+def test_chart_ticks_are_clean_and_end_labels_never_collide():
+    assert chart.ticks(9.3) == [0, 2, 4, 6, 8, 10]
+    assert chart.ticks(43.0)[-1] == 50
+    same = [(1, 10.0, 20.0), (2, 15.0, 30.0)]
+    svg = chart.render({"a": same, "b": same}, "t", "s")
+    assert svg.count('class="label"') == 1  # the legend still names both

@@ -200,6 +200,7 @@ def runtime(serving):
         },
         "counters": {
             "prefill.graph_replays": prefill_status.get("prefill_cuda_graph_replays"),
+            "prefill.graph_captures": prefill_status.get("prefill_cuda_graph_captures"),
             "decode.graph_replays": decode_status.get("decode_cuda_graph_replays"),
             "decode.eager_fallbacks": decode_status.get(
                 "decode_cuda_graph_fallback_eager_count"

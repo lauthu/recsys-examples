@@ -20,6 +20,7 @@ Response    beam parsing, per-run observed checks, setup rows for the report.
 
 import array
 import json
+import math
 import pickle
 import struct
 import sys
@@ -147,7 +148,8 @@ class SidGrAdapter(Adapter):
 
     def server(self, plan, port, profile):
         workload = plan["workload"]
-        batch = workload["concurrency"]  # every request in flight shares one batch
+        # Every request in flight shares one batch; one deployment serves every level.
+        batch = max(plan["levels"])
         env = self.environment(plan, profile)
         env.update(
             {
@@ -204,9 +206,20 @@ class SidGrAdapter(Adapter):
             "items": status.get("item_count"),
         }
 
+    def check_counters(self, plan, counters, requests, runtime):
+        # SID-GR keys prefill graphs by prompt length and captures a new one on first
+        # sight, so with variable lengths captures would land in measured latency.
+        captures = counters.get("prefill.graph_captures")
+        if captures:
+            raise RuntimeError(
+                f"SID-GR captured {captures} prefill CUDA graphs during measured "
+                "requests; for variable prompt lengths set "
+                'GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "1" in the solution'
+            )
+
     def graph_usage(self, clean):
         counts = _sum_counters(clean)
-        requests = sum(len(result["latency_ms"]) for result in clean)
+        requests = sum(measured_requests(result) for result in clean)
         enabled = clean[0]["runtime"]["cuda_graphs"]
         parts = [
             (
@@ -252,23 +265,24 @@ class SGLangAdapter(Adapter):
     def server_args(self, plan, port):
         """Where the model and the port are, and what follows from the scenario.
 
-        CUDA graph sizes: k requests in flight decode k * beam_width rows and
-        prefill k * context_length tokens. Request slots: every beam holds one,
-        and beam-search-new also keeps the request's own; with too few, requests
-        queue or the server fails.
+        One deployment serves every concurrency level, so it is sized for the
+        largest, top. CUDA graph sizes: k requests in flight decode k * beam_width
+        rows; prefill sizes come from prefill_tokens. Request slots: every beam
+        holds one, and beam-search-new also keeps the request's own; with too few,
+        requests queue or the server fails.
         """
-        workload = plan["workload"]
-        sizes = range(1, workload["concurrency"] + 1)
+        workload, top = plan["workload"], max(plan["levels"])
         return {
             "model_path": "/model",
             "host": "127.0.0.1",
             "port": port,
             "dtype": plan["dtype"],
             "random_seed": workload["seed"],
-            "cuda_graph_bs_decode": [workload["beam_width"] * k for k in sizes],
-            "cuda_graph_bs_prefill": [workload["context_length"] * k for k in sizes],
-            "max_running_requests": workload["concurrency"]
-            * (workload["beam_width"] + 1),
+            "cuda_graph_bs_decode": [
+                workload["beam_width"] * k for k in range(1, top + 1)
+            ],
+            "cuda_graph_bs_prefill": prefill_tokens(workload, top),
+            "max_running_requests": top * (workload["beam_width"] + 1),
         }
 
     def profile(self, port, start):
@@ -332,7 +346,13 @@ class SGLangAdapter(Adapter):
             )
         decodes = counts["forward.decode.graph"] + counts["forward.decode.eager"]
         if counts["forward.decode.rows"]:  # the beams of every request batched
-            parts[-1] += f", {counts['forward.decode.rows'] / decodes:g} rows each"
+            rows = counts["forward.decode.rows"] / decodes
+            each = (
+                f"{rows:g} rows each"
+                if rows.is_integer()
+                else f"{rows:.1f} rows on average"
+            )
+            parts[-1] += f", {each}"
         return "; ".join(parts)
 
 
@@ -585,6 +605,29 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
     encoded = json.dumps(header, separators=(",", ":")).encode()
     encoded += b" " * (-len(encoded) % 8)
     return struct.pack("<Q", len(encoded)) + encoded + bytes(payload)
+
+
+def prefill_tokens(workload, top):
+    """Prefill CUDA graph sizes in tokens for up to `top` requests in flight.
+
+    Fixed lengths: k prompts of context_length for k = 1..top. Variable lengths:
+    1.5x steps from min_context_length up to top * context_length, so a batch pads
+    by less than 1.5x; SGLang replays a prefill graph only below 2x padding and
+    runs the batch eagerly otherwise.
+    """
+    longest, shortest = workload["context_length"], workload.get("min_context_length")
+    if shortest is None:
+        return [longest * k for k in range(1, top + 1)]
+    sizes, size = [], shortest
+    while size < top * longest:
+        sizes.append(size)
+        size = math.ceil(size * 1.5)
+    return sizes + [top * longest]
+
+
+def measured_requests(result):
+    """Measured requests of one run's result.json, over every concurrency level."""
+    return sum(len(level["latency_ms"]) for level in result["levels"])
 
 
 def _sum_counters(clean):

@@ -179,6 +179,7 @@ def make_plan(args, run, vocab, catalog_items):
     """plan.json: the container reads this, never the YAML files."""
     scenario, solution, resources = run.scenario, run.solution, args.resources
     plan = {"engine": run.adapter.name, "workload": asdict(scenario.workload)}
+    plan.update(levels=scenario.workload.levels)
     plan.update(vocab_size=vocab, dtype=scenario.model.dtype)
     plan.update(warmups=scenario.runs.warmups, requests=scenario.runs.requests)
     plan.update(profile_requests=scenario.runs.profile_requests)
@@ -408,7 +409,10 @@ def measure(args, run, phases, model_config, rows, model):
         fail("source, benchmark code or model files changed during the runs")
     # Newer configs name it "dtype"; Hugging Face reads a config without either as float32.
     dtype = model_config.get("torch_dtype") or model_config.get("dtype") or "float32"
-    summary = write_outputs(args, run, phases, catalog_info, before, model, dtype)
+    lengths = prompt_lengths(run.scenario, rows)
+    summary = write_outputs(
+        args, run, phases, catalog_info, before, model, dtype, lengths
+    )
     shutil.rmtree(run.work)
     return summary
 
@@ -428,7 +432,18 @@ def manifest(args, run, before, model, profile):
     }
 
 
-def write_outputs(args, run, phases, catalog_info, before, model, checkpoint_dtype):
+def prompt_lengths(scenario, rows):
+    """Prompt tokens of the measured requests, in the order every level sends them."""
+    runs = scenario.runs
+    measured = rows[
+        runs.warmups : runs.warmups + max(runs.requests, runs.profile_requests)
+    ]
+    return [len(row["input_ids"]) for row in measured]
+
+
+def write_outputs(
+    args, run, phases, catalog_info, before, model, checkpoint_dtype, lengths
+):
     work, resources = run.work, args.resources
     summary = trace.analyze(work / "profile/trace.sqlite")
     title = f"{run.adapter.title} · {model['id'].split('/')[-1]}"
@@ -458,7 +473,8 @@ def write_outputs(args, run, phases, catalog_info, before, model, checkpoint_dty
         },
         "added": added_settings(run, read_json(work / "plan.json")),
         "command": shlex.join(["python3", *sys.argv]),
-        # The first clean run's beams per request, for the cross-engine comparison.
+        "lengths": lengths,
+        # The first clean run's beams per level and request, for the comparison.
         "outputs": read_json(work / phases[0] / "outputs.json"),
     }
     (run.output / "report.md").write_text(report.render(context))
@@ -470,6 +486,9 @@ def write_comparison(args, runs, finished):
     reference = args.reference or ("sglang" if "sglang" in names else names[0])
     text = compare.render(finished, names, reference)
     (args.output / "comparison.md").write_text(text)
+    svg = compare.chart_svg(finished, names)
+    if svg:
+        (args.output / compare.CHART).write_text(svg)
 
 
 if __name__ == "__main__":

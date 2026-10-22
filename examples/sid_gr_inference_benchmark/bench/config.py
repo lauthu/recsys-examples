@@ -83,23 +83,43 @@ class Model:
 
 @dataclass(frozen=True)
 class Workload:
-    context_length: int  # prompt tokens per request
+    context_length: int  # prompt tokens per request; the longest with min_context_length
     beam_width: int
     output_tokens: int  # generated tokens per beam: one from prefill, the rest decode
-    concurrency: int  # requests in flight, as a closed loop of this many clients
-    seed: int  # seeds the synthetic token IDs
+    # Requests in flight, as a closed loop of this many clients; a list measures
+    # each level in turn.
+    concurrency: int | list[int]
+    seed: int  # seeds the synthetic token IDs and lengths
+    # Variable lengths: each prompt's length is drawn uniformly from
+    # [min_context_length, context_length].
+    min_context_length: int | None = None
 
     def __post_init__(self):
-        minimums = dict(
-            context_length=1, beam_width=1, output_tokens=2, concurrency=1, seed=0
-        )
+        minimums = dict(context_length=1, beam_width=1, output_tokens=2, seed=0)
         at_least(self, "workload", **minimums)
+        levels = self.concurrency
+        levels = levels if isinstance(levels, list) else [levels]
+        check(
+            levels and min(levels) >= 1 and len(set(levels)) == len(levels),
+            "workload.concurrency must be >= 1, or a list of distinct such levels",
+        )
+        if self.min_context_length is not None:
+            check(
+                1 <= self.min_context_length <= self.context_length,
+                "workload.min_context_length must be between 1 and context_length",
+            )
+
+    @property
+    def levels(self):
+        """The concurrency levels, ascending."""
+        levels = self.concurrency
+        return sorted(levels if isinstance(levels, list) else [levels])
 
 
 @dataclass(frozen=True)
 class Runs:
     clean: int  # separate server processes measured for latency
-    requests: int  # measured requests per clean process
+    requests: int  # measured requests per concurrency level in each clean process
     warmups: int  # unmeasured requests before them
     profile_requests: int  # requests captured by the profiled process
 
@@ -237,13 +257,17 @@ def parse(cls, value, name):
 
 
 def convert(kind, value, name):
-    """Check `value` against a field type: scalars, list, dict, dataclass, X | None."""
+    """Check `value` against a field type: scalars, list, dict, dataclass, unions."""
     origin, args = typing.get_origin(kind), typing.get_args(kind)
     if origin in (typing.Union, types.UnionType):
         if value is None and type(None) in args:
             return None
-        (kind,) = [arg for arg in args if arg is not type(None)]
-        return convert(kind, value, name)
+        kinds = [arg for arg in args if arg is not type(None)]
+        if len(kinds) > 1:  # such as int | list[int]: the YAML type picks one
+            names = " or ".join(getattr(k, "__name__", str(k)) for k in kinds)
+            kinds = [k for k in kinds if (typing.get_origin(k) or k) is type(value)]
+            check(kinds, f"{name} must be {names}, not {type(value).__name__}")
+        return convert(kinds[0], value, name)
     if dataclasses.is_dataclass(kind):
         return parse(kind, value, name)
     if origin is list:
@@ -298,7 +322,8 @@ def load_model(model, workload):
 
 
 def make_workload(scenario, model_config):
-    """Seeded random token IDs without special tokens; identical for every engine."""
+    """Seeded random token IDs without special tokens, and seeded lengths with
+    min_context_length; identical for every engine and concurrency level."""
     workload, runs = scenario.workload, scenario.runs
     special = set()
     for key in ("bos_token_id", "eos_token_id", "pad_token_id"):
@@ -307,7 +332,12 @@ def make_workload(scenario, model_config):
     allowed = [t for t in range(model_config["vocab_size"]) if t not in special]
     rng = random.Random(workload.seed)
     count = runs.warmups + max(runs.requests, runs.profile_requests)
-    rows = [rng.choices(allowed, k=workload.context_length) for _ in range(count)]
+    rows = []
+    for _ in range(count):
+        length = workload.context_length
+        if workload.min_context_length is not None:
+            length = rng.randint(workload.min_context_length, length)
+        rows.append(rng.choices(allowed, k=length))
     return [
         {"request_id": f"request-{i}", "input_ids": row} for i, row in enumerate(rows)
     ]

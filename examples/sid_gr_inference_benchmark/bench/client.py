@@ -4,10 +4,11 @@
 
     python3 -m bench.client --plan /work/plan.json --run clean_1 [--profile]
 
-Starts the server, sends warmup and then measured requests from a closed loop of
-workload.concurrency clients (a new loopback connection per request), checks
-every returned beam and writes /work/<run>/result.json, with the server's full
-settings and environment read once after the measured requests. With --profile the
+Starts the server and, for each concurrency level in turn (level_order), sends
+warmup and then measured requests from a closed loop of that many clients (a new
+loopback connection per request); checks every returned beam and writes
+/work/<run>/result.json, with the server's full settings and environment read
+once after the last level's measured requests. With --profile the
 server runs under Nsight Systems, requests go one at a time and the capture
 covers only the measured ones; the report is exported to SQLite after the
 server exits.
@@ -152,6 +153,16 @@ def check_server(adapter, plan, port, runtime):
         )
 
 
+def level_order(levels, name):
+    """Concurrency levels in the order run `name` measures them. clean_i rotates
+    them by i - 1, so no level always runs first; the profiled run sends one
+    request at a time, because the trace attributes GPU time per request."""
+    if name == "profile":
+        return [1]
+    shift = (int(name.rsplit("_", 1)[1]) - 1) % len(levels)
+    return levels[shift:] + levels[:shift]
+
+
 def run(plan, name, profile, work=Path("/work")):
     directory = work / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -159,15 +170,14 @@ def run(plan, name, profile, work=Path("/work")):
     warmups = plan["warmups"]
     rows = read_json(plan["workload_path"])
     count = plan["profile_requests"] if profile else plan["requests"]
-    # The trace attributes GPU time per request, so profiled requests never overlap.
-    concurrency = 1 if profile else workload["concurrency"]
     measured = rows[warmups : warmups + count]
     paths = None
     if plan["catalog"]:
         data = Path(plan["catalog"]["path"]).read_bytes()
         shape = {key: workload[key] for key in ("output_tokens", "beam_width")}
         paths, _ = catalog.parse(data, **shape, vocab_size=plan["vocab_size"])
-    result = {"run": name, "profile": profile, "concurrency": concurrency}
+    order = level_order(plan["levels"], name)
+    result = {"run": name, "profile": profile, "order": order, "levels": []}
     result.update(machine())
     if profile:
         result["nsys"] = subprocess.run(
@@ -184,38 +194,48 @@ def run(plan, name, profile, work=Path("/work")):
     try:
         wait_ready(process, port, adapter.ready)
         os.sched_setaffinity(0, plan["client_cpus"])  # client threads inherit it
-        warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
-        for row, (response, _) in zip(rows[:warmups], warm):
-            validate(adapter, plan, row, response, paths)
-        before = call(port, "GET", "/pilot/runtime")
-        pid = before["pid"]
-        check_server(adapter, plan, port, before)
-        if profile:
-            adapter.profile(port, start=True)
-        first = time.perf_counter()
-        timed = send_all(port, adapter, measured, workload, concurrency)
-        duration = time.perf_counter() - first
-        if profile:
-            adapter.profile(port, start=False)
-        after = call(port, "GET", "/pilot/runtime")
+        counters, outputs = {}, {}
+        for concurrency in order:
+            warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
+            for row, (response, _) in zip(rows[:warmups], warm):
+                validate(adapter, plan, row, response, paths)
+            before = call(port, "GET", "/pilot/runtime")
+            pid = before["pid"]
+            check_server(adapter, plan, port, before)
+            if profile:
+                adapter.profile(port, start=True)
+            first = time.perf_counter()
+            timed = send_all(port, adapter, measured, workload, concurrency)
+            duration = time.perf_counter() - first
+            if profile:
+                adapter.profile(port, start=False)
+            after = call(port, "GET", "/pilot/runtime")
+            # Counters cover only measured requests: warmups fall between snapshots.
+            for key, value in after["counters"].items():
+                if value is not None:
+                    delta = value - before["counters"].get(key, 0)
+                    counters[key] = counters.get(key, 0) + delta
+            # Output checks run after timing so they never delay the next request.
+            outputs[str(concurrency)] = {
+                row["request_id"]: validate(adapter, plan, row, response, paths)
+                for row, (response, _) in zip(measured, timed)
+            }
+            latency = [ms for _, ms in timed]
+            result["levels"].append(
+                {
+                    "concurrency": concurrency,
+                    "latency_ms": latency,
+                    "duration_s": duration,
+                }
+            )
         # Once, after timing: the server's full settings and its environment.
         config = call(port, "GET", "/pilot/config")
-        # Output checks run after timing so they never delay the next request.
-        outputs = {}
-        for row, (response, _) in zip(measured, timed):
-            beams = validate(adapter, plan, row, response, paths)
-            outputs[row["request_id"]] = beams
-        counters = {
-            key: value - before["counters"].get(key, 0)
-            for key, value in after["counters"].items()
-            if value is not None
-        }
-        adapter.check_counters(plan, counters, len(measured), after)
-        result.update(latency_ms=[ms for _, ms in timed], duration_s=duration)
+        adapter.check_counters(plan, counters, len(measured) * len(order), after)
         result.update(runtime=after, counters=counters, catalog_beams=None)
         result.update(config=config, server_command=argv)
         if paths is not None:
-            result["catalog_beams"] = len(measured) * workload["beam_width"]
+            beams = len(measured) * len(order) * workload["beam_width"]
+            result["catalog_beams"] = beams
     finally:
         stop(process, pid, profile)
     if profile:
