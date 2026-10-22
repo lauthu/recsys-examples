@@ -10,8 +10,8 @@ Same
   - The server: SGLang's http_server.launch_server, run from the mounted source.
     Requests go to SGLang's own /generate; there is no proxy or extra hop.
   - ServerArgs: `server_settings` from the solution file verbatim, plus
-    model_path, host, port, the CUDA graph sizes of the workload
-    (engines.graph_sizes) and, for beam-search-new with a catalog,
+    model_path, host, port, the CUDA graph sizes and request slots of the
+    workload (engines.sglang_settings) and, for beam-search-new with a catalog,
     beam_search_constraint_dict.
 
 Different, and nothing else
@@ -35,7 +35,7 @@ import os
 import threading
 from pathlib import Path
 
-from bench.engines import graph_sizes
+from bench.engines import sglang_settings
 from bench.patching import Patch, apply
 
 ENGINE = os.environ.get("BENCH_ENGINE")
@@ -452,6 +452,7 @@ def runtime(scheduler):
         "sglang": sglang.__file__,
         "packages": {name: _version(name) for name in PACKAGES.split()},
         "attention": {"prefill": resolved("prefill"), "decode": resolved("decode")},
+        "dtype": str(runner.dtype).removeprefix("torch."),
         "overlap": scheduler.enable_overlap,
         "catalog": catalog_status(scheduler),
         "length_penalty": _observed.get("length_penalty"),
@@ -484,7 +485,7 @@ def main():
     from sglang.srt.utils import kill_process_tree
 
     settings = dict(plan["server_settings"], model_path="/model", host="127.0.0.1")
-    settings.update(graph_sizes(plan["workload"]), port=args.port)
+    settings.update(sglang_settings(plan["workload"]), port=args.port)
     if plan["catalog"] and plan["engine"] == "sglang-beam-search-new":
         settings["beam_search_constraint_dict"] = plan["catalog"]["server_source"]
     server_args = ServerArgs(**settings)

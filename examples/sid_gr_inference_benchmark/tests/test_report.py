@@ -126,6 +126,7 @@ def context(engine, **overrides):
     runtime = {
         "packages": {"torch": "2.9.1"},
         "attention": {"prefill": "A x28", "decode": "B"},
+        "dtype": "bfloat16",
         "cuda_graphs": {"prefill": True, "decode": False},
         "patches": ["m:Runner.forward"],
     }
@@ -174,6 +175,7 @@ def context(engine, **overrides):
         "trace": TRACE,
         "catalog": None,
         "model": "Qwen3-0.6B",
+        "checkpoint_dtype": "float32",
         "manifest": MANIFEST,
         "cpus": {"server": "0-9", "client": "10"},
         "command": "python3 run_benchmark.py",
@@ -242,6 +244,8 @@ def test_report_states_the_requests_in_flight():
 
 def test_report_prints_the_pins_that_reproduce_the_run():
     text = report.render(context("sid-gr"))
+    row = "| Model | Qwen/Qwen3-0.6B @ `eeeeeeeeeeee`; float32 checkpoint, weights "
+    assert row + "bfloat16 (observed) |" in text
     assert "https://github.com/example/engine @ `cccccccccccc`" in text
     assert f"`sha256:{'1' * 64}`" in text and "nightly-1" in text
     assert "`images/Dockerfile.engine`" in text

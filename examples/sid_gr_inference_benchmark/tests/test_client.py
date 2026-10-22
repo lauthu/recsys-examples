@@ -100,7 +100,7 @@ def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1):
         "vocab_size": 5000,
         "env": {},
         "server_settings": None,
-        "server_cpus": [0],
+        "server_cpus": sorted(os.sched_getaffinity(0))[:1],  # a CPU this job has
         "client_cpus": sorted(os.sched_getaffinity(0)),
         "workload_path": str(tmp_path / "workload.json"),
         "catalog": catalog,

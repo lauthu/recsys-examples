@@ -8,7 +8,7 @@ attributes and methods below and list it in `ENGINES`; nothing else changes.
 Standard library only: this module is imported on the host and in the container.
 
 Host side   solution sections and checks, catalog and model preparation, mounts;
-            these methods get the typed Solution and Workload from bench.config.
+            these methods get the typed Solution and Scenario from bench.config.
 Container   these methods get plan.json, which the runner generates from them.
 Server side launch command, readiness and profiler endpoints, request payload.
 Response    beam parsing, per-run observed checks, setup rows for the report.
@@ -20,6 +20,7 @@ import os
 import pickle
 import struct
 import sys
+from dataclasses import asdict
 
 from bench.common import call
 
@@ -61,11 +62,13 @@ class Engine:
     catalog_file: str | None = None
 
     # ---- host side -------------------------------------------------------
-    def validate(self, solution, workload):
-        """Engine-specific checks of a Solution against the Workload; raise ValueError."""
+    def validate(self, solution, scenario, catalog):
+        """Engine-specific checks of a Solution against the Scenario, with or
+        without a catalog; raise ValueError."""
 
-    def convert_catalog(self, paths, solution, vocab_size):
-        """Bytes of the engine's native catalog file (only if catalog_file is set)."""
+    def convert_catalog(self, paths, model, vocab_size):
+        """Bytes of the engine's native catalog file (only if catalog_file is set);
+        `model` is the scenario's Model."""
         raise NotImplementedError
 
     # ---- server side -----------------------------------------------------
@@ -75,6 +78,9 @@ class Engine:
 
     def environment(self, plan, profile):
         env = {k: v for k, v in os.environ.items() if not k.startswith(AMBIENT)}
+        # CPU thread pools match the server CPUs unless the solution says otherwise.
+        threads = str(len(plan["server_cpus"]))
+        env.update(OMP_NUM_THREADS=threads, MKL_NUM_THREADS=threads)
         env.update(plan["env"], BENCH_PROFILE="1" if profile else "0")
         return env
 
@@ -201,23 +207,15 @@ class SGLang(Engine):
     fingerprint: tuple[str, ...] = ("python",)
     sections: tuple[str, ...] = ("server_settings",)
 
-    def validate(self, solution, workload):
+    def validate(self, solution, scenario, catalog):
         settings = solution.server_settings
-        # The launcher sets these; graph sizes follow the workload (graph_sizes).
+        # The launcher sets these; the workload decides the rest (sglang_settings).
         managed = {"model_path", "host", "port", "beam_search_constraint_dict"}
-        managed |= {"cuda_graph_bs_decode", "cuda_graph_bs_prefill"}
+        managed |= set(sglang_settings(asdict(scenario.workload)))
         if managed & settings.keys():
             fail(f"server_settings must not set {sorted(managed & settings.keys())}")
         if settings.get("tp_size", 1) != 1:
             fail("server_settings need tp_size 1: phase markers need one process")
-        # Every beam holds a request slot, and beam-search-new keeps the request's
-        # own slot too; with too few, requests queue or the server fails.
-        slots = workload.concurrency * (workload.beam_width + 1)
-        if settings.get("max_running_requests", slots) < slots:
-            fail(
-                "server_settings.max_running_requests must be at least "
-                f"concurrency x (beam_width + 1) = {slots}"
-            )
 
     def server(self, plan, port, profile):
         env = self.environment(plan, profile)
@@ -297,8 +295,8 @@ class BeamSearchNew(SGLang):
     title = "SGLang beam-search-new"
     catalog_file = "catalog.pkl"
 
-    def validate(self, solution, workload):
-        super().validate(solution, workload)
+    def validate(self, solution, scenario, catalog):
+        super().validate(solution, scenario, catalog)
         if not solution.server_settings.get("enable_beam_search"):
             fail("sglang-beam-search-new needs server_settings.enable_beam_search true")
         # The branch turns the overlap scheduler off for beam search; say so.
@@ -308,7 +306,7 @@ class BeamSearchNew(SGLang):
                 "true: the branch runs beam search without the overlap scheduler"
             )
 
-    def convert_catalog(self, paths, solution, vocab_size):
+    def convert_catalog(self, paths, model, vocab_size):
         """Pickled token trie read by this branch's prefix-constrained trie."""
         root = {"t": False, "c": {}}
         nodes = 1
@@ -362,31 +360,38 @@ class Vedantjh2SGLang(Native):
     name = "vedantjh2-sglang"
     recipe = FROM_SOURCE
     title = "vedantjh2/sglang (trie-head)"
-    sections = ("server_settings", "trie_config")
     model_view = True
     catalog_file = TRIE_HEAD_FILE
 
-    def validate(self, solution, workload):
-        super().validate(solution, workload)
+    def validate(self, solution, scenario, catalog):
+        super().validate(solution, scenario, catalog)
         legacy = {"enable_beam_search", "enable_beam_cascade_attention"}
         legacy &= solution.server_settings.keys()
         if legacy:
             fail(
                 f"vedantjh2-sglang uses the native beam_width API; remove {sorted(legacy)}"
             )
-        if workload.output_tokens != 3:
-            fail(
-                "vedantjh2-sglang needs workload.output_tokens 3 (three SID codebooks)"
-            )
         if solution.env.get(SHARED, "false") not in ("true", "false"):
             fail(f'{SHARED} must be "true" or "false"')
+        if not catalog:  # native beam search: no trie output head
+            return
+        if scenario.model.sid_codebooks is None:
+            fail(
+                "vedantjh2-sglang with --catalog needs model.sid_codebooks in the "
+                "scenario: where the SID tokens sit in the vocabulary"
+            )
+        if scenario.workload.output_tokens != 3:
+            fail(
+                "vedantjh2-sglang with --catalog needs workload.output_tokens 3: its "
+                "trie output head takes exactly three SID codebooks"
+            )
 
-    def convert_catalog(self, paths, solution, vocab_size):
-        trie = solution.trie_config
+    def convert_catalog(self, paths, model, vocab_size):
+        layout = model.sid_codebooks
         return trie_output_head(
             paths,
-            token_start=trie.token_start,
-            codebook_size=trie.codebook_size,
+            token_start=layout.token_start,
+            codebook_size=layout.codebook_size,
             vocab_size=vocab_size,
         )
 
@@ -456,12 +461,13 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
 
     Depth d of a three-token path must lie in codebook range
     [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
-    The file stores range-local codes as three-level CSR int32 indices.
+    The file stores range-local codes as three-level CSR int32 indices; the
+    fork reads exactly three codebooks.
     """
     if token_start < 0 or codebook_size <= 0:
-        raise ValueError("trie_config needs token_start >= 0 and codebook_size > 0")
+        raise ValueError("sid_codebooks needs token_start >= 0 and codebook_size > 0")
     if token_start + 3 * codebook_size > vocab_size:
-        raise ValueError("trie_config codebook ranges exceed the model vocabulary")
+        raise ValueError("sid_codebooks ranges exceed the model vocabulary")
     tree = {}
     for path in paths:
         if len(path) != 3:
@@ -472,7 +478,7 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
         ]
         if any(not 0 <= code < codebook_size for code in codes):
             raise ValueError(
-                f"token path {path} is outside the trie_config codebook ranges"
+                f"token path {path} is outside the model.sid_codebooks ranges"
             )
         tree.setdefault(codes[0], {}).setdefault(codes[1], []).append(codes[2])
     roots, level1, level2 = sorted(tree), [], []
@@ -515,13 +521,19 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
     return struct.pack("<Q", len(encoded)) + encoded + bytes(payload)
 
 
-def graph_sizes(workload):
-    """SGLang CUDA graph sizes: k requests in flight decode k * beam_width rows
-    and prefill k * context_length tokens."""
+def sglang_settings(workload):
+    """SGLang ServerArgs that follow from the workload (a plan.json mapping).
+
+    CUDA graph sizes: k requests in flight decode k * beam_width rows and
+    prefill k * context_length tokens. Request slots: every beam holds one, and
+    beam-search-new also keeps the request's own; with too few, requests queue
+    or the server fails.
+    """
     sizes = range(1, workload["concurrency"] + 1)
     return {
         "cuda_graph_bs_decode": [workload["beam_width"] * k for k in sizes],
         "cuda_graph_bs_prefill": [workload["context_length"] * k for k in sizes],
+        "max_running_requests": workload["concurrency"] * (workload["beam_width"] + 1),
     }
 
 

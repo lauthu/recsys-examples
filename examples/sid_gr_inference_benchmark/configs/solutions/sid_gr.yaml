@@ -1,6 +1,7 @@
 # Solution: how the SID-GR server is launched. Loaded into bench.config.Solution.
 # The runner sets the request shape (GR_CONTEXT_LEN, GR_BEAM_WIDTH,
-# GR_DECODE_STEPS, batch size 1), the model path and the port; env must not.
+# GR_DECODE_STEPS), the batch size, pool capacities and decode graph buckets
+# from the concurrency, the model path and the port; env must not.
 
 engine: sid-gr
 
@@ -10,6 +11,7 @@ source:
   branch: main   # the image tag names it
 
 # Server environment, passed verbatim. Values are strings: quote numbers.
+# OMP_NUM_THREADS and MKL_NUM_THREADS default to the scenario's server CPU count.
 env:
   GR_ENABLE_PREFILL_CACHE: "0"
   GR_RETURN_BEAM_DETAILS: "0"
@@ -34,5 +36,3 @@ env:
   GR_INFERENCE_DECODE_NEXT_INPUT_NORM_FUSION: "0"
   GR_INFERENCE_DECODE_NEXT_INPUT_NORM_EXACT: "1"
   GR_INFERENCE_GR_TRTLLM_EXACT_ADD_RMSNORM_JIT: "1"
-  OMP_NUM_THREADS: "10"
-  MKL_NUM_THREADS: "10"

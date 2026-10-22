@@ -167,6 +167,7 @@ def runtime(adapter):
             backends[_class(getattr(backend, "_backend", None) or backend)] += 1
         decode = executor.engine.decode_engine.attention
         decode = getattr(decode, "backend", None) or getattr(decode, "_backend", None)
+        weights = executor.engine.model.embed_tokens.weight.dtype
         prefill_graph = executor.prefill_cuda_graph_runner
         decode_graph = executor.decode_cuda_graph_runner
         # A disabled graph runner has no status; None keeps that distinct from 0.
@@ -181,6 +182,7 @@ def runtime(adapter):
             ),
             "decode": _class(decode),
         },
+        "dtype": str(weights).removeprefix("torch."),
         "cuda_graphs": {
             "prefill": prefill_graph is not None,
             "decode": decode_graph is not None,

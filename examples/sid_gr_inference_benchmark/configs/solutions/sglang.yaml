@@ -8,13 +8,12 @@ source:
   commit: "baa9befa381511cd4d56f83980951e5a45fffc6d"  # v0.5.22
 
 # Server environment, passed verbatim. Values are strings: quote numbers.
+# OMP_NUM_THREADS and MKL_NUM_THREADS default to the scenario's server CPU count.
 env:
-  OMP_NUM_THREADS: "10"
-  MKL_NUM_THREADS: "10"
   PYTHONUNBUFFERED: "1"
 
-# SGLang ServerArgs, passed verbatim. The runner sets model_path, host, port
-# and CUDA graph sizes.
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host, port and,
+# from the workload, CUDA graph sizes and max_running_requests.
 server_settings:
   dtype: bfloat16
   kv_cache_dtype: auto
@@ -29,7 +28,6 @@ server_settings:
   disable_cuda_graph: false
   cuda_graph_backend_prefill: breakable
   chunked_prefill_size: -1          # one prefill chunk per request
-  max_running_requests: 1280        # >= concurrency x (beam_width + 1)
   mem_fraction_static: 0.7
   skip_server_warmup: true          # the client sends its own warmups
   log_level: warning

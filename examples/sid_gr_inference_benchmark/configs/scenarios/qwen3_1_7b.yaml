@@ -12,6 +12,14 @@ model:
     model-00002-of-00002.safetensors: "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"
     model.safetensors.index.json: "0d660e94b165eb912669a5249dff44b83188c4777a07ddb9611fb78d91b0578d"
 
+  # Semantic-ID token layout, read only by engines that decode a catalog through
+  # an SID trie output head (vedantjh2-sglang): the token at depth d lies in
+  # [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
+  # Qwen3 has no SID tokens; synthetic catalogs for it use these ranges.
+  sid_codebooks:
+    token_start: 1000
+    codebook_size: 1000
+
 workload:
   context_length: 2048  # prompt tokens per request
   beam_width: 256

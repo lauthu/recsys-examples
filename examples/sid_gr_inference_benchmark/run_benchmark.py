@@ -167,11 +167,11 @@ def prepare(args, run, model_config, workload_rows):
             for item in args.model.iterdir():
                 if item.name != engine.catalog_file:
                     (view / item.name).symlink_to(f"/model-source/{item.name}")
-            native = engine.convert_catalog(paths, solution, vocab)
+            native = engine.convert_catalog(paths, run.scenario.model, vocab)
             (view / engine.catalog_file).write_bytes(native)
         elif engine.catalog_file:
             source = f"/work/{engine.catalog_file}"
-            native = engine.convert_catalog(paths, solution, vocab)
+            native = engine.convert_catalog(paths, run.scenario.model, vocab)
             (work / engine.catalog_file).write_bytes(native)
         jsonl = "/work/catalog.jsonl"
         plan_catalog = dict(path=jsonl, server_path=jsonl, server_source=source)
@@ -203,10 +203,15 @@ def parse_args(argv):
     parser.add_argument(
         "--scenario",
         type=Path,
-        default=ROOT / "configs/scenarios/qwen3_0_6b.yaml",
+        required=True,
         help="scenario YAML: model pin, workload, runs, CPUs and GPU",
     )
-    parser.add_argument("--model", type=Path, required=True, help="bf16 checkpoint")
+    parser.add_argument(
+        "--model",
+        type=Path,
+        required=True,
+        help="checkpoint directory matching the scenario's model pin",
+    )
     parser.add_argument("--catalog", type=Path, help="JSONL items that constrain beams")
     parser.add_argument("--output", type=Path, required=True, help="new or empty dir")
     parser.add_argument(
@@ -235,7 +240,7 @@ def build_runs(args, scenario):
     runs = []
     for solution_path, source, image in args.solution:
         solution_path = Path(solution_path).expanduser().resolve()
-        engine, solution = load_solution(solution_path, scenario.workload)
+        engine, solution = load_solution(solution_path, scenario, bool(args.catalog))
         source = Path(source).expanduser().resolve()
         if not (source / engine.entry).is_file():
             fail(f"{source} is not {engine.source_label}: no {engine.entry}")
@@ -315,7 +320,9 @@ def measure(args, run, phases, model_config, rows, model):
         run_container(argv, name, run.work / f"{phase}.log")
     if input_state(args, run) != before:
         fail("source, benchmark code or model files changed during the runs")
-    summary = write_outputs(args, run, phases, catalog_info, before, model)
+    # Newer configs name it "dtype"; Hugging Face reads a config without either as float32.
+    dtype = model_config.get("torch_dtype") or model_config.get("dtype") or "float32"
+    summary = write_outputs(args, run, phases, catalog_info, before, model, dtype)
     shutil.rmtree(run.work)
     return summary
 
@@ -335,7 +342,7 @@ def manifest(args, run, before, model, profile):
     }
 
 
-def write_outputs(args, run, phases, catalog_info, before, model):
+def write_outputs(args, run, phases, catalog_info, before, model, checkpoint_dtype):
     work, cpus = run.work, run.scenario.cpus
     summary = trace.analyze(work / "profile/trace.sqlite")
     title = f"{run.engine.title} · {model['id'].split('/')[-1]}"
@@ -355,6 +362,7 @@ def write_outputs(args, run, phases, catalog_info, before, model):
         "trace": summary,
         "catalog": catalog_info,
         "model": model["id"].split("/")[-1],
+        "checkpoint_dtype": checkpoint_dtype,
         "manifest": manifest(
             args, run, before, model, read_json(work / "profile/result.json")
         ),

@@ -60,12 +60,24 @@ def test_shipped_configs_load_into_typed_classes():
         found = configs.load_scenario(path(name))
         assert isinstance(found.workload, configs.Workload)
         assert found.model.revision == raw(name)["model"]["revision"]
+        layout = configs.SidCodebooks(token_start=1000, codebook_size=1000)
+        assert found.model.sid_codebooks == layout
     for name in CONFIGS:
-        engine, found = configs.load_solution(path(name), shipped().workload)
-        assert isinstance(found, configs.Solution) and engine.name == found.engine
-        assert isinstance(found.source, configs.Source)
-    trie = configs.load_solution(path(VEDANTJH2), shipped().workload)[1].trie_config
-    assert trie == configs.TrieConfig(token_start=1000, codebook_size=1000)
+        for catalog in (False, name != PUBLIC):
+            engine, found = configs.load_solution(path(name), shipped(), catalog)
+            assert isinstance(found, configs.Solution) and engine.name == found.engine
+            assert isinstance(found.source, configs.Source)
+
+
+def test_every_solution_runs_with_any_scenario(tmp_path):
+    """Solutions hold no model or workload values."""
+    larger = {"workload.beam_width": 512, "workload.concurrency": 8}
+    larger["workload.output_tokens"] = 5
+    scenarios = [configs.load_scenario(path(name)) for name in SCENARIOS]
+    scenarios.append(configs.load_scenario(write(tmp_path, scenario(**larger))))
+    for found in scenarios:
+        for name in CONFIGS:
+            configs.load_solution(path(name), found)
 
 
 INVALID_SCENARIO = [
@@ -82,6 +94,8 @@ INVALID_SCENARIO = [
     ({"gpu": "0,1"}, "one device index"),
     ({"model.revision": "main"}, "40-character Hub commit"),
     ({"model.sha256": {"model.safetensors": "0" * 64}}, "including config.json"),
+    ({"model.sid_codebooks.codebook_size": 0}, "codebook_size must be >= 1"),
+    ({"model.sid_codebooks.depth": 3}, "sid_codebooks has unknown keys"),
 ]
 
 
@@ -117,7 +131,7 @@ INVALID_SOLUTION = [
     (SID, {"source.url": "git@github.com:x/y.git"}, "https://"),
     (VEDANTJH2, {"source.branch": ""}, "source.branch must not be empty"),
     (SID, {"server_settings": {"tp_size": 1}}, r"sections \[\]"),
-    (PUBLIC, {"trie_config": {"token_start": 0, "codebook_size": 1}}, "sections"),
+    (VEDANTJH2, {"trie_config": {"token_start": 0}}, r"unknown keys \['trie_config'\]"),
     (LEGACY, {"server_settings.enable_beam_search": False}, "enable_beam_search"),
     (LEGACY, {"server_settings.port": 30000}, "must not set"),
     (LEGACY, {"server_settings.tp_size": 2}, "tp_size"),
@@ -125,65 +139,74 @@ INVALID_SOLUTION = [
     (PUBLIC, {"server_settings.tp_size": 2}, "tp_size"),
     (PUBLIC, {"server_settings.cuda_graph_bs_decode": [256]}, "must not set"),
     (LEGACY, {"server_settings.cuda_graph_bs_prefill": [2048]}, "must not set"),
-    (PUBLIC, {"server_settings.max_running_requests": 256}, r"\+ 1\) = 257"),
+    (PUBLIC, {"server_settings.max_running_requests": 1280}, "must not set"),
     (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
     (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
-    (VEDANTJH2, {"trie_config.codebook_size": 0}, "codebook_size must be >= 1"),
-    (VEDANTJH2, {"trie_config.depth": 3}, "trie_config has unknown keys"),
 ]
 
 
 @pytest.mark.parametrize("name, changes, message", INVALID_SOLUTION)
 def test_invalid_solutions_fail_before_launch(tmp_path, name, changes, message):
     with pytest.raises(ValueError, match=message):
-        configs.load_solution(
-            write(tmp_path, solution(name, **changes)), shipped().workload
-        )
+        configs.load_solution(write(tmp_path, solution(name, **changes)), shipped())
 
 
 @pytest.mark.parametrize("name", [PUBLIC, VEDANTJH2])
 def test_native_beam_search_may_use_the_overlap_scheduler(tmp_path, name):
     value = solution(name, **{"server_settings.disable_overlap_schedule": False})
-    found = configs.load_solution(write(tmp_path, value), shipped().workload)[1]
+    found = configs.load_solution(write(tmp_path, value), shipped())[1]
     assert found.server_settings["disable_overlap_schedule"] is False
-
-
-def test_sglang_slots_cover_every_beam_in_flight():
-    four = dataclasses.replace(shipped().workload, concurrency=4)
-    for name in (PUBLIC, LEGACY, VEDANTJH2):
-        configs.load_solution(path(name), four)
-    five = dataclasses.replace(four, concurrency=5)
-    with pytest.raises(ValueError, match=r"concurrency x \(beam_width \+ 1\) = 1285"):
-        configs.load_solution(path(PUBLIC), five)
 
 
 def test_engines_size_batches_for_the_requests_in_flight():
     workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
     workload.update(concurrency=3, seed=0)
-    assert engines.graph_sizes(workload) == {
+    # Every beam holds a request slot; beam-search-new also keeps the request's.
+    assert engines.sglang_settings(workload) == {
         "cuda_graph_bs_decode": [256, 512, 768],
         "cuda_graph_bs_prefill": [2048, 4096, 6144],
+        "max_running_requests": 3 * 257,
     }
-    plan = {"workload": workload, "env": {}, "catalog": None}
+    plan = {"workload": workload, "env": {}, "catalog": None, "server_cpus": [4, 5]}
     env = engines.get("sid-gr").server(plan, 8000, profile=False)[1]
     assert env["GR_MAX_BATCH_SIZE"] == env["GR_BEAM_KV_POOL_CAPACITY"] == "3"
     assert env["GR_CONTEXT_KV_POOL_CAPACITY"] == "3"
     assert env["GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS"] == "1,2,3"
+    assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == "2"  # server CPUs
+    plan["env"] = {"OMP_NUM_THREADS": "1"}  # a solution may choose its own
+    env = engines.get("sglang").server(plan, 8000, profile=False)[1]
+    assert env["OMP_NUM_THREADS"] == "1" and env["MKL_NUM_THREADS"] == "2"
 
 
 def test_sglang_solutions_need_server_settings(tmp_path):
     value = solution(PUBLIC)
     del value["server_settings"]
     with pytest.raises(ValueError, match=r"sections \['server_settings'\]"):
-        configs.load_solution(write(tmp_path, value), shipped().workload)
+        configs.load_solution(write(tmp_path, value), shipped())
 
 
-def test_vedantjh2_needs_three_output_tokens(tmp_path):
-    workload = configs.Workload(
-        context_length=2048, beam_width=256, output_tokens=4, concurrency=1, seed=0
-    )
-    with pytest.raises(ValueError, match="three SID codebooks"):
-        configs.load_solution(path(VEDANTJH2), workload)
+def test_vedantjh2_trie_head_needs_three_tokens_and_the_sid_layout():
+    found = shipped()
+    four = dataclasses.replace(found.workload, output_tokens=4)
+    four = dataclasses.replace(found, workload=four)
+    configs.load_solution(path(VEDANTJH2), four)  # native beam search: any length
+    with pytest.raises(ValueError, match="exactly three SID codebooks"):
+        configs.load_solution(path(VEDANTJH2), four, catalog=True)
+    plain = dataclasses.replace(found.model, sid_codebooks=None)
+    plain = dataclasses.replace(found, model=plain)
+    configs.load_solution(path(VEDANTJH2), plain)
+    with pytest.raises(ValueError, match="needs model.sid_codebooks"):
+        configs.load_solution(path(VEDANTJH2), plain, catalog=True)
+
+
+def test_any_checkpoint_dtype_loads(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "model.safetensors").write_text("")
+    for dtype in ("float16", "float32"):
+        config = {"torch_dtype": dtype, "vocab_size": 5000}
+        (model / "config.json").write_text(json.dumps(config))
+        assert configs.load_model(model, shipped().workload) == config
 
 
 def test_workload_is_seeded_and_skips_special_tokens(tmp_path):
@@ -214,7 +237,7 @@ def arguments(tmp_path, catalog=None):
 
 def make_run(tmp_path, name, output=None):
     found = shipped()
-    engine, config = configs.load_solution(path(name), found.workload)
+    engine, config = configs.load_solution(path(name), found)
     output = output or tmp_path / "out"
     return runner.Run(name, engine, found, config, tmp_path / "src", "img", output)
 
@@ -317,7 +340,8 @@ def fake_sources(tmp_path):
 
 def command(tmp_path, *engine_names):
     sid_gr, sglang = fake_sources(tmp_path)
-    argv = ["--model", str(arguments(tmp_path).model), "--dry-run"]
+    argv = ["--scenario", str(path("qwen3_0_6b"))]
+    argv += ["--model", str(arguments(tmp_path).model), "--dry-run"]
     argv += ["--output", str(tmp_path / "out")]
     for name in engine_names:
         source = sid_gr if name == SID else sglang
@@ -334,11 +358,19 @@ def test_dry_run_prints_every_phase_and_writes_nothing(tmp_path, capsys):
 
 def test_several_solutions_get_their_own_directories(tmp_path, capsys):
     args = runner.parse_args(command(tmp_path, SID, LEGACY))
-    assert args.scenario == path("qwen3_0_6b")  # the default scenario
+    assert args.scenario == path("qwen3_0_6b")
     runs = runner.build_runs(args, configs.load_scenario(args.scenario))
     assert [run.output for run in runs] == [args.output / SID, args.output / LEGACY]
     assert runner.main(command(tmp_path, SID, LEGACY)) == 0
     assert capsys.readouterr().out.count("docker run") == 8
+
+
+def test_the_scenario_is_required(tmp_path, capsys):
+    argv = command(tmp_path, SID)
+    del argv[:2]
+    with pytest.raises(SystemExit):
+        runner.parse_args(argv)
+    assert "--scenario" in capsys.readouterr().err
 
 
 def test_engine_with_the_wrong_source_is_rejected(tmp_path):

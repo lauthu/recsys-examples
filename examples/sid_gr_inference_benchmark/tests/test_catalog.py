@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from bench import catalog, engines
-from bench.config import TrieConfig
+from bench.config import SidCodebooks
 
 PATHS = [
     [1000 + a, 2000 + b, 3000 + c] for a in range(4) for b in range(2) for c in range(2)
@@ -87,9 +87,9 @@ def test_sglang_trie_contains_every_path():
 
 
 def test_vedantjh2_round_trip():
-    solution = SimpleNamespace(trie_config=TrieConfig(1000, 1000))
+    model = SimpleNamespace(sid_codebooks=SidCodebooks(1000, 1000))
     paths = {tuple(p): i for i, p in enumerate(PATHS)}
-    data = engines.get("vedantjh2-sglang").convert_catalog(paths, solution, 5000)
+    data = engines.get("vedantjh2-sglang").convert_catalog(paths, model, 5000)
     size = struct.unpack("<Q", data[:8])[0]
     header = json.loads(data[8 : 8 + size])
     assert size % 8 == 0 and header["__metadata__"]["token_start"] == "1000"
@@ -118,7 +118,7 @@ def test_vedantjh2_round_trip():
 
 
 def test_vedantjh2_rejects_tokens_outside_codebooks():
-    with pytest.raises(ValueError, match="codebook ranges"):
+    with pytest.raises(ValueError, match="sid_codebooks ranges"):
         engines.trie_output_head(
             {(1000, 1999, 3000): 0},
             token_start=1000,

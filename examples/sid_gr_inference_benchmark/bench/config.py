@@ -50,12 +50,26 @@ def at_least(config, name, **minimums):
 
 # ---- scenario ------------------------------------------------------------
 @dataclass(frozen=True)
+class SidCodebooks:
+    """Where semantic-ID tokens sit in the vocabulary: the token at depth d lies
+    in [token_start + d * codebook_size, token_start + (d + 1) * codebook_size)."""
+
+    token_start: int
+    codebook_size: int
+
+    def __post_init__(self):
+        at_least(self, "model.sid_codebooks", token_start=0, codebook_size=1)
+
+
+@dataclass(frozen=True)
 class Model:
     """Hub checkpoint pin; the runner hashes the local files against it."""
 
     id: str
     revision: str  # full Hub commit ID
     sha256: dict[str, str]  # config.json, weights and index file -> SHA-256
+    # Read by engines that decode a catalog through an SID trie output head.
+    sid_codebooks: SidCodebooks | None = None
 
     def __post_init__(self):
         check(self.id, "model.id must be a Hub model ID such as Qwen/Qwen3-0.6B")
@@ -155,26 +169,14 @@ class Source:
 
 
 @dataclass(frozen=True)
-class TrieConfig:
-    """Trie output head layout: depth d uses [token_start + d * size, ... + size)."""
-
-    token_start: int
-    codebook_size: int
-
-    def __post_init__(self):
-        at_least(self, "trie_config", token_start=0, codebook_size=1)
-
-
-@dataclass(frozen=True)
 class Solution:
-    """How one engine is launched."""
+    """How one engine is launched; nothing in it depends on the model."""
 
     engine: str  # a name in engines.ENGINES
     source: Source
     env: dict[str, str]  # server environment, passed verbatim
     # SGLang ServerArgs, passed verbatim; SGLang validates names and values.
     server_settings: dict[str, Any] | None = None
-    trie_config: TrieConfig | None = None  # vedantjh2-sglang only
 
     def __post_init__(self):
         engines.get(self.engine)
@@ -259,28 +261,24 @@ def load_scenario(path):
     return parse(Scenario, read_yaml(path), f"scenario {path.name}")
 
 
-def load_solution(path, workload):
-    """How one engine is launched; returns (engine, Solution)."""
+def load_solution(path, scenario, catalog=False):
+    """How one engine is launched; returns (engine, Solution).
+
+    `catalog` says whether the run constrains beams to a catalog."""
     solution = parse(Solution, read_yaml(path), f"solution {path.name}")
     engine = engines.get(solution.engine)
-    sections = {
-        key
-        for key in ("server_settings", "trie_config")
-        if getattr(solution, key) is not None
-    }
+    sections = {"server_settings"} if solution.server_settings is not None else set()
     check(
         sections == set(engine.sections),
         f"{engine.name} solutions take exactly the sections "
         f"{sorted(engine.sections)} besides engine, source and env",
     )
-    engine.validate(solution, workload)
+    engine.validate(solution, scenario, catalog)
     return engine, solution
 
 
 def load_model(model, workload):
     config = read_json(model / "config.json")
-    if config.get("torch_dtype", config.get("dtype")) != "bfloat16":
-        fail("the model checkpoint must be bfloat16")
     names = [p.name for p in model.iterdir() if p.suffix == ".safetensors"]
     if not set(names) - {TRIE_HEAD_FILE}:
         fail(f"{model} has no safetensors weights")

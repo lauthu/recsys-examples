@@ -71,8 +71,11 @@ def setup_rows(ctx):
     if "overlap" in runtime:  # SGLang's scheduler; SID-GR has its own worker
         overlap = "on" if runtime["overlap"] else "off"
         rows.append(["Overlap scheduler (observed)", overlap])
+    weights = (
+        f"{ctx['checkpoint_dtype']} checkpoint, weights {runtime['dtype']} (observed)"
+    )
     rows += [
-        ["Model", f"{model['id']} @ `{model['revision'][:12]}`, bfloat16"],
+        ["Model", f"{model['id']} @ `{model['revision'][:12]}`; {weights}"],
         ["Workload", inputs],
     ]
     rows += engine.setup_rows(solution, catalog)
