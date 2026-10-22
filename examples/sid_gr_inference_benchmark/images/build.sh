@@ -43,8 +43,17 @@ case "$engine" in
       echo "$checkout is at $commit, not the pinned $pinned" >&2; exit 1; }
     [[ -z "$(git -C "$checkout" status --porcelain --untracked-files=no)" ]] || {
       echo "$checkout has uncommitted changes" >&2; exit 1; }
+    # The recipe freezes the resolved dependencies into constraints.txt. Since
+    # python-dateutil 3.0 that includes it, and botocore needs <3, so the later
+    # runai-model-streamer[s3] install cannot resolve: hold it below 3.
+    recipe="$(mktemp)"
+    trap 'rm -f "$recipe"' EXIT
+    sed 's|pip install .*"\.\[\${BUILD_TYPE}]"|& "python-dateutil<3"|' \
+      "$checkout/docker/Dockerfile" >"$recipe"
+    [[ "$(grep -c '"python-dateutil<3"' "$recipe")" == 1 ]] || {
+      echo "$checkout/docker/Dockerfile: no single dependency install" >&2; exit 1; }
     echo "building $url@$pinned ($branch) from source in $checkout"
-    DOCKER_BUILDKIT=1 exec docker build -f "$checkout/docker/Dockerfile" \
+    DOCKER_BUILDKIT=1 docker build -f "$recipe" \
       --target framework_final --build-arg BRANCH_TYPE=local \
       --build-arg BUILD_TYPE=all --build-arg INSTALL_FLASHINFER_JIT_CACHE=1 \
       "${labels[@]}" -t "$name:$tag" "$checkout"

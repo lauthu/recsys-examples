@@ -14,8 +14,8 @@ branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
 | Engine | Source | Recipe | Tag |
 | --- | --- | --- | --- |
 | `sglang` | release v0.5.22 | [Dockerfile.sglang](Dockerfile.sglang): the official image, by digest | `sid-gr-bench:sglang` |
-| `sglang-beam-search-new` | [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891), `feature/beam_search_update_0801` | the source's `docker/Dockerfile`, target `framework_final` | `cswuyg-sglang:feature-beam_search_update_0801-df191d672f19` |
-| `vedantjh2-sglang` | [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788), `trie-head` | the source's `docker/Dockerfile`, target `framework_final` | `vedantjh2-sglang:trie-head-646a7f5ce6f9` |
+| `sglang-beam-search-new` | [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891), `feature/beam_search_update_0801` | the source's `docker/Dockerfile` with one pin (below), target `framework_final` | `cswuyg-sglang:feature-beam_search_update_0801-df191d672f19` |
+| `vedantjh2-sglang` | [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788), `trie-head` | the source's `docker/Dockerfile` with one pin (below), target `framework_final` | `vedantjh2-sglang:trie-head-646a7f5ce6f9` |
 | `sid-gr` | [NVIDIA/recsys-examples@c6eba91](https://github.com/NVIDIA/recsys-examples/tree/c6eba911231d69d8cabaab94626bcb5a25c5a719), `main` | [Dockerfile.sid-gr](Dockerfile.sid-gr): an SGLang release plus the dependencies the commit declares | `nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d` |
 
 ```bash
@@ -28,7 +28,11 @@ images/build.sh sid-gr ../..                                    # any clone with
 The SGLang forks are built with the recipe SGLang releases with: `BRANCH_TYPE=local`
 installs the checkout itself together with the dependencies that commit pins, on
 the CUDA image the fork's Dockerfile names (pinned by tag, not digest). The
-checkout must be clean and at the pinned commit.
+checkout must be clean and at the pinned commit. `build.sh` adds one pin: the step
+that resolves the dependencies also requires `python-dateutil<3`. The recipe
+freezes what that step resolves into `constraints.txt` for the later steps, and
+every botocore requires python-dateutil below 3, so with python-dateutil 3.0 (on
+PyPI since 2026-10-21) the later `runai-model-streamer[s3]` install cannot resolve.
 
 ## SID-GR
 
