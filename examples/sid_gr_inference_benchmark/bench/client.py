@@ -6,7 +6,8 @@
 
 Starts the server, sends warmup and then measured requests from a closed loop of
 workload.concurrency clients (a new loopback connection per request), checks
-every returned beam and writes /work/<run>/result.json. With --profile the
+every returned beam and writes /work/<run>/result.json, with the server's full
+settings and environment read once after the measured requests. With --profile the
 server runs under Nsight Systems, requests go one at a time and the capture
 covers only the measured ones; the report is exported to SQLite after the
 server exits.
@@ -197,6 +198,8 @@ def run(plan, name, profile, work=Path("/work")):
         if profile:
             adapter.profile(port, start=False)
         after = call(port, "GET", "/pilot/runtime")
+        # Once, after timing: the server's full settings and its environment.
+        config = call(port, "GET", "/pilot/config")
         # Output checks run after timing so they never delay the next request.
         outputs = {}
         for row, (response, _) in zip(measured, timed):
@@ -210,6 +213,7 @@ def run(plan, name, profile, work=Path("/work")):
         adapter.check_counters(plan, counters, len(measured), after)
         result.update(latency_ms=[ms for _, ms in timed], duration_s=duration)
         result.update(runtime=after, counters=counters, catalog_beams=None)
+        result.update(config=config, server_command=argv)
         if paths is not None:
             result["catalog_beams"] = len(measured) * workload["beam_width"]
     finally:

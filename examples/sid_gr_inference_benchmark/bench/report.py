@@ -4,11 +4,13 @@
 
 Every number is measured or observed at runtime; solution settings are copied
 verbatim from the configuration rather than interpreted. The context carries the
-typed Scenario and Solution from bench.config, and the settings the benchmark
-adds to the solution's (run_benchmark.added_settings).
+typed Scenario and Solution from bench.config, the settings the benchmark adds
+to the solution's (run_benchmark.added_settings), and, in each run's result, the
+server's full settings and environment as it reported them (GET /pilot/config).
 """
 
 import json
+import shlex
 from collections import defaultdict
 
 import yaml
@@ -86,6 +88,96 @@ def setup_rows(ctx):
         text += f"`{catalog['sha256'][:12]}`; all {checked:,} returned beams are "
         rows.append(["Catalog", text + "catalog items"])
     return rows
+
+
+UNSET = object()  # a setting the server does not report
+
+
+def cell(value):
+    """One value as compact JSON, safe inside a table cell."""
+    text = "unset" if value is UNSET else json.dumps(value)
+    return "`" + text.replace("|", "\\|") + "`"
+
+
+def changed_by_engine(ctx, observed):
+    """Rows for what the solution or the benchmark set that the server runs with a
+    different value; PORT differs per run by design."""
+    solution, added = ctx["solution"], ctx["added"]
+    settings = {**(solution.server_settings or {}), **added.get("server_settings", {})}
+    rows = []
+    for kind, wanted, running in (
+        ("server_settings", settings, observed["settings"]),
+        ("env", {**solution.env, **added["env"]}, observed["environment"]),
+    ):
+        for key, value in wanted.items():
+            found = running.get(key, UNSET)
+            if value != "PORT" and found != value:
+                rows.append([f"`{kind}.{key}`", cell(value), cell(found)])
+    return rows
+
+
+def profile_differences(clean, profile, added):
+    """Settings and environment variables in which the profiled process differed,
+    except the port and the container's hostname, which differ in every run."""
+    lines = []
+    for kind, key, wanted in (
+        ("settings", "settings", added.get("server_settings", {})),
+        ("env", "environment", {**added["env"], "HOSTNAME": "PORT"}),
+    ):
+        before, after = clean["config"][key], profile["config"][key]
+        per_run = {name for name, value in wanted.items() if value == "PORT"}
+        for name in sorted((before.keys() | after.keys()) - per_run):
+            old, new = before.get(name, UNSET), after.get(name, UNSET)
+            if old != new:
+                lines.append(f"- `{kind}.{name}`: {cell(old)} → {cell(new)}")
+    return lines
+
+
+def configuration_section(ctx):
+    """The server's own report of its settings and environment, if it gave one."""
+    clean, profile = ctx["clean"][0], ctx["profile"]
+    observed = clean.get("config")
+    if not observed:
+        return ""
+    rows = changed_by_engine(ctx, observed)
+    changed = table(["Setting", "Set to", "Running with"], rows) if rows else "none"
+    profiled = ""
+    if profile.get("config"):
+        lines = profile_differences(clean, profile, ctx["added"]) or ["- nothing"]
+        profiled = (
+            "\n\nThe profiled process differed from the first clean run in (port and "
+            "container hostname aside):\n\n"
+            + "\n".join(lines)
+            + "\n\nand ran as:\n\n```bash\n"
+            + shlex.join(profile["server_command"])
+            + "\n```"
+        )
+    source = observed["source"]
+    settings = yaml.safe_dump(observed["settings"], sort_keys=True).rstrip()
+    environment = yaml.safe_dump(observed["environment"], sort_keys=True).rstrip()
+    return f"""
+
+<details><summary>Full server configuration (observed)</summary>
+
+Read from the server once, after the first clean run's measured requests: its settings ({source}) and its process environment. Text values of names with the word TOKEN, SECRET, PASSWORD or KEY are redacted.
+
+Changed by the engine, that is set by the solution or the benchmark but running with another value (`PORT` differs per run by design):
+
+{changed}
+
+Settings ({source}):
+
+```yaml
+{settings}
+```
+
+Environment:
+
+```yaml
+{environment}
+```{profiled}
+
+</details>"""
 
 
 def source_text(source):
@@ -263,7 +355,7 @@ Added by the benchmark for this scenario and machine (`PORT` is chosen per run).
 {yaml.safe_dump(ctx["added"], sort_keys=False).rstrip()}
 ```
 
-</details>
+</details>{configuration_section(ctx)}
 
 <details><summary>Changes to the engine's own HTTP server (observed)</summary>
 

@@ -45,8 +45,10 @@ class Handler(BaseHTTPRequestHandler):
         catalog = {"source": "/work/catalog.jsonl", "item_count": len(paths)}
         runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1],
                    "dtype": "bfloat16"}
+        config = {"source": "build_info", "settings": {"beam_width": 4},
+                  "environment": {"GR_X": "1"}}
         self.reply({"/ready": {"ready": True}, "/catalog/status": {"catalog": catalog},
-                    "/pilot/runtime": runtime}[self.path])
+                    "/pilot/runtime": runtime, "/pilot/config": config}[self.path])
 
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"null")
@@ -128,6 +130,10 @@ def test_clean_run_measures_checks_and_counts(tmp_path, monkeypatch):
     # Counters cover only the measured requests; a disabled runner (None) has no delta.
     assert result["counters"] == {"prefill.graph_replays": 3, "decode.graph_replays": 6}
     assert result["catalog_beams"] == 12 and result["gpu"] == "G"
+    # The server's own settings and environment, and how it was started.
+    assert result["config"]["settings"] == {"beam_width": 4}
+    assert result["config"]["environment"] == {"GR_X": "1"}
+    assert result["server_command"][:2] == ["taskset", "--cpu-list"]
     # Every measured request's validated beams are kept for the comparison.
     outputs = read_json(tmp_path / "clean_1/outputs.json")
     assert sorted(outputs) == ["request-2", "request-3", "request-4"]

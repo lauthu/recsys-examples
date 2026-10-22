@@ -17,9 +17,11 @@ Same
 Different, and nothing else
   - PATCHES: the methods listed there. Hooks follow the rules in
     bench/patching.py: original arguments and results, no GPU sync.
-  - The one "always" entry adds three routes and leaves every other route to
+  - The one "always" entry adds four routes and leaves every other route to
     the original dispatcher (about 85 ns per request):
         GET  /pilot/runtime        packages, attention backends, CUDA graph counters
+        GET  /pilot/config         the server's build_info and environment, read
+                                   once after the measured requests
         POST /pilot/profile/start  cudaProfilerStart (BENCH_PROFILE=1 only)
         POST /pilot/profile/stop   cudaProfilerStop
   - "profile" entries exist only in the profiled process (BENCH_PROFILE=1) and
@@ -39,7 +41,11 @@ from pathlib import Path
 
 # Only bench.patching: more modules in this process put a ~220 ms stall into one
 # round of measured requests at concurrency 4 (seen when it imported bench.adapters).
-from bench.patching import Patch, apply  # PYTHONPATH has /benchmark-tools
+from bench.patching import (  # PYTHONPATH has /benchmark-tools
+    Patch,
+    apply,
+    configuration,
+)
 
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
 PACKAGES = (
@@ -55,8 +61,8 @@ def patches():
         Patch(
             f"{http}._dispatch",
             pilot_routes,
-            "adds /pilot/runtime and /pilot/profile/start|stop; other routes "
-            "go to the original dispatcher",
+            "adds /pilot/runtime, /pilot/config and /pilot/profile/start|stop; "
+            "other routes go to the original dispatcher",
         ),
         Patch(
             f"{http}._handle_sglang_generate",
@@ -128,6 +134,9 @@ def pilot_routes(original):
     def wrapped(self, method, route, payload):
         if (method, route) == ("GET", ("pilot", "runtime")):
             return GRHTTPResponse(200, runtime(self))
+        if (method, route) == ("GET", ("pilot", "config")):
+            snapshot = configuration(self.build_info, "build_info", os.environ)
+            return GRHTTPResponse(200, snapshot)
         if method == "POST" and route in (
             ("pilot", "profile", "start"),
             ("pilot", "profile", "stop"),

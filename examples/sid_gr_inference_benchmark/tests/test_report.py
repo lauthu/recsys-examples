@@ -122,6 +122,29 @@ MANIFEST = {
 }
 
 
+ENVIRONMENT = {
+    "BENCH_PROFILE": "0",
+    "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "true",
+    "HF_TOKEN": "redacted",
+}
+SETTINGS = {"page_size": 1, "dtype": "bfloat16", "port": 30001, "policy": "fcfs"}
+CONFIG = {
+    "source": "ServerArgs.resolved_dict()",
+    "settings": SETTINGS,
+    "environment": ENVIRONMENT,
+}
+PROFILED = {
+    **CONFIG,
+    "settings": {**SETTINGS, "port": 30002},  # per run, not listed
+    "environment": {
+        **ENVIRONMENT,
+        "HOSTNAME": "other-container",
+        "BENCH_PROFILE": "1",
+        "CUDA_INJECTION64_PATH": "/nsys/inject.so",
+    },
+}
+
+
 def context(engine, **overrides):
     runtime = {
         "packages": {"torch": "2.9.1"},
@@ -139,6 +162,8 @@ def context(engine, **overrides):
             "driver": "1.0",
             "cpu": "CPU",
             "runtime": runtime,
+            "config": CONFIG,
+            "server_command": ["taskset", "--cpu-list", "0", "python3", "server"],
             "catalog_beams": 8,
             "counters": {
                 "prefill.graph_replays": 4,
@@ -171,6 +196,8 @@ def context(engine, **overrides):
             **clean[0],
             "catalog_beams": 4,
             "runtime": {**runtime, "patches": ["m:Runner.forward", "m:Batch.run"]},
+            "config": PROFILED,
+            "server_command": ["nsys", "profile", "taskset", "python3", "server"],
         },
         "trace": TRACE,
         "catalog": None,
@@ -265,6 +292,30 @@ def test_report_shows_the_solution_settings_and_what_the_benchmark_adds():
     assert "server_settings:\n  page_size: 1\n```" in solution
     assert "env:\n  BENCH_PROFILE: '0'\nserver_settings:\n  dtype: bfloat16\n" in added
     assert "scenario `111111111111`, solution `222222222222`" in text
+
+
+def test_report_holds_the_full_configuration_the_server_reported():
+    text = report.render(context("sglang"))
+    section = text.split("Full server configuration (observed)</summary>")[1]
+    section = section.split("</details>")[0]
+    assert "Settings (ServerArgs.resolved_dict()):" in section
+    assert "\n\nnone\n" in section  # nothing set differs; PORT is skipped
+    assert "policy: fcfs" in section and "HF_TOKEN: redacted" in section
+    assert '- `env.BENCH_PROFILE`: `"0"` → `"1"`' in section
+    assert '- `env.CUDA_INJECTION64_PATH`: `unset` → `"/nsys/inject.so"`' in section
+    assert "```bash\nnsys profile taskset python3 server\n```" in section
+    assert "settings.port" not in section and "HOSTNAME" not in section
+
+
+def test_report_lists_settings_the_engine_changed():
+    clean = context("sglang")["clean"]
+    changed = {**CONFIG, "settings": {**SETTINGS, "page_size": 4}}
+    clean = [{**run, "config": changed} for run in clean]
+    text = report.render(context("sglang", clean=clean))
+    assert "| `server_settings.page_size` | `1` | `4` |" in text
+    del changed["settings"]["dtype"]
+    text = report.render(context("sglang", clean=clean))
+    assert '| `server_settings.dtype` | `"bfloat16"` | `unset` |' in text
 
 
 def test_report_lists_the_observed_server_patches():

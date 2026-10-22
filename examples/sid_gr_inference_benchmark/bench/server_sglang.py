@@ -15,8 +15,10 @@ Same
     and, for beam-search-new with a catalog, beam_search_constraint_dict.
 
 Different, and nothing else
-  - ROUTES: two added GET routes (/pilot/ready, /pilot/runtime) and, when
-    profiling, wrappers on /generate, /start_profile and /stop_profile.
+  - ROUTES: three added GET routes (/pilot/ready, /pilot/runtime, /pilot/config)
+    and, when profiling, wrappers on /generate, /start_profile and
+    /stop_profile. /pilot/config serves the resolved ServerArgs and the
+    environment; the client reads it once, after the measured requests.
   - PATCHES: the scheduler-process methods listed there. Hooks follow the rules
     in bench/patching.py: original arguments and results, no GPU sync.
   - Latency runs keep only the "always" entries, which count forwards and read
@@ -36,7 +38,7 @@ import threading
 from pathlib import Path
 
 from bench import adapters
-from bench.patching import Patch, apply
+from bench.patching import Patch, apply, configuration
 
 ENGINE = os.environ.get("BENCH_ENGINE")
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
@@ -168,6 +170,7 @@ def routes(http_server):
     return [
         ("/pilot/ready", ready_route(http_server), False, "added: 200 once Up"),
         ("/pilot/runtime", runtime_route(http_server), False, "added: snapshot"),
+        ("/pilot/config", config_route(http_server), False, "added: settings"),
         ("/generate", request_range, True, "NVTX request range"),
         ("/start_profile", capture_route(True), True, "notes the capture start"),
         ("/stop_profile", capture_route(False), True, "notes the capture stop"),
@@ -358,6 +361,26 @@ def runtime_route(http_server):
         return JSONResponse({"pid": os.getpid(), **states[0]["bench"]})
 
     return runtime_snapshot
+
+
+def config_route(http_server):
+    from fastapi.responses import JSONResponse
+
+    async def config_snapshot():
+        # The client reads this once, after the measured requests. resolved_dict()
+        # gives the values a resolving ServerArgs (v0.5.22, vedantjh2) runs with;
+        # older ones resolve their fields in place.
+        args = http_server._global_state.tokenizer_manager.server_args
+        resolved = getattr(args, "resolved_dict", None)
+        if callable(resolved):
+            snapshot = configuration(
+                resolved(), "ServerArgs.resolved_dict()", os.environ
+            )
+        else:
+            snapshot = configuration(args, "ServerArgs fields", os.environ)
+        return JSONResponse(snapshot)
+
+    return config_snapshot
 
 
 def request_range(original):

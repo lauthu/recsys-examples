@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
+import enum
+import json
 import subprocess
 import sys
 import types
@@ -8,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from bench import adapters, server_sglang, server_sid_gr
-from bench.patching import Patch, apply, selected
+from bench.patching import Patch, apply, configuration, plain, redacted, selected
 
 NATIVE = ("sglang", "vedantjh2-sglang")  # both use the native beam_width API
 
@@ -112,6 +114,75 @@ def test_the_sid_gr_launcher_loads_nothing_else_from_bench():
         "['bench',",
         "'bench.patching',",
         "'bench.server_sid_gr']",
+    ]
+
+
+class Mode(enum.Enum):
+    FAST = "fast"
+
+
+class Record:
+    def __init__(self):
+        self.name, self.sizes, self._hidden = "x", (1, 2), 3
+        self.ratio, self.mode, self.tags = float("inf"), Mode.FAST, {"b", "a"}
+        self.nested = {"inner": {"deep": {"deeper": {"deepest": [1]}}}}
+
+
+def test_configuration_values_become_json_safe():
+    found = plain({"record": Record(), 1: None})
+    assert found == {
+        "record": {
+            "name": "x",
+            "sizes": [1, 2],
+            "ratio": "inf",
+            "mode": "fast",
+            "tags": ["a", "b"],
+            "nested": {"inner": {"deep": "{'deeper': {'deepest': [1]}}"}},  # depth 4
+        },
+        "1": None,
+    }
+    json.dumps(found, allow_nan=False)
+
+
+def test_only_secret_words_are_redacted():
+    found = redacted(
+        {
+            "HF_TOKEN": "t",
+            "api_key": "k",
+            "ssl_keyfile_password": "p",
+            "UNSET_SECRET": "",
+            "bos_token_id": 1,
+            "num_key_value_heads": 8,
+            "max_prefill_tokens": 8,
+            "skip_tokenizer_init": True,
+            "ssl_keyfile": "/k.pem",
+            "nested": {"admin_api_key": "a"},
+        }
+    )
+    assert found == {
+        "HF_TOKEN": "redacted",
+        "api_key": "redacted",
+        "ssl_keyfile_password": "redacted",
+        "UNSET_SECRET": "",
+        "bos_token_id": 1,
+        "num_key_value_heads": 8,
+        "max_prefill_tokens": 8,
+        "skip_tokenizer_init": True,
+        "ssl_keyfile": "/k.pem",
+        "nested": {"admin_api_key": "redacted"},
+    }
+
+
+def test_config_snapshot_names_its_source_and_sorts_the_environment():
+    found = configuration({"page_size": 1}, "build_info", {"B": "1", "GH_TOKEN": "x"})
+    assert found == {
+        "source": "build_info",
+        "settings": {"page_size": 1},
+        "environment": {"B": "1", "GH_TOKEN": "redacted"},
+    }
+    assert list(configuration({}, "s", {"B": "1", "A": "2"})["environment"]) == [
+        "A",
+        "B",
     ]
 
 
