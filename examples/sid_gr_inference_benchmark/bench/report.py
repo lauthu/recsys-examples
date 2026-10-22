@@ -1,0 +1,383 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""report.md from the run results and the trace summary.
+
+Every number is measured or observed at runtime; solution settings are copied
+verbatim from the configuration rather than interpreted. The context carries the
+typed Scenario and Solution from bench.config, the settings the benchmark adds
+to the solution's (run_benchmark.added_settings), and, in each run's result, the
+server's full settings and environment as it reported them (GET /pilot/config).
+"""
+
+import json
+import shlex
+from collections import defaultdict
+
+import yaml
+from bench import adapters
+from bench.common import summarize
+from bench.sunburst import phase_key
+from bench.trace import NO_PHASE, NO_SECTION
+
+
+def short(name, limit=90):
+    """Kernel symbol without the return type and template arguments."""
+    name = name.removeprefix("void ")
+    name = name if len(name) <= limit else name[: limit - 1] + "…"
+    return name.replace("|", "\\|").replace("`", "")
+
+
+def table(headers, rows, right=()):
+    align = ["---:" if i in right else "---" for i in range(len(headers))]
+    lines = [headers, align, *rows]
+    return "\n".join("| " + " | ".join(map(str, line)) + " |" for line in lines)
+
+
+def latency_row(name, latencies, duration):
+    stats = summarize(latencies)
+    values = [f"{stats[key]:.3f}" for key in ("mean", "p50", "p95", "p99", "max")]
+    return [name, stats["n"], *values, f"{stats['n'] / duration:.2f}"], stats
+
+
+def latency_rows(clean):
+    rows = [latency_row(r["run"], r["latency_ms"], r["duration_s"])[0] for r in clean]
+    pooled = [ms for result in clean for ms in result["latency_ms"]]
+    duration = sum(result["duration_s"] for result in clean)
+    row, total = latency_row("**All**", pooled, duration)
+    return rows + [row], total, total["n"] / duration
+
+
+def setup_rows(ctx):
+    """Hardware, software and workload; runtime rows are read from the server."""
+    solution, clean, catalog = ctx["solution"], ctx["clean"], ctx["catalog"]
+    adapter = adapters.get(solution.engine)
+    workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
+    machine, cpus, runtime = clean[0], ctx["cpus"], clean[0]["runtime"]
+    manifest = ctx["manifest"]
+    model = manifest["model"]
+    packages = [f"{name} {v}" for name, v in runtime["packages"].items() if v]
+    cpu = f"{machine['cpu']}; server CPUs {cpus['server']}, client CPUs "
+    attention = runtime["attention"]
+    backends = f"prefill {attention['prefill']}; decode {attention['decode']}"
+    inputs = f"synthetic token IDs (seed {workload.seed}, special tokens excluded)"
+    inputs += f"; {runs.warmups} warmup + {runs.requests} measured requests per run"
+    inputs += f", {workload.concurrency} in flight"
+    rows = [
+        ["GPU", f"{machine['gpu']} (driver {machine['driver']})"],
+        ["CPU", cpu + cpus["client"]],
+        ["Engine", f"{adapter.title}, {source_text(manifest['source'])}"],
+        ["Image", f"`{manifest['image']['id']}`"],
+        ["Packages", ", ".join(packages)],
+        ["Attention (observed)", backends],
+        ["CUDA graphs (observed)", adapter.graph_usage(clean)],
+    ]
+    if "overlap" in runtime:  # SGLang's scheduler; SID-GR has its own worker
+        overlap = "on" if runtime["overlap"] else "off"
+        rows.append(["Overlap scheduler (observed)", overlap])
+    weights = (
+        f"{ctx['checkpoint_dtype']} checkpoint, weights {runtime['dtype']} (observed)"
+    )
+    rows += [
+        ["Model", f"{model['id']} @ `{model['revision'][:12]}`; {weights}"],
+        ["Workload", inputs],
+    ]
+    rows += adapter.setup_rows(solution, catalog)
+    if catalog:
+        checked = sum(result["catalog_beams"] for result in clean + [ctx["profile"]])
+        text = f"{catalog['name']}: {catalog['items']:,} items, sha256 "
+        text += f"`{catalog['sha256'][:12]}`; all {checked:,} returned beams are "
+        rows.append(["Catalog", text + "catalog items"])
+    return rows
+
+
+UNSET = object()  # a setting the server does not report
+
+
+def cell(value):
+    """One value as compact JSON, safe inside a table cell."""
+    text = "unset" if value is UNSET else json.dumps(value)
+    return "`" + text.replace("|", "\\|") + "`"
+
+
+def changed_by_engine(ctx, observed):
+    """Rows for what the solution or the benchmark set that the server runs with a
+    different value; PORT differs per run by design."""
+    solution, added = ctx["solution"], ctx["added"]
+    settings = {**(solution.server_settings or {}), **added.get("server_settings", {})}
+    rows = []
+    for kind, wanted, running in (
+        ("server_settings", settings, observed["settings"]),
+        ("env", {**solution.env, **added["env"]}, observed["environment"]),
+    ):
+        for key, value in wanted.items():
+            found = running.get(key, UNSET)
+            if value != "PORT" and found != value:
+                rows.append([f"`{kind}.{key}`", cell(value), cell(found)])
+    return rows
+
+
+def profile_differences(clean, profile, added):
+    """Settings and environment variables in which the profiled process differed,
+    except the port and the container's hostname, which differ in every run."""
+    lines = []
+    for kind, key, wanted in (
+        ("settings", "settings", added.get("server_settings", {})),
+        ("env", "environment", {**added["env"], "HOSTNAME": "PORT"}),
+    ):
+        before, after = clean["config"][key], profile["config"][key]
+        per_run = {name for name, value in wanted.items() if value == "PORT"}
+        for name in sorted((before.keys() | after.keys()) - per_run):
+            old, new = before.get(name, UNSET), after.get(name, UNSET)
+            if old != new:
+                lines.append(f"- `{kind}.{name}`: {cell(old)} → {cell(new)}")
+    return lines
+
+
+def configuration_section(ctx):
+    """The server's own report of its settings and environment, if it gave one."""
+    clean, profile = ctx["clean"][0], ctx["profile"]
+    observed = clean.get("config")
+    if not observed:
+        return ""
+    rows = changed_by_engine(ctx, observed)
+    changed = table(["Setting", "Set to", "Running with"], rows) if rows else "none"
+    profiled = ""
+    if profile.get("config"):
+        lines = profile_differences(clean, profile, ctx["added"]) or ["- nothing"]
+        profiled = (
+            "\n\nThe profiled process differed from the first clean run in (port and "
+            "container hostname aside):\n\n"
+            + "\n".join(lines)
+            + "\n\nand ran as:\n\n```bash\n"
+            + shlex.join(profile["server_command"])
+            + "\n```"
+        )
+    source = observed["source"]
+    settings = yaml.safe_dump(observed["settings"], sort_keys=True).rstrip()
+    environment = yaml.safe_dump(observed["environment"], sort_keys=True).rstrip()
+    return f"""
+
+<details><summary>Full server configuration (observed)</summary>
+
+Read from the server once, after the first clean run's measured requests: its settings ({source}) and its process environment. Text values of names with the word TOKEN, SECRET, PASSWORD or KEY are redacted.
+
+Changed by the engine, that is set by the solution or the benchmark but running with another value (`PORT` differs per run by design):
+
+{changed}
+
+Settings ({source}):
+
+```yaml
+{settings}
+```
+
+Environment:
+
+```yaml
+{environment}
+```{profiled}
+
+</details>"""
+
+
+def source_text(source):
+    text = f"{source['url']} @ `{source['commit'][:12]}`"
+    if not source["enforced"]:
+        text += (
+            " **(pin not enforced: "
+            + "; ".join(source["differences"] or ["no difference"])
+            + ")**"
+        )
+    return text
+
+
+def reproduce_rows(manifest):
+    source, image, model = manifest["source"], manifest["image"], manifest["model"]
+    labels = image["labels"]
+    base = labels.get("org.opencontainers.image.version") or labels.get(
+        "org.opencontainers.image.revision", "none recorded"
+    )
+    digests = (
+        ", ".join(f"`{d}`" for d in image["repo_digests"]) or "none (built locally)"
+    )
+    files = ", ".join(
+        f"{name} `{digest[:12]}`" for name, digest in model["sha256"].items()
+    )
+    return [
+        ["Benchmark code", manifest["benchmark_code"]],
+        [
+            "Engine source",
+            f"{source_text(source)}; checkout HEAD `{source['head'][:12]}`",
+        ],
+        [
+            "Image",
+            f"`{image['id']}`; tags {', '.join(image['tags']) or 'none'}; digests {digests}",
+        ],
+        ["Image base", base],
+        ["Image recipe", f"`{manifest['recipe']}`"],
+        ["Model", f"{model['id']} @ `{model['revision']}`; SHA-256 {files}"],
+        [
+            "Config SHA-256",
+            f"scenario `{manifest['configs']['scenario'][:12]}`, solution `{manifest['configs']['solution'][:12]}`",
+        ],
+        ["Nsight Systems", manifest["nsys"] or "unknown"],
+    ]
+
+
+def render(ctx):
+    solution, clean, trace = ctx["solution"], ctx["clean"], ctx["trace"]
+    adapter = adapters.get(solution.engine)
+    workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
+    requests = trace["requests"]
+
+    def per_request(ns):
+        return ns / requests / 1e6
+
+    latency, total, throughput = latency_rows(clean)
+    sections, gaps = defaultdict(int), defaultdict(int)
+    for phase, section, _, ns in trace["work"]:
+        sections[(phase, section)] += ns
+    for phase, section, _, ns in trace["gaps"]:
+        gaps[(phase, section)] += ns
+    kernel_ns, window_ns = trace["kernel_ns"], trace["window_ns"]
+    gap_ns = sum(gaps.values())
+    (top_phase, top_section), top_ns = max(sections.items(), key=lambda item: item[1])
+    idle = trace["busy_ns"]["idle"]
+    catalog = ctx["catalog"]
+    scope = (
+        f"{ctx['model']} · context {workload.context_length:,} · beam width "
+        f"{workload.beam_width} · {workload.output_tokens} output tokens"
+    )
+    if catalog:
+        scope += f" · catalog of {catalog['items']:,} items"
+
+    def share(ns, whole):
+        return [f"{per_request(ns):.3f}", f"{100 * ns / whole:.1f}%"]
+
+    def time_row(kernel, gap):
+        share = 100 * (kernel + gap) / (kernel_ns + gap_ns)
+        times = (per_request(ns) for ns in (kernel, gap, kernel + gap))
+        return [*(f"{ms:.3f}" for ms in times), f"{share:.1f}%"]
+
+    keys = set(sections) | set(gaps)
+    totals = {key: sections[key] + gaps[key] for key in keys}
+    order = sorted(keys, key=lambda key: (phase_key(key[0]), -totals[key]))
+    section_rows = [[*key, *time_row(sections[key], gaps[key])] for key in order]
+    section_rows.append(["**Total**", "", *time_row(kernel_ns, gap_ns)])
+    busy, launches = trace["busy_ns"], trace["launches"]
+    window_rows = [
+        ["One kernel running", *share(busy["kernel"], window_ns)],
+        ["Kernels overlapping", *share(busy["overlap"], window_ns)],
+        ["Memory copy/set only", *share(busy["memory"], window_ns)],
+        ["No GPU activity", *share(busy["idle"], window_ns)],
+        ["**Server window**", *share(window_ns, window_ns)],
+    ]
+
+    kernel_rows = [
+        [
+            f"`{short(name)}`",
+            family,
+            f"{per_request(ns):.3f}",
+            f"{launches / requests:g}",
+        ]
+        for name, family, ns, launches in trace["top"]
+    ]
+    setup = setup_rows(ctx)
+    latency_patches = clean[0]["runtime"].get("patches", [])
+    profile_patches = ctx["profile"]["runtime"].get("patches", [])
+    added = [p for p in profile_patches if p not in latency_patches]
+    patch_lines = "\n".join(f"- `{p}`" for p in latency_patches) or "- none"
+    patch_lines += "\n\nThe profiled run also patched:\n\n"
+    patch_lines += "\n".join(f"- `{p}`" for p in added) or "- nothing else"
+    in_flight = (
+        "requests go one at a time"
+        if workload.concurrency == 1
+        else f"{workload.concurrency} requests are in flight, as each of "
+        f"{workload.concurrency} clients sends its next one when its last returns"
+    )
+    sequential = (
+        ""
+        if workload.concurrency == 1
+        else ", so it shows one request's GPU time, not how the latency runs batch"
+    )
+    settings = {"env": solution.env}
+    if solution.server_settings is not None:
+        settings["server_settings"] = solution.server_settings
+
+    return f"""# {adapter.title} HTTP beam-search benchmark
+
+{scope}
+
+- **Latency:** mean {total['mean']:.3f} ms, p99 {total['p99']:.3f} ms over {total['n']:,} requests ({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests}), {throughput:.2f} requests/s at concurrency {workload.concurrency}.
+- **GPU profile:** {per_request(kernel_ns):.3f} ms of kernel time per request; the largest section is {top_phase} `{top_section}` ({per_request(top_ns):.3f} ms, {100 * top_ns / kernel_ns:.1f}%). No GPU activity is traced for {per_request(idle):.3f} ms ({100 * idle / window_ns:.1f}%) of the {per_request(window_ns):.3f} ms server window.
+
+## Latency
+
+{table(["Run", "Requests", "Mean ms", "p50 ms", "p95 ms", "p99 ms", "Max ms", "Requests/s"], latency, right=range(1, 8))}
+
+The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.
+
+## GPU profile
+
+A separate server process ran under Nsight Systems; the capture holds {requests} requests sent one at a time after {runs.warmups} warmups{sequential}. Trace: [profile.nsys-rep](profile.nsys-rep).
+
+![Server time per request](sunburst.svg)
+
+Open [sunburst.svg](sunburst.svg) directly in a browser to hover for details and click a slice to zoom in.
+
+{table(["Phase", "Section", "Kernel ms", "Non-kernel ms", "Total ms", "Share"], section_rows, right=(2, 3, 4, 5))}
+
+{table(["Server window per request", "ms", "Share"], window_rows, right=(1, 2))}
+
+Launch calls per request: {launches['kernel'] / requests:g} kernel launches and {launches['graph'] / requests:g} CUDA graph launches; the kernels inside a graph need no call of their own.
+
+{table(["Longest-running kernels", "Family", "ms/request", "Launches/request"], kernel_rows, right=(2, 3))}
+
+Families come from kernel names only: GEMMs of different layers (QKV, MLP, LM head) look alike, so they share `linear`; phase and section show where a kernel ran. Open the sunburst to see families per phase and section.
+
+The server window is the request handler (NVTX `bench/request`). Times are per request. Kernel time adds up kernel durations, so concurrent kernels count separately and the total exceeds the server window by their overlap. A kernel gets its phase and section from the NVTX range around its launch call; {trace['unknown_kernels']} of {trace['kernels']:,} kernels had no unambiguous launch range and are listed as `unknown`. Non-kernel time (memory copy/set only, or no GPU activity) gets the innermost phase and section range, on any thread, that covers it; outside every range it is `{NO_PHASE}` / `{NO_SECTION}`. "No GPU activity" means no traced kernel or memory operation, which alone does not prove CPU overhead. Profiled timings are separate from the latency runs.
+
+## Setup
+
+{table(["", ""], setup)}
+
+<details><summary>Server settings and environment</summary>
+
+From the solution file, passed verbatim:
+
+```yaml
+{yaml.safe_dump(settings, sort_keys=False).rstrip()}
+```
+
+Added by the benchmark for this scenario and machine (`PORT` is chosen per run). The rest of the server's environment is the container's, without its `GR_*`, `SGLANG_*` and `MODEL_*` variables:
+
+```yaml
+{yaml.safe_dump(ctx["added"], sort_keys=False).rstrip()}
+```
+
+</details>{configuration_section(ctx)}
+
+<details><summary>Changes to the engine's own HTTP server (observed)</summary>
+
+The launcher runs the engine's own server and patches only these methods, as reported by the server; each hook calls the original unchanged. `PATCHES` in `bench/server_*.py` says what each one adds. The latency runs patched:
+
+{patch_lines}
+
+</details>
+
+## Reproduce
+
+{table(["", ""], reproduce_rows(ctx["manifest"]))}
+
+<details><summary>Manifest (JSON)</summary>
+
+```json
+{json.dumps(ctx["manifest"], indent=2)}
+```
+
+</details>
+
+```bash
+{ctx['command']}
+```
+"""

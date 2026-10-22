@@ -1,0 +1,32 @@
+# Solution: public SGLang with its native beam_width API (v0.5.22 or newer).
+# Loaded into bench.config.Solution. No catalog support.
+
+engine: sglang
+
+source:
+  url: https://github.com/sgl-project/sglang
+  commit: "baa9befa381511cd4d56f83980951e5a45fffc6d"  # v0.5.22
+
+# Server environment, passed verbatim. Values are strings: quote numbers.
+# OMP_NUM_THREADS and MKL_NUM_THREADS default to the scenario's server CPU count.
+env:
+  PYTHONUNBUFFERED: "1"
+
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host and port
+# and, from the scenario, dtype, random_seed, CUDA graph sizes and
+# max_running_requests.
+server_settings:
+  kv_cache_dtype: auto
+  tp_size: 1                        # required: phase markers need one process
+  skip_tokenizer_init: true         # requests send token IDs
+  disable_radix_cache: true         # no prefix reuse between requests
+  prefill_attention_backend: flashinfer
+  decode_attention_backend: flashinfer
+  disable_overlap_schedule: true    # false runs SGLang's overlap scheduler
+  page_size: 1                      # required by SGLang beam search
+  disable_cuda_graph: false
+  cuda_graph_backend_prefill: breakable
+  chunked_prefill_size: -1          # one prefill chunk per request
+  mem_fraction_static: 0.7
+  skip_server_warmup: true          # the client sends its own warmups
+  log_level: warning
