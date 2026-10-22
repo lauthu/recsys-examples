@@ -47,6 +47,7 @@ bench/
   patching.py          the Patch table entry and how patches are applied and logged
   catalog.py           the shared item catalog: parsing and beam membership checks
   trace.py sunburst.py report.py compare.py    outputs
+tools/make_catalog.py  seeded synthetic catalogs (see Catalog filtering)
 tests/                 CPU-only tests
 ```
 
@@ -211,10 +212,25 @@ its trie output head takes exactly three codebooks, so `output_tokens` must be 3
 Without a catalog it serves the checkpoint as is, at any `output_tokens`, and
 the run fails if its trie output head runs anyway.
 
+[tools/make_catalog.py](tools/make_catalog.py) writes a seeded synthetic catalog,
+for models without semantic-ID tokens: `--items` distinct paths whose token at
+depth `d` lies in the codebook range above, drawn per depth from a Zipf
+distribution (`--skew`) over a shuffled codebook, so fan-out is uneven and most
+prefixes do not exist. It checks the file as a run would and prints the
+`model.sid_codebooks` and `catalog.sha256` keys for the scenario; the same
+arguments always give the same file:
+
+```bash
+python3 tools/make_catalog.py --items 1000000 --codebook-size 1024 --output catalog-1m.jsonl
+```
+
 The run fails unless the server reports the catalog as loaded and every returned
-beam is a catalog item. Public SGLang has no catalog support, so a catalog scenario rejects it. SID-GR normalizes scores over the allowed tokens; both
-SGLang engines keep full-vocabulary normalization, so scores differ across
-engines even when the beams match.
+beam is a catalog item. Public SGLang has no catalog support, so a catalog scenario rejects it. SID-GR normalizes scores over the allowed tokens.
+beam-search-new normalizes over the full vocabulary, and so does
+vedantjh2-sglang unless its solution sets `SGLANG_BEAM_TRIE_TOPK_LOGPROB: "true"`,
+which normalizes over the active codebook; the run checks the chosen one on
+every decode step. Scores therefore differ across engines even when the beams
+match.
 
 ## Adding an engine
 

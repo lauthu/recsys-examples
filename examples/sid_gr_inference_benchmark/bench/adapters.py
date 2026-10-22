@@ -29,6 +29,7 @@ from bench.common import CACHE_ENV, call, fail
 TRIE_HEAD_FILE = "trie_output_head.safetensors"
 SID_GR_SCRIPT = "/source/examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
 SHARED = "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION"
+TOPK = "SGLANG_BEAM_TRIE_TOPK_LOGPROB"  # "true": normalize over the codebook only
 # Image recipe of the SGLang dev branches, which images/build.sh builds from source.
 FROM_SOURCE = (
     "docker/Dockerfile of the source, target framework_final (images/build.sh)"
@@ -427,8 +428,9 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
             fail(
                 f"vedantjh2-sglang uses the native beam_width API; remove {sorted(legacy)}"
             )
-        if solution.env.get(SHARED, "false") not in ("true", "false"):
-            fail(f'{SHARED} must be "true" or "false"')
+        for name in (SHARED, TOPK):
+            if solution.env.get(name, "false") not in ("true", "false"):
+                fail(f'{name} must be "true" or "false"')
         if scenario.catalog is None:  # native beam search: no trie output head
             return
         if scenario.model.sid_codebooks is None:
@@ -454,11 +456,16 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
     def shared(self, env):
         return env.get(SHARED, "false") == "true"
 
+    def codebook_normalized(self, env):
+        return env.get(TOPK, "false") == "true"
+
     def check_counters(self, plan, counters, requests, runtime):
         """Every measured request must take the path that was requested: the
-        trie output head exactly when there is a catalog."""
+        trie output head exactly when there is a catalog, with the requested
+        normalization."""
         decode = counters["forward.decode.graph"] + counters["forward.decode.eager"]
         shared = self.shared(plan["env"])
+        codebook = self.codebook_normalized(plan["env"])
         problems = []
         try:
             super().check_counters(plan, counters, requests, runtime)
@@ -473,7 +480,11 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
                 problems.append(
                     "not every decode forward used the compact trie output head"
                 )
-            if counters["vedantjh2.exact_normalizer"] != decode:
+            if codebook and counters["vedantjh2.exact_normalizer"]:
+                problems.append(
+                    f"the full-vocabulary normalizer ran although {TOPK} is true"
+                )
+            if not codebook and counters["vedantjh2.exact_normalizer"] != decode:
                 problems.append(
                     "not every decode forward kept the full-vocabulary normalizer"
                 )
@@ -493,7 +504,12 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
 
     def setup_rows(self, solution, catalog):
         if catalog:
-            text = "compact trie output head, full-vocabulary normalizer and device "
+            normalizer = (
+                "codebook-only"
+                if self.codebook_normalized(solution.env)
+                else "full-vocabulary"
+            )
+            text = f"compact trie output head, {normalizer} normalization and device "
             text += "beam history on every measured request"
         else:
             text = "off: no catalog"

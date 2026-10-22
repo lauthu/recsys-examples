@@ -1,8 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import json
 import pickle
 import struct
+import subprocess
+import sys
+from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -149,3 +154,34 @@ def test_status_and_membership():
             catalog.check_status(status, source="/work/c.jsonl", items=2)
     paths = {tuple(PATHS[0]): "a"}
     assert catalog.outside([(PATHS[0], -1.0), (PATHS[1], -2.0)], paths) == 1
+
+
+def synthetic(seed=0, items=3000):
+    shape = dict(levels=3, codebook_size=64, token_start=1000, skew=1.0)
+    return catalog.synthesize(items, **shape, seed=seed)
+
+
+def test_synthetic_catalogs_are_seeded_sparse_and_valid():
+    data = synthetic()
+    assert data == synthetic() and data != synthetic(seed=1)
+    paths, info = catalog.parse(data, output_tokens=3, beam_width=32, vocab_size=2000)
+    assert info["items"] == 3000
+    for path in paths:
+        for depth, token in enumerate(path):
+            assert 1000 + 64 * depth <= token < 1000 + 64 * (depth + 1)
+    per_first = Counter(path[0] for path in paths)
+    assert max(per_first.values()) > 5 * min(per_first.values())  # skewed, no grid
+    assert len({path[:2] for path in paths}) < 64 * 64  # most prefixes do not exist
+    with pytest.raises(ValueError, match="at most half"):
+        synthetic(items=64**3)
+
+
+def test_make_catalog_writes_the_file_and_its_scenario_pin(tmp_path):
+    tool = Path(__file__).resolve().parents[1] / "tools" / "make_catalog.py"
+    output = tmp_path / "catalog.jsonl"
+    argv = [sys.executable, str(tool), "--items", "3000", "--codebook-size", "64"]
+    argv += ["--beam-width", "32", "--output", str(output)]
+    done = subprocess.run(argv, capture_output=True, text=True, check=True)
+    assert output.read_bytes() == synthetic()
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    assert f'sha256: "{digest}"' in done.stdout and "codebook_size: 64" in done.stdout

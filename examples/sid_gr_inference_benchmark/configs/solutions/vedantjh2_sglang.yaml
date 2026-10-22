@@ -17,7 +17,7 @@ env:
   SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: "false"
   # Scores normalized over the full vocabulary, as in public SGLang; "true" makes
   # the trie output head normalize over the active SID codebook only. With a
-  # catalog, the run checks that every decode forward kept the full normalizer.
+  # catalog, the run checks that every decode forward used the one chosen here.
   SGLANG_BEAM_TRIE_TOPK_LOGPROB: "false"
 
 # SGLang ServerArgs, passed verbatim. The runner sets model_path, host and port

@@ -235,6 +235,28 @@ def test_vedantjh2_checks(shared, changes, message):
         adapter.check_counters(plan, counters, 4, {"length_penalty": 0.5})
 
 
+@pytest.mark.parametrize("normalizer, message", [(0, None), (8, "ran although")])
+def test_vedantjh2_codebook_normalization_skips_the_full_normalizer(
+    normalizer, message
+):
+    counters = {
+        "forward.decode.graph": 8,
+        "forward.decode.eager": 0,
+        "vedantjh2.compact_decode": 8,
+        "vedantjh2.exact_normalizer": normalizer,
+        "vedantjh2.device_history": 4,
+        "vedantjh2.shared_attention": 0,
+    }
+    env = {"SGLANG_BEAM_TRIE_TOPK_LOGPROB": "true"}
+    plan = {"env": env, "catalog": {"items": 256}}
+    check = adapters.get("vedantjh2-sglang").check_counters
+    if message is None:
+        check(plan, counters, 4, {"length_penalty": 1.0})
+    else:
+        with pytest.raises(RuntimeError, match=message):
+            check(plan, counters, 4, {"length_penalty": 1.0})
+
+
 @pytest.mark.parametrize(
     "name", ["vedantjh2.compact_decode", "vedantjh2.exact_normalizer", None]
 )

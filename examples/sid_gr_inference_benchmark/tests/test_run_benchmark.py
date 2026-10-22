@@ -153,6 +153,7 @@ INVALID_SOLUTION = [
     (SID, {"env.PYTHON_BIN": "python3"}, "runner-managed"),
     (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
     (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
+    (VEDANTJH2, {"env.SGLANG_BEAM_TRIE_TOPK_LOGPROB": "1"}, '"true"'),
 ]
 
 
