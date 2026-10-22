@@ -10,9 +10,10 @@ the same rules:
 - it only counts calls, reads state, or pushes NVTX ranges;
 - it never synchronizes the GPU.
 
-apply() installs the entries for this engine and run kind. A missing target
-stops the server, so a new engine revision cannot silently skip a patch. Each
-applied patch is printed to the server log.
+apply() installs the entries for this run kind and for the code paths the
+engine has (its adapter's `features`). A missing target stops the server, so a
+new engine revision cannot silently skip a patch. Each applied patch is printed
+to the server log.
 """
 
 import functools
@@ -25,7 +26,8 @@ class Patch(NamedTuple):
     hook: Callable  # hook(original) -> replacement
     adds: str  # what the patch adds, for readers and the server log
     profile_only: bool = False  # only in the profiled process (BENCH_PROFILE=1)
-    engines: tuple[str, ...] | None = None  # None: every engine of the launcher
+    # The adapter feature (Adapter.features) the target exists for; None: always.
+    needs: str | None = None
 
 
 def wrap(owner, name, hook, target):
@@ -45,18 +47,18 @@ def resolve(target):
     return owner, name
 
 
-def selected(patches, engine, profile):
+def selected(patches, features, profile):
     return [
         patch
         for patch in patches
         if (profile or not patch.profile_only)
-        and (patch.engines is None or engine in patch.engines)
+        and (patch.needs is None or patch.needs in features)
     ]
 
 
-def apply(patches, engine, profile):
+def apply(patches, features, profile):
     """Install the selected patches and return them."""
-    chosen = selected(patches, engine, profile)
+    chosen = selected(patches, features, profile)
     for patch in chosen:
         wrap(*resolve(patch.target), patch.hook, patch.target)
         kind = "profile" if patch.profile_only else "always"

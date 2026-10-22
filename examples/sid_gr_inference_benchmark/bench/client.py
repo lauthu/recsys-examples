@@ -23,7 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from bench import catalog, engines
+from bench import adapters, catalog
 from bench.common import call, read_json, write_json
 
 # Capture only between cudaProfilerStart/Stop; trace CUDA graph replays per node.
@@ -38,11 +38,15 @@ EXPORT = (
 ).split()
 
 
-def launch(engine, plan, port, profile):
-    """Return (argv, env) for the server, pinned to the server CPUs."""
-    argv, env = engine.server(plan, port, profile)
+def launch(adapter, plan, port, profile):
+    """Return (argv, env) for the server, pinned to the server CPUs. The image's
+    engine settings (AMBIENT) are dropped: the server sees only the plan's."""
+    argv, env = adapter.server(plan, port, profile)
+    inherited = {
+        k: v for k, v in os.environ.items() if not k.startswith(adapters.AMBIENT)
+    }
     argv = ["taskset", "--cpu-list", ",".join(map(str, plan["server_cpus"])), *argv]
-    return (NSYS + argv if profile else argv), env
+    return (NSYS + argv if profile else argv), {**inherited, **env}
 
 
 def wait_ready(process, port, path, timeout=1800):
@@ -68,11 +72,11 @@ def send(port, body, timeout=120):
     return response, (time.perf_counter_ns() - start) / 1e6
 
 
-def send_all(port, engine, rows, workload, concurrency):
+def send_all(port, adapter, rows, workload, concurrency):
     """[(response, ms)] in row order; each client sends its next row on a reply."""
     with ThreadPoolExecutor(concurrency) as clients:
         return list(
-            clients.map(lambda row: send(port, engine.payload(row, workload)), rows)
+            clients.map(lambda row: send(port, adapter.payload(row, workload)), rows)
         )
 
 
@@ -121,20 +125,26 @@ def machine():
     return {"gpu": name, "gpu_uuid": uuid, "driver": driver, "cpu": cpu}
 
 
-def validate(engine, plan, row, response, paths):
+def validate(adapter, plan, row, response, paths):
     """Check one response; with a catalog, every beam must be a catalog item."""
-    result = engine.beams(response, row["request_id"])
+    result = adapter.beams(response, row["request_id"])
     check(result, plan["workload"], plan["vocab_size"])
     if paths is not None and catalog.outside(result, paths):
         raise ValueError(f"{row['request_id']}: returned beams outside the catalog")
     return result
 
 
-def check_server(engine, plan, port, runtime):
-    """The server must run the mounted source and hold the managed catalog."""
-    engine.check_source(runtime)
+def check_server(adapter, plan, port, runtime):
+    """The server must run the mounted source, hold its weights in the scenario's
+    dtype and hold the managed catalog."""
+    adapter.check_source(runtime)
+    if runtime["dtype"] != plan["dtype"]:
+        raise RuntimeError(
+            f"the server holds {runtime['dtype']} weights, not the scenario's "
+            f"{plan['dtype']}"
+        )
     if plan["catalog"]:
-        status = engine.catalog_status(port, runtime)
+        status = adapter.catalog_status(port, runtime)
         expected = plan["catalog"]
         catalog.check_status(
             status, source=expected["server_source"], items=expected["items"]
@@ -144,7 +154,7 @@ def check_server(engine, plan, port, runtime):
 def run(plan, name, profile, work=Path("/work")):
     directory = work / name
     directory.mkdir(parents=True, exist_ok=True)
-    engine, workload = engines.get(plan["engine"]), plan["workload"]
+    adapter, workload = adapters.get(plan["engine"]), plan["workload"]
     warmups = plan["warmups"]
     rows = read_json(plan["workload_path"])
     count = plan["profile_requests"] if profile else plan["requests"]
@@ -165,39 +175,39 @@ def run(plan, name, profile, work=Path("/work")):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    argv, env = launch(engine, plan, port, profile)
+    argv, env = launch(adapter, plan, port, profile)
     pid = None
     with (directory / "server.log").open("w") as log:
         options = {"stdout": log, "stderr": subprocess.STDOUT, "env": env}
         process = subprocess.Popen(argv, start_new_session=True, **options)
     try:
-        wait_ready(process, port, engine.ready)
+        wait_ready(process, port, adapter.ready)
         os.sched_setaffinity(0, plan["client_cpus"])  # client threads inherit it
-        warm = send_all(port, engine, rows[:warmups], workload, concurrency)
+        warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
         for row, (response, _) in zip(rows[:warmups], warm):
-            validate(engine, plan, row, response, paths)
+            validate(adapter, plan, row, response, paths)
         before = call(port, "GET", "/pilot/runtime")
         pid = before["pid"]
-        check_server(engine, plan, port, before)
+        check_server(adapter, plan, port, before)
         if profile:
-            engine.profile(port, start=True)
+            adapter.profile(port, start=True)
         first = time.perf_counter()
-        timed = send_all(port, engine, measured, workload, concurrency)
+        timed = send_all(port, adapter, measured, workload, concurrency)
         duration = time.perf_counter() - first
         if profile:
-            engine.profile(port, start=False)
+            adapter.profile(port, start=False)
         after = call(port, "GET", "/pilot/runtime")
         # Output checks run after timing so they never delay the next request.
         outputs = {}
         for row, (response, _) in zip(measured, timed):
-            beams = validate(engine, plan, row, response, paths)
+            beams = validate(adapter, plan, row, response, paths)
             outputs[row["request_id"]] = beams
         counters = {
             key: value - before["counters"].get(key, 0)
             for key, value in after["counters"].items()
             if value is not None
         }
-        engine.check_counters(plan, counters, len(measured), after)
+        adapter.check_counters(plan, counters, len(measured), after)
         result.update(latency_ms=[ms for _, ms in timed], duration_s=duration)
         result.update(runtime=after, counters=counters, catalog_beams=None)
         if paths is not None:

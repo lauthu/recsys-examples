@@ -37,7 +37,8 @@ import threading
 from collections import Counter
 from pathlib import Path
 
-from bench.patching import Patch, apply  # PYTHONPATH has /benchmark-tools
+from bench import adapters  # PYTHONPATH has /benchmark-tools
+from bench.patching import Patch, apply
 
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
 PACKAGES = (
@@ -47,17 +48,17 @@ PACKAGES = (
 
 # ---- every difference from the native server ------------------------------
 def patches():
-    adapter = "gr_inference.gr_serving.http:GRHTTPServingAdapter"
+    http = "gr_inference.gr_serving.http:GRHTTPServingAdapter"
     executor = "gr_inference.gr_serving.continuous:GRContinuousServingExecutor"
     return [
         Patch(
-            f"{adapter}._dispatch",
+            f"{http}._dispatch",
             pilot_routes,
             "adds /pilot/runtime and /pilot/profile/start|stop; other routes "
             "go to the original dispatcher",
         ),
         Patch(
-            f"{adapter}._handle_sglang_generate",
+            f"{http}._handle_sglang_generate",
             request_range,
             "NVTX request range",
             profile_only=True,
@@ -136,14 +137,14 @@ def pilot_routes(original):
     return wrapped
 
 
-def _executor(adapter):
-    facade = adapter.facade
+def _executor(serving):
+    facade = serving.facade
     return getattr(facade, "facade", facade).executor
 
 
-def _idle(adapter):
+def _idle(serving):
     """Hold the worker lock so snapshots and profiler calls never overlap a request."""
-    return getattr(adapter.facade, "_lock", contextlib.nullcontext())
+    return getattr(serving.facade, "_lock", contextlib.nullcontext())
 
 
 def _class(value):
@@ -157,10 +158,10 @@ def _version(name):
         return None
 
 
-def runtime(adapter):
+def runtime(serving):
     """Facts read from the running executor; the client checks and reports them."""
-    with _idle(adapter):
-        executor = _executor(adapter)
+    with _idle(serving):
+        executor = _executor(serving)
         backends = Counter()
         for layer in executor.engine.model.layers:
             backend = layer.prefill_runner.attention._backend
@@ -198,14 +199,14 @@ def runtime(adapter):
     }
 
 
-def profile(adapter, start):
+def profile(serving, start):
     import torch
 
     global _capturing
     if not PROFILE:
         raise ValueError("profiling requires BENCH_PROFILE=1")
-    with _idle(adapter):
-        device = _executor(adapter).engine.model.embed_tokens.weight.device
+    with _idle(serving):
+        device = _executor(serving).engine.model.embed_tokens.weight.device
         with torch.cuda.device(device):
             torch.cuda.synchronize(device)
             cudart = torch.cuda.cudart()
@@ -281,7 +282,7 @@ def main():
     sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != here]
     sys.path[:0] = [str(entrypoint.parent), str(entrypoint.parent.parent / "src")]
     sys.argv = [str(entrypoint), *sys.argv[2:]]
-    applied.extend(apply(patches(), "sid-gr", PROFILE))
+    applied.extend(apply(patches(), adapters.get("sid-gr").features, PROFILE))
     runpy.run_path(str(entrypoint), run_name="__main__")
 
 

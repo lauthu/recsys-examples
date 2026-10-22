@@ -5,8 +5,10 @@ import sys
 import types
 
 import pytest
-from bench import engines, server_sglang, server_sid_gr
+from bench import adapters, server_sglang, server_sid_gr
 from bench.patching import Patch, apply, selected
+
+NATIVE = ("sglang", "vedantjh2-sglang")  # both use the native beam_width API
 
 
 @pytest.fixture
@@ -37,25 +39,26 @@ def counting(calls):
 def test_apply_keeps_arguments_and_results_and_logs(fake_engine, capsys):
     calls = []
     patch = Patch("fake_engine:Server.handle", counting(calls), "counts calls")
-    assert apply([patch], "any", profile=False) == [patch]
+    assert apply([patch], frozenset(), profile=False) == [patch]
     assert fake_engine.Server().handle(3, scale=2) == 6  # the original's result
     assert calls == [(3,)] and fake_engine.Server.handle.__name__ == "handle"
     out = capsys.readouterr().out
     assert "[bench] patched fake_engine:Server.handle (always): counts calls" in out
 
 
-def test_selection_by_engine_and_run_kind():
+def test_selection_by_feature_and_run_kind():
     always = Patch("m:f", None, "")
     profiling = Patch("m:g", None, "", profile_only=True)
-    vedantjh2 = Patch("m:h", None, "", engines=("vedantjh2-sglang",))
-    table = [always, profiling, vedantjh2]
-    assert selected(table, "sglang", profile=False) == [always]
-    assert selected(table, "vedantjh2-sglang", profile=True) == table
+    trie = Patch("m:h", None, "", needs="trie_head")
+    table = [always, profiling, trie]
+    public, vedantjh2 = (adapters.get(name).features for name in NATIVE)
+    assert selected(table, public, profile=False) == [always]
+    assert selected(table, vedantjh2, profile=True) == table
 
 
 def test_a_missing_target_stops_the_server(fake_engine):
     with pytest.raises(RuntimeError, match="fake_engine:Server.gone is missing"):
-        apply([Patch("fake_engine:Server.gone", lambda f: f, "")], "x", False)
+        apply([Patch("fake_engine:Server.gone", lambda f: f, "")], frozenset(), False)
 
 
 @pytest.mark.parametrize("launcher", [server_sglang, server_sid_gr])
@@ -63,19 +66,26 @@ def test_launcher_tables_are_well_formed(launcher):
     for patch in launcher.patches():
         module, _, attribute = patch.target.partition(":")
         assert module and attribute and callable(patch.hook) and patch.adds
-        assert patch.engines is None or set(patch.engines) <= set(engines.ENGINES)
+        known = set().union(*(a.features for a in adapters.ADAPTERS.values()))
+        assert patch.needs is None or patch.needs in known
 
 
 def test_latency_runs_patch_only_counters_and_routes():
     def always(launcher, engine):
+        features = adapters.get(engine).features
         return [
             p.target.rsplit(":", 1)[1]
-            for p in selected(launcher.patches(), engine, False)
+            for p in selected(launcher.patches(), features, False)
         ]
 
     assert always(server_sglang, "sglang-beam-search-new") == [
         "Scheduler.get_internal_state",
         "ModelRunner.forward",
+    ]
+    assert always(server_sglang, "sglang") == [
+        "Scheduler.get_internal_state",
+        "ModelRunner.forward",
+        "BeamGroup.finalize",
     ]
     assert always(server_sglang, "vedantjh2-sglang") == [
         "Scheduler.get_internal_state",

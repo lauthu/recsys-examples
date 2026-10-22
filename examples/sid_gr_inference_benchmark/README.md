@@ -35,12 +35,12 @@ OUTPUT/<engine>/profile.nsys-rep
 ```text
 run_benchmark.py       host CLI: validates, starts containers, writes the outputs
 configs/
-  scenarios/<model>.yaml    what is measured: model pin, workload, run counts, CPUs, GPU
-  solutions/<name>.yaml     how one engine is launched: source pin, environment, server settings
+  scenarios/<model>.yaml    what is measured: model pin and dtype, workload, run counts, optional catalog pin
+  solutions/<name>.yaml     how one engine is configured: source pin, environment, server settings
 images/                Dockerfiles and build.sh; dev branches are built from source
 bench/
-  engines.py           one class per engine: everything engine-specific
-  config.py            typed Scenario and Solution classes, YAML loading, checkpoint and workload checks
+  adapters.py          one adapter per engine: how the benchmark talks to it; logic, no settings
+  config.py            typed Scenario, Solution and Resources classes, YAML loading, checkpoint and workload checks
   provenance.py        source, model and image pins and identities
   client.py            runs inside the container: server, requests, checks
   server_*.py          launch the engine's own HTTP server; PATCHES lists every change
@@ -70,11 +70,13 @@ images/build.sh sglang-beam-search-new /path/to/beam_new
 # One solution: public SGLang
 python3 run_benchmark.py --scenario configs/scenarios/qwen3_0_6b.yaml \
   --model /path/to/Qwen3-0.6B --output logs/sglang \
+  --server-cpus 0-9 --client-cpus 10 --gpu 0 \
   --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang
 
 # Compare solutions; public SGLang is the reference unless --reference says otherwise
 python3 run_benchmark.py --scenario configs/scenarios/qwen3_0_6b.yaml \
   --model /path/to/Qwen3-0.6B --output logs/compare \
+  --server-cpus 0-9 --client-cpus 10 --gpu 0 \
   --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang \
   --solution configs/solutions/sid_gr.yaml ../.. \
     nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d \
@@ -85,9 +87,12 @@ python3 run_benchmark.py --scenario configs/scenarios/qwen3_0_6b.yaml \
 For Qwen3-1.7B, pass `--scenario configs/scenarios/qwen3_1_7b.yaml`; for another
 model, copy a scenario and change its `model` pin. For throughput under load,
 raise `workload.concurrency`; the runner sizes each engine's batches and request
-slots from the scenario, so the solution files stay the same.
+slots from the scenario, so the solution files stay the same. The CPUs and the
+GPU come from the command line, so a scenario runs unchanged on another machine.
 
-`--dry-run` validates the configuration and prints the `docker run` commands; it does not hash the checkpoint or check the pins. The output
+`--dry-run` validates the configuration and prints, for each solution, what the
+benchmark adds to its `env` and `server_settings`, and the `docker run`
+commands; it does not hash the checkpoint or check the source pins. The output
 directory must be new or empty. JIT caches go to `.cache/<image>` next to the
 output directory (or `--cache-dir`) and are reused by later runs with the same
 image. If a run fails, `.work` keeps the container and server logs.
@@ -100,7 +105,7 @@ the runner does one after another.
 - **Latency and throughput:** `runs.clean` separate server processes, each sent `runs.warmups` unmeasured and then `runs.requests` measured requests, each over a new loopback connection. `workload.concurrency` clients keep that many requests in flight: each sends its next request when its last one returns (closed loop; 1 means one at a time). The client times each request from JSON encoding to the parsed response; requests/s is measured requests over the time from the first send to the last reply.
 - **Correctness:** every returned request must have `beam_width` distinct beams of `output_tokens` valid token IDs with finite scores in descending order. Scores are cumulative log-probabilities; SGLang's mean log-probability is multiplied by the beam length.
 - **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups, one at a time at any concurrency, so GPU time can be attributed to each request. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time, and the report counts the kernel and CUDA graph launch calls per request. Memory-only and no-GPU time go to the innermost phase and section range covering them, so the sunburst shows where the GPU waits, for example on eager kernel launches. With SGLang's overlap scheduler (`disable_overlap_schedule: false`) the server launches the next step before it processes the current step's results, so phases interleave in time; kernels still take the phase of their launch call.
-- **Runtime facts:** attention backends, the weights' dtype, package versions, CUDA graph use and, for SGLang, decode rows per forward (the beams of every request batched together) and whether the overlap scheduler ran are read from the running server, not inferred from settings.
+- **Runtime facts:** attention backends, the weights' dtype (the run fails unless it is the scenario's `model.dtype`), package versions, CUDA graph use and, for SGLang, decode rows per forward (the beams of every request batched together) and whether the overlap scheduler ran are read from the running server, not inferred from settings.
 - **Output agreement** (`comparison.md`): beams of the first clean run, request by request, against the reference engine (public SGLang by default, as in the SID-GR accuracy benchmark). Agreement with SGLang shows consistency, not correctness: reduced precision can flip near-tied beams.
   It reports top-1 match, share of shared beams (mean and worst request), rank match and the largest score difference.
 
@@ -115,6 +120,7 @@ A run is pinned by configuration, and the runner refuses to start when a pin doe
 | --- | --- | --- |
 | Engine source | `source.url` and `source.commit` in `configs/solutions/<name>.yaml` | The checkout contains the commit, and every path the engine reads (`python/` for SGLang, `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) is identical at HEAD and at the commit and has no uncommitted changes. A commit that leaves those paths alone passes. |
 | Checkpoint | `model.id`, `model.revision` and `model.sha256` in the scenario | SHA-256 of `config.json` and every `.safetensors` and index file must match; extra or missing files fail. |
+| Catalog | `catalog.sha256` in the scenario | SHA-256 of the `--catalog` file must match. |
 | Image | Recipe in [images/](images/README.md); dev branches built from source and tagged with repository, branch and commit | Recorded, not enforced: a local build gets a new ID each time. |
 
 To change a pin, edit its commit or hash in the config; nothing is hard-coded.
@@ -131,44 +137,61 @@ whether its pins were enforced.
 
 ## Configuration
 
-Configuration is YAML in two kinds of files, each loaded into frozen dataclasses
-in [bench/config.py](bench/config.py) (`Scenario`, `Solution` and their parts).
-Everything about the model and the workload lives in the scenario; a solution
-holds none of it, so any solution runs with any scenario.
-Unknown or missing keys, wrong types and out-of-range values fail before any
-container starts; YAML duplicate keys fail too. Types are exact: `true` is a
-bool and `1` an int, so `env` values and the `gpu` index must be quoted. The
-container never reads YAML: the runner writes a `plan.json` from the typed
-objects.
+Each value lives in one place:
+
+- the scenario says what is measured, the same for every solution: model, dtype, workload, runs and catalog;
+- a solution says how one engine is configured: its source pin and settings;
+- the command line says where this invocation runs: paths, CPUs and GPU;
+- the engine's adapter in [bench/adapters.py](bench/adapters.py) is logic without settings: it computes what follows from the scenario and the run, such as CUDA graph sizes, request slots, ports and paths, and a solution must not set those.
+
+So any solution runs with any scenario, on any machine. Both kinds of YAML file
+load into frozen dataclasses in [bench/config.py](bench/config.py) (`Scenario`,
+`Solution` and their parts). Unknown or missing keys, wrong types and
+out-of-range values fail before any container starts; YAML duplicate keys fail
+too. Types are exact: `true` is a bool and `1` an int, so `env` values must be
+quoted. The container never reads YAML: the runner writes a `plan.json` from the
+typed objects.
 
 A scenario, `configs/scenarios/<model>.yaml`, is shared by every solution in a run:
 
 | Key | Meaning |
 | --- | --- |
-| `model` | `id`, Hub `revision` and `sha256` per checkpoint file; see Reproducibility. Optional `sid_codebooks` (`token_start`, `codebook_size`): where semantic-ID tokens sit in the vocabulary, for engines that decode a catalog through an SID trie output head (vedantjh2-sglang) |
+| `model` | `id`, Hub `revision` and `sha256` per checkpoint file; see Reproducibility. `dtype` (`bfloat16`, `float16` or `float32`): the weights and activations while serving, whatever the checkpoint holds; SID-GR serves only `bfloat16`. Optional `sid_codebooks` (`token_start`, `codebook_size`): where semantic-ID tokens sit in the vocabulary, for engines that decode a catalog through an SID trie output head (vedantjh2-sglang) |
 | `workload` | `context_length`, `beam_width`, `output_tokens`, `concurrency` (requests in flight) and `seed` |
 | `runs` | `clean` processes × `requests`, `warmups` per process, `profile_requests` |
-| `cpus` | Disjoint `server` and `client` CPU lists; the container is limited to both |
-| `gpu` | Device index or GPU UUID |
+| `catalog` | Optional `sha256` of the catalog JSONL that constrains every beam; see Catalog filtering |
 
-A solution, `configs/solutions/<name>.yaml`, launches one engine:
+A solution, `configs/solutions/<name>.yaml`, configures one engine:
 
 | Key | Meaning |
 | --- | --- |
-| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang` |
+| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang`; it picks the engine's adapter |
 | `source` | `url` and the full 40-character `commit` of the engine source; optional `branch` the commit was taken from, which names a from-source image |
 | `env` | String environment variables for the server, passed verbatim; `OMP_NUM_THREADS` and `MKL_NUM_THREADS` default to the number of server CPUs |
-| `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets the model path, host, port and catalog, and from the workload the CUDA graph sizes and request slots: with k requests batched, decode runs k × `beam_width` rows and prefill k × `context_length` tokens, for k up to the concurrency; every beam holds a request slot and beam-search-new also keeps the request's own, so `max_running_requests` is concurrency × (`beam_width` + 1) |
+| `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets `model_path`, `host` and `port`, and from the scenario `dtype`, `random_seed` (the workload seed), the CUDA graph sizes, the request slots and beam-search-new's catalog: with k requests batched, decode runs k × `beam_width` rows and prefill k × `context_length` tokens, for k up to the concurrency; every beam holds a request slot and beam-search-new also keeps the request's own, so `max_running_requests` is concurrency × (`beam_width` + 1) |
 
-The runner derives the request shape (`GR_CONTEXT_LEN`, `GR_BEAM_WIDTH`,
-`GR_DECODE_STEPS`), the batch size, pool capacities and decode graph buckets
-from the concurrency, and the profiler settings; `env` must not set them. The
-report copies `env` and `server_settings` verbatim. To vary an engine setting,
-copy its file; the file name names the solution's directory in the output.
+Values a run depends on, such as `tp_size: 1`, `page_size: 1` or beam-search-new's
+`enable_beam_search: true`, stay in the solution file with a comment saying why;
+the adapter or the engine rejects or overrides other values. For SID-GR the runner derives the
+request shape (`GR_CONTEXT_LEN`, `GR_BEAM_WIDTH`, `GR_DECODE_STEPS`), the batch
+size, pool capacities and decode graph buckets from the scenario, and the paths
+and port; `env` must not set them. The report copies `env` and `server_settings`
+verbatim and lists what the benchmark added. To vary an engine setting, copy its
+file; the file name names the solution's directory in the output.
+
+The command line places the run:
+
+| Option | Meaning |
+| --- | --- |
+| `--server-cpus`, `--client-cpus` | Disjoint CPU lists such as `0-9` and `10`; the container is limited to both |
+| `--gpu` | One device index or GPU UUID |
+| `--model`, `--catalog` | The checkpoint and catalog files the scenario pins |
+| `--solution CONFIG SOURCE IMAGE` | A solution, its engine checkout and a local image; repeat to compare |
 
 ## Catalog filtering
 
-`--catalog items.jsonl` constrains every beam to a catalog item:
+A scenario with `catalog.sha256` constrains every beam to a catalog item; pass the
+file with `--catalog items.jsonl`:
 
 ```jsonl
 {"item_id": "item-a", "token_ids": [1000, 2000, 3000]}
@@ -189,17 +212,20 @@ Without a catalog it serves the checkpoint as is, at any `output_tokens`, and
 the run fails if its trie output head runs anyway.
 
 The run fails unless the server reports the catalog as loaded and every returned
-beam is a catalog item. Public SGLang has no catalog support, so `--catalog` rejects it. SID-GR normalizes scores over the allowed tokens; both
+beam is a catalog item. Public SGLang has no catalog support, so a catalog scenario rejects it. SID-GR normalizes scores over the allowed tokens; both
 SGLang engines keep full-vocabulary normalization, so scores differ across
 engines even when the beams match.
 
 ## Adding an engine
 
-An engine is one subclass of `Engine` in [bench/engines.py](bench/engines.py),
-listed in `ENGINES`, plus a config file with its `source` pin and an `images/` recipe. The class declares
+An engine needs an adapter, one subclass of `Adapter` in
+[bench/adapters.py](bench/adapters.py) listed in `ADAPTERS`, plus a solution file
+with its `source` pin and settings and an `images/` recipe. The adapter is logic
+and holds no settings; it declares
 
-- the source file the checkout must contain, where it is mounted, the paths pinned by `source.commit`, the image recipe, and the config keys and checks;
-- the server command, readiness endpoint and profiler start/stop calls;
+- the source file the checkout must contain, where it is mounted, the paths pinned by `source.commit`, the image recipe, and the solution keys and checks;
+- the server command, readiness endpoint and profiler start/stop calls, and the environment variables and `ServerArgs` it sets itself, which solutions may not;
+- the engine's code paths that its launcher's patches target (`features`);
 - the request payload and how to read beams and scores from the response, as cumulative log-probabilities;
 - whether it supports a catalog and, if it stores one natively, how to convert the shared catalog (`convert_catalog`);
 - the runtime facts to check and report (graph use, the code path taken).

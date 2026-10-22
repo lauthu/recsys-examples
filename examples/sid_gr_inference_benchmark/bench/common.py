@@ -10,6 +10,15 @@ from pathlib import Path
 
 # NVTX ranges: bench/request:<rid>, bench/phase:<rid>:<phase>, bench/section:<rid>:<name>
 MARKER = "bench"
+# JIT and model caches; the runner points each at a per-image directory.
+CACHE_ENV = """XDG_CACHE_HOME HF_HOME TORCH_HOME TORCH_EXTENSIONS_DIR TRITON_CACHE_DIR
+    TORCHINDUCTOR_CACHE_DIR CUDA_CACHE_PATH FLASHINFER_WORKSPACE_BASE TVM_FFI_CACHE_DIR
+    CUTE_DSL_CACHE_DIR QUACK_CACHE_DIR SGLANG_CACHE_DIR SGLANG_JIT_CACHE_DIR
+    NUMBA_CACHE_DIR MPLCONFIGDIR""".split()
+
+
+def fail(message):
+    raise ValueError(message)
 
 
 def call(port, method, path, body=None, timeout=60, text=False):

@@ -1,28 +1,30 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Everything the benchmark needs to know about one engine, in one class.
+"""How the benchmark talks to each engine: one adapter class per engine.
 
-The runner (host), the client (container) and the report ask the engine instead
-of branching on its name. To add an engine, subclass `Engine`, fill in the
-attributes and methods below and list it in `ENGINES`; nothing else changes.
+An adapter is plain logic and holds no settings. It reads the solution (how
+the engine is configured) and the scenario (what is measured) on the host, and
+plan.json, which the runner writes from both plus the CPUs and GPU of the run,
+in the container. The runner, the client, the launchers and the report ask the
+adapter instead of branching on the engine name. To add an engine, subclass
+`Adapter`, fill in the attributes and methods below and list it in `ADAPTERS`;
+nothing else changes.
 Standard library only: this module is imported on the host and in the container.
 
-Host side   solution sections and checks, catalog and model preparation, mounts;
-            these methods get the typed Solution and Scenario from bench.config.
-Container   these methods get plan.json, which the runner generates from them.
+Host side   solution checks, catalog and model preparation, mounts; these
+            methods get the typed Solution and Scenario from bench.config.
+Container   these methods get plan.json.
 Server side launch command, readiness and profiler endpoints, request payload.
 Response    beam parsing, per-run observed checks, setup rows for the report.
 """
 
 import array
 import json
-import os
 import pickle
 import struct
 import sys
-from dataclasses import asdict
 
-from bench.common import call
+from bench.common import CACHE_ENV, call, fail
 
 TRIE_HEAD_FILE = "trie_output_head.safetensors"
 SID_GR_SCRIPT = "/source/examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
@@ -35,12 +37,8 @@ FROM_SOURCE = (
 AMBIENT = ("GR_", "SGLANG_", "MODEL_")
 
 
-def fail(message):
-    raise ValueError(message)
-
-
-class Engine:
-    name: str
+class Adapter:
+    name: str  # the engine name a solution gives as `engine`
     title: str
     source_label: str  # what --source must be, for error messages
     entry: str  # file that must exist under --source
@@ -54,6 +52,13 @@ class Engine:
     )
     # Optional solution sections this engine requires; it rejects the others.
     sections: tuple[str, ...] = ()
+    # Environment the runner or the adapter sets; a solution must not.
+    managed_env = frozenset(
+        CACHE_ENV
+        + "HOME PYTHONPATH CUDA_VISIBLE_DEVICES BENCH_PROFILE BENCH_ENGINE".split()
+    )
+    # The engine's code paths that launcher patches target (patching.Patch.needs).
+    features: frozenset[str] = frozenset()
     ready = "/pilot/ready"
     # With a catalog, the engine serves a generated copy of the checkpoint.
     model_view = False
@@ -62,9 +67,8 @@ class Engine:
     catalog_file: str | None = None
 
     # ---- host side -------------------------------------------------------
-    def validate(self, solution, scenario, catalog):
-        """Engine-specific checks of a Solution against the Scenario, with or
-        without a catalog; raise ValueError."""
+    def validate(self, solution, scenario):
+        """Engine-specific checks of a Solution against the Scenario; raise ValueError."""
 
     def convert_catalog(self, paths, model, vocab_size):
         """Bytes of the engine's native catalog file (only if catalog_file is set);
@@ -73,14 +77,19 @@ class Engine:
 
     # ---- server side -----------------------------------------------------
     def server(self, plan, port, profile):
-        """Return (argv, env) that start the server."""
+        """Return (argv, env) that start the server. env holds what the benchmark
+        sets; the client adds it to the container's environment without AMBIENT."""
         raise NotImplementedError
 
+    def server_args(self, plan, port):
+        """SGLang ServerArgs this adapter sets over the solution's server_settings;
+        None for an engine configured only through its environment."""
+        return None
+
     def environment(self, plan, profile):
-        env = {k: v for k, v in os.environ.items() if not k.startswith(AMBIENT)}
         # CPU thread pools match the server CPUs unless the solution says otherwise.
         threads = str(len(plan["server_cpus"]))
-        env.update(OMP_NUM_THREADS=threads, MKL_NUM_THREADS=threads)
+        env = {"OMP_NUM_THREADS": threads, "MKL_NUM_THREADS": threads}
         env.update(plan["env"], BENCH_PROFILE="1" if profile else "0")
         return env
 
@@ -113,13 +122,27 @@ class Engine:
         return []
 
 
-class SidGr(Engine):
+class SidGrAdapter(Adapter):
     name = "sid-gr"
     recipe = "images/Dockerfile.sid-gr"
     title = "SID-GR"
     source_label = "a recsys-examples checkout"
     entry = "examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
     ready = "/ready"
+    # Set from the plan below; the model and the catalog come only from the runner.
+    managed_env = Adapter.managed_env | frozenset(
+        """PYTHON_BIN MODEL_DIR GR_MODEL_DIR GR_DECODE_ATTEN_ROOT GR_HTTP_HOST
+        GR_HTTP_PORT GR_CONTEXT_LEN GR_BEAM_WIDTH GR_DECODE_STEPS GR_MAX_BATCH_SIZE
+        GR_BEAM_KV_POOL_CAPACITY GR_CONTEXT_KV_POOL_CAPACITY
+        GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS GR_CATALOG_JSONL GR_ALLOW_CATALOG_RELOAD""".split()
+    )
+
+    def validate(self, solution, scenario):
+        if scenario.model.dtype != "bfloat16":
+            fail(
+                "sid-gr builds its model in bfloat16 and has no dtype setting; "
+                f"the scenario asks for model.dtype {scenario.model.dtype}"
+            )
 
     def server(self, plan, port, profile):
         workload = plan["workload"]
@@ -141,14 +164,11 @@ class SidGr(Engine):
                 "GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS": ",".join(
                     str(size) for size in range(1, batch + 1)
                 ),
-                "GR_DEVICE": "cuda",
-                "GR_DECODE_BACKEND": "real",
-                "GR_SUPPRESS_SPECIAL_TOKENS_ON_IGNORE_EOS": "0",
             }
         )
         if plan["catalog"]:
             env["GR_CATALOG_JSONL"] = plan["catalog"]["server_path"]
-        return ["bash", SID_GR_SCRIPT, "--no-executor-sync-timing"], env
+        return ["bash", SID_GR_SCRIPT], env
 
     def profile(self, port, start):
         call(port, "POST", f"/pilot/profile/{'start' if start else 'stop'}")
@@ -200,20 +220,24 @@ class SidGr(Engine):
         return "; ".join(parts)
 
 
-class SGLang(Engine):
+class SGLangAdapter(Adapter):
     source_label = "an SGLang checkout"
     entry = "python/sglang/srt/entrypoints/http_server.py"
     mount = "/sglang"
     fingerprint: tuple[str, ...] = ("python",)
     sections: tuple[str, ...] = ("server_settings",)
+    managed_env = Adapter.managed_env | {"SGLANG_PROFILE_V2"}
+    # Set by server_args; a solution must not.
+    managed_settings = frozenset(
+        """model_path host port dtype random_seed cuda_graph_bs_decode
+        cuda_graph_bs_prefill max_running_requests beam_search_constraint_dict""".split()
+    )
 
-    def validate(self, solution, scenario, catalog):
+    def validate(self, solution, scenario):
         settings = solution.server_settings
-        # The launcher sets these; the workload decides the rest (sglang_settings).
-        managed = {"model_path", "host", "port", "beam_search_constraint_dict"}
-        managed |= set(sglang_settings(asdict(scenario.workload)))
-        if managed & settings.keys():
-            fail(f"server_settings must not set {sorted(managed & settings.keys())}")
+        managed = sorted(self.managed_settings & settings.keys())
+        if managed:
+            fail(f"server_settings must not set {managed}: the runner sets them")
         if settings.get("tp_size", 1) != 1:
             fail("server_settings need tp_size 1: phase markers need one process")
 
@@ -223,6 +247,28 @@ class SGLang(Engine):
         env["SGLANG_PROFILE_V2"] = "0"  # the cudaProfilerApi control path
         argv = [sys.executable, "-m", "bench.server_sglang"]
         return argv + ["--plan", "/work/plan.json", "--port", str(port)], env
+
+    def server_args(self, plan, port):
+        """Where the model and the port are, and what follows from the scenario.
+
+        CUDA graph sizes: k requests in flight decode k * beam_width rows and
+        prefill k * context_length tokens. Request slots: every beam holds one,
+        and beam-search-new also keeps the request's own; with too few, requests
+        queue or the server fails.
+        """
+        workload = plan["workload"]
+        sizes = range(1, workload["concurrency"] + 1)
+        return {
+            "model_path": "/model",
+            "host": "127.0.0.1",
+            "port": port,
+            "dtype": plan["dtype"],
+            "random_seed": workload["seed"],
+            "cuda_graph_bs_decode": [workload["beam_width"] * k for k in sizes],
+            "cuda_graph_bs_prefill": [workload["context_length"] * k for k in sizes],
+            "max_running_requests": workload["concurrency"]
+            * (workload["beam_width"] + 1),
+        }
 
     def profile(self, port, start):
         # Native endpoints answer with plain text.
@@ -289,14 +335,15 @@ class SGLang(Engine):
         return "; ".join(parts)
 
 
-class BeamSearchNew(SGLang):
+class BeamSearchNewAdapter(SGLangAdapter):
     name = "sglang-beam-search-new"
     recipe = FROM_SOURCE
     title = "SGLang beam-search-new"
+    features = frozenset({"legacy_beam"})  # the branch's use_beam_search scheduler
     catalog_file = "catalog.pkl"
 
-    def validate(self, solution, scenario, catalog):
-        super().validate(solution, scenario, catalog)
+    def validate(self, solution, scenario):
+        super().validate(solution, scenario)
         if not solution.server_settings.get("enable_beam_search"):
             fail("sglang-beam-search-new needs server_settings.enable_beam_search true")
         # The branch turns the overlap scheduler off for beam search; say so.
@@ -305,6 +352,12 @@ class BeamSearchNew(SGLang):
                 "sglang-beam-search-new needs server_settings.disable_overlap_schedule "
                 "true: the branch runs beam search without the overlap scheduler"
             )
+
+    def server_args(self, plan, port):
+        args = super().server_args(plan, port)
+        if plan["catalog"]:
+            args["beam_search_constraint_dict"] = plan["catalog"]["server_source"]
+        return args
 
     def convert_catalog(self, paths, model, vocab_size):
         """Pickled token trie read by this branch's prefix-constrained trie."""
@@ -335,8 +388,10 @@ class BeamSearchNew(SGLang):
         return {"use_beam_search": True}
 
 
-class Native(SGLang):
+class NativeSGLangAdapter(SGLangAdapter):
     """SGLang's native `beam_width` API: public SGLang and the vedantjh2 fork."""
+
+    features = frozenset({"native_beam"})  # BeamCoordinator and BeamGroup
 
     def sampling(self, workload):
         return {"beam_width": workload["beam_width"]}
@@ -349,22 +404,23 @@ class Native(SGLang):
             )
 
 
-class SGLangPublic(Native):
+class PublicSGLangAdapter(NativeSGLangAdapter):
     name = "sglang"
     recipe = "images/Dockerfile.sglang"
     title = "SGLang (public)"
     catalog_supported = False
 
 
-class Vedantjh2SGLang(Native):
+class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
     name = "vedantjh2-sglang"
     recipe = FROM_SOURCE
     title = "vedantjh2/sglang (trie-head)"
+    features = NativeSGLangAdapter.features | {"trie_head", "shared_context"}
     model_view = True
     catalog_file = TRIE_HEAD_FILE
 
-    def validate(self, solution, scenario, catalog):
-        super().validate(solution, scenario, catalog)
+    def validate(self, solution, scenario):
+        super().validate(solution, scenario)
         legacy = {"enable_beam_search", "enable_beam_cascade_attention"}
         legacy &= solution.server_settings.keys()
         if legacy:
@@ -373,16 +429,16 @@ class Vedantjh2SGLang(Native):
             )
         if solution.env.get(SHARED, "false") not in ("true", "false"):
             fail(f'{SHARED} must be "true" or "false"')
-        if not catalog:  # native beam search: no trie output head
+        if scenario.catalog is None:  # native beam search: no trie output head
             return
         if scenario.model.sid_codebooks is None:
             fail(
-                "vedantjh2-sglang with --catalog needs model.sid_codebooks in the "
+                "vedantjh2-sglang with a catalog needs model.sid_codebooks in the "
                 "scenario: where the SID tokens sit in the vocabulary"
             )
         if scenario.workload.output_tokens != 3:
             fail(
-                "vedantjh2-sglang with --catalog needs workload.output_tokens 3: its "
+                "vedantjh2-sglang with a catalog needs workload.output_tokens 3: its "
                 "trie output head takes exactly three SID codebooks"
             )
 
@@ -394,12 +450,6 @@ class Vedantjh2SGLang(Native):
             codebook_size=layout.codebook_size,
             vocab_size=vocab_size,
         )
-
-    def server(self, plan, port, profile):
-        argv, env = super().server(plan, port, profile)
-        # Keep exact full-vocabulary normalization; the approximation changes scores.
-        env["SGLANG_BEAM_TRIE_TOPK_LOGPROB"] = "false"
-        return argv, env
 
     def shared(self, env):
         return env.get(SHARED, "false") == "true"
@@ -521,22 +571,6 @@ def trie_output_head(paths, *, token_start, codebook_size, vocab_size):
     return struct.pack("<Q", len(encoded)) + encoded + bytes(payload)
 
 
-def sglang_settings(workload):
-    """SGLang ServerArgs that follow from the workload (a plan.json mapping).
-
-    CUDA graph sizes: k requests in flight decode k * beam_width rows and
-    prefill k * context_length tokens. Request slots: every beam holds one, and
-    beam-search-new also keeps the request's own; with too few, requests queue
-    or the server fails.
-    """
-    sizes = range(1, workload["concurrency"] + 1)
-    return {
-        "cuda_graph_bs_decode": [workload["beam_width"] * k for k in sizes],
-        "cuda_graph_bs_prefill": [workload["context_length"] * k for k in sizes],
-        "max_running_requests": workload["concurrency"] * (workload["beam_width"] + 1),
-    }
-
-
 def _sum_counters(clean):
     totals = {}
     for result in clean:
@@ -550,13 +584,19 @@ class _Counts(dict):
         return 0
 
 
-ENGINES = {
-    engine.name: engine
-    for engine in (SidGr(), SGLangPublic(), BeamSearchNew(), Vedantjh2SGLang())
+ADAPTERS = {
+    adapter.name: adapter
+    for adapter in (
+        SidGrAdapter(),
+        PublicSGLangAdapter(),
+        BeamSearchNewAdapter(),
+        Vedantjh2SGLangAdapter(),
+    )
 }
 
 
-def get(name):
-    if name not in ENGINES:
-        fail(f"engine must be one of {', '.join(ENGINES)}")
-    return ENGINES[name]
+def get(engine):
+    """The adapter of an engine name, as a solution gives it in `engine`."""
+    if engine not in ADAPTERS:
+        fail(f"engine must be one of {', '.join(ADAPTERS)}")
+    return ADAPTERS[engine]

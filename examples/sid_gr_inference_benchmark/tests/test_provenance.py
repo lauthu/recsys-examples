@@ -113,6 +113,7 @@ def checkpoint(tmp_path):
         id="Org/Model",
         revision=COMMIT,
         sha256={k: hashlib.sha256(v).hexdigest() for k, v in files.items()},
+        dtype="bfloat16",
     )
     return model, pin
 

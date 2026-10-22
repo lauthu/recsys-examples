@@ -6,7 +6,7 @@ All engines receive identical requests, so beams are compared request by request
 with a reference engine (public SGLang by default), using the first clean run of each.
 """
 
-from bench import engines
+from bench import adapters
 from bench.common import summarize
 from bench.report import table
 
@@ -68,7 +68,7 @@ def render(contexts, names, reference):
             if name != reference
             else "reference"
         )
-        title = engines.get(ctx["solution"].engine).title
+        title = adapters.get(ctx["solution"].engine).title
         link = f"[{name}]({name}/report.md)"
         performance.append(
             [

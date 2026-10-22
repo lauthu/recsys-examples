@@ -13,22 +13,20 @@ source:
 env:
   PYTHONUNBUFFERED: "1"
 
-# SGLang ServerArgs, passed verbatim. The runner sets model_path, host, port,
-# from the workload CUDA graph sizes and max_running_requests, and, with
-# --catalog, beam_search_constraint_dict.
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host and port;
+# from the scenario dtype, random_seed, CUDA graph sizes and
+# max_running_requests; and, with a catalog, beam_search_constraint_dict.
 server_settings:
-  dtype: bfloat16
   kv_cache_dtype: auto
   tp_size: 1                        # required: phase markers need one process
   skip_tokenizer_init: true         # requests send token IDs
   disable_radix_cache: true         # no prefix reuse between requests
-  random_seed: 42
   enable_beam_search: true          # required by this engine
   enable_beam_cascade_attention: true  # beams share the context's attention
   prefill_attention_backend: flashinfer
   decode_attention_backend: flashinfer
   disable_overlap_schedule: true    # required: the branch has no overlap for beam search
-  page_size: 1
+  page_size: 1                      # the branch forces 1 for beam search
   disable_cuda_graph: false
   cuda_graph_backend_prefill: breakable
   mem_fraction_static: 0.7

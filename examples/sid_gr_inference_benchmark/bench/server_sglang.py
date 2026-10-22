@@ -9,10 +9,10 @@ Compared with the image's native server (`python3 -m sglang.launch_server`):
 Same
   - The server: SGLang's http_server.launch_server, run from the mounted source.
     Requests go to SGLang's own /generate; there is no proxy or extra hop.
-  - ServerArgs: `server_settings` from the solution file verbatim, plus
-    model_path, host, port, the CUDA graph sizes and request slots of the
-    workload (engines.sglang_settings) and, for beam-search-new with a catalog,
-    beam_search_constraint_dict.
+  - ServerArgs: `server_settings` from the solution file verbatim, plus what
+    the adapter sets (Adapter.server_args): model_path, host, port, and from
+    the scenario dtype, random_seed, the CUDA graph sizes and request slots
+    and, for beam-search-new with a catalog, beam_search_constraint_dict.
 
 Different, and nothing else
   - ROUTES: two added GET routes (/pilot/ready, /pilot/runtime) and, when
@@ -35,14 +35,14 @@ import os
 import threading
 from pathlib import Path
 
-from bench.engines import sglang_settings
+from bench import adapters
 from bench.patching import Patch, apply
 
 ENGINE = os.environ.get("BENCH_ENGINE")
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
-VEDANTJH2 = ENGINE == "vedantjh2-sglang"
-NATIVE = ("sglang", "vedantjh2-sglang")  # the native BeamCoordinator beam API
-LEGACY = ("sglang-beam-search-new",)  # the use_beam_search API
+# The engine's code paths (Adapter.features) decide which patches apply.
+FEATURES = adapters.get(ENGINE).features if ENGINE else frozenset()
+TRIE_HEAD = "trie_head" in FEATURES
 PACKAGES = (
     "sglang-kernel torch triton flashinfer-python nvidia-cutlass-dsl transformers"
 )
@@ -80,14 +80,14 @@ def patches():
             record_finalize,
             "records length_penalty and device beam history; NVTX section "
             "`beam_history` when profiling",
-            engines=NATIVE,
+            needs="native_beam",
         ),
         Patch(
             "sglang.srt.beam_search.shared_context_attention_kernel"
             ":shared_context_attention",
             section("shared_context_attention", counter="vedantjh2.shared_attention"),
             "counts shared-context attention calls; NVTX section when profiling",
-            engines=("vedantjh2-sglang",),
+            needs="shared_context",
         ),
         # Profile only: capture state, then NVTX phases and sections.
         Patch(
@@ -128,7 +128,7 @@ def patches():
                 section(label),
                 f"NVTX section `{label}`",
                 profile_only=True,
-                engines=NATIVE,
+                needs="native_beam",
             )
             for method, label in (
                 ("select_leader_prefill", "beam_selection"),
@@ -144,7 +144,7 @@ def patches():
             section("trie_output_head"),
             "NVTX section `trie_output_head`",
             profile_only=True,
-            engines=("vedantjh2-sglang",),
+            needs="trie_head",
         ),
         *(
             Patch(
@@ -152,7 +152,7 @@ def patches():
                 section(label),
                 f"NVTX section `{label}`",
                 profile_only=True,
-                engines=LEGACY,
+                needs="legacy_beam",
             )
             for method, label in (
                 ("process_beam_search_prefill_result", "beam_selection"),
@@ -234,7 +234,7 @@ def count_forward(original):
         _counts[f"forward.{kind}.{mode}"] += 1
         if kind == "decode":
             _counts["forward.decode.rows"] += batch.batch_size
-        if VEDANTJH2 and kind == "decode":
+        if TRIE_HEAD and kind == "decode":
             output = getattr(result, "logits_output", None)
             trie = getattr(batch, "beam_trie_levels", None)
             normalizer = getattr(output, "beam_normalizer", None)
@@ -419,7 +419,7 @@ def _version(name):
 
 
 def catalog_status(scheduler):
-    if VEDANTJH2:
+    if TRIE_HEAD:
         trie = getattr(
             getattr(scheduler, "beam_coordinator", None), "trie_constraint", None
         )
@@ -467,7 +467,7 @@ applied: list[Patch] = []  # in the scheduler process, where runtime() runs
 
 def run_scheduler_process(*args, **kwargs):
     """Spawn target: patch the scheduler process, then run SGLang's own."""
-    applied.extend(apply(patches(), ENGINE, PROFILE))
+    applied.extend(apply(patches(), FEATURES, PROFILE))
     from sglang.srt.managers.scheduler import run_scheduler_process as native
 
     return native(*args, **kwargs)
@@ -484,10 +484,8 @@ def main():
     from sglang.srt.server_args import ServerArgs
     from sglang.srt.utils import kill_process_tree
 
-    settings = dict(plan["server_settings"], model_path="/model", host="127.0.0.1")
-    settings.update(sglang_settings(plan["workload"]), port=args.port)
-    if plan["catalog"] and plan["engine"] == "sglang-beam-search-new":
-        settings["beam_search_constraint_dict"] = plan["catalog"]["server_source"]
+    adapter = adapters.get(plan["engine"])
+    settings = {**plan["server_settings"], **adapter.server_args(plan, args.port)}
     server_args = ServerArgs(**settings)
     if server_args.tp_size != 1:
         raise ValueError("NVTX phases need tp_size=1")

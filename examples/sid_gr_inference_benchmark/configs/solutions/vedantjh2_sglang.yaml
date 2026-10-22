@@ -15,16 +15,19 @@ env:
   PYTHONUNBUFFERED: "1"
   # "true" shares the context's attention across beams; decode then runs eagerly.
   SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: "false"
+  # Scores normalized over the full vocabulary, as in public SGLang; "true" makes
+  # the trie output head normalize over the active SID codebook only. With a
+  # catalog, the run checks that every decode forward kept the full normalizer.
+  SGLANG_BEAM_TRIE_TOPK_LOGPROB: "false"
 
-# SGLang ServerArgs, passed verbatim. The runner sets model_path, host, port and,
-# from the workload, CUDA graph sizes and max_running_requests.
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host and port
+# and, from the scenario, dtype, random_seed, CUDA graph sizes and
+# max_running_requests.
 server_settings:
-  dtype: bfloat16
   kv_cache_dtype: auto
   tp_size: 1                        # required: phase markers need one process
   skip_tokenizer_init: true         # requests send token IDs
   disable_radix_cache: true         # no prefix reuse between requests
-  random_seed: 42
   prefill_attention_backend: flashinfer
   decode_attention_backend: flashinfer
   disable_overlap_schedule: true    # false runs SGLang's overlap scheduler

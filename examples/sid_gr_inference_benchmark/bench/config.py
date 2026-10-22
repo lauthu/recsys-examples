@@ -4,9 +4,11 @@
 
 Two kinds of YAML files: a scenario (configs/scenarios/: what is measured,
 shared by every solution in a comparison) and a solution (configs/solutions/:
-how one engine is launched). Each file loads into the frozen dataclasses below;
-unknown or missing keys, wrong types and out-of-range values fail before any
-container starts. Engine-specific rules live in the engine's `validate`.
+how one engine is configured). Each file loads into the frozen dataclasses
+below; unknown or missing keys, wrong types and out-of-range values fail before
+any container starts. The CPUs and GPU of an invocation come from the command
+line (Resources). Engine-specific rules live in the engine's adapter
+(bench/adapters.py).
 """
 
 import dataclasses
@@ -18,24 +20,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import yaml
-from bench import engines
-from bench.common import read_json
-from bench.engines import TRIE_HEAD_FILE, fail
+from bench import adapters
+from bench.adapters import TRIE_HEAD_FILE
+from bench.common import fail, read_json
 
 SHA1 = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-MANAGED_ENV = set(
-    """XDG_CACHE_HOME HF_HOME TORCH_HOME TORCH_EXTENSIONS_DIR TRITON_CACHE_DIR
-    TORCHINDUCTOR_CACHE_DIR CUDA_CACHE_PATH FLASHINFER_WORKSPACE_BASE TVM_FFI_CACHE_DIR
-    CUTE_DSL_CACHE_DIR QUACK_CACHE_DIR SGLANG_CACHE_DIR SGLANG_JIT_CACHE_DIR
-    NUMBA_CACHE_DIR MPLCONFIGDIR
-    BENCH_PROFILE BENCH_ENGINE PYTHONPATH PYTHON_BIN HOME CUDA_VISIBLE_DEVICES
-    MODEL_DIR GR_MODEL_DIR GR_DECODE_ATTEN_ROOT GR_HTTP_HOST GR_HTTP_PORT GR_DEVICE
-    GR_CONTEXT_LEN GR_BEAM_WIDTH GR_DECODE_STEPS GR_MAX_BATCH_SIZE GR_DECODE_BACKEND
-    GR_BEAM_KV_POOL_CAPACITY GR_CONTEXT_KV_POOL_CAPACITY GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS
-    GR_SUPPRESS_SPECIAL_TOKENS_ON_IGNORE_EOS GR_CATALOG_JSONL GR_ALLOW_CATALOG_RELOAD
-    SGLANG_PROFILE_V2 SGLANG_BEAM_TRIE_TOPK_LOGPROB""".split()
-)
+# torch's names, which the servers report back as the weights' dtype.
+DTYPES = ("bfloat16", "float16", "float32")
 
 
 def check(condition, message):
@@ -68,6 +60,7 @@ class Model:
     id: str
     revision: str  # full Hub commit ID
     sha256: dict[str, str]  # config.json, weights and index file -> SHA-256
+    dtype: str  # weights and activations while serving; the checkpoint may differ
     # Read by engines that decode a catalog through an SID trie output head.
     sid_codebooks: SidCodebooks | None = None
 
@@ -85,6 +78,7 @@ class Model:
             all(SHA256.fullmatch(value) for value in self.sha256.values()),
             "model.sha256 values must be 64-character lowercase SHA-256 digests",
         )
+        check(self.dtype in DTYPES, f"model.dtype must be one of {', '.join(DTYPES)}")
 
 
 @dataclass(frozen=True)
@@ -115,20 +109,15 @@ class Runs:
 
 
 @dataclass(frozen=True)
-class Cpus:
-    server: list[int]
-    client: list[int]
+class CatalogPin:
+    """The catalog every beam is constrained to; --catalog gives its path."""
+
+    sha256: str
 
     def __post_init__(self):
-        for key in ("server", "client"):
-            cpus = getattr(self, key)
-            check(
-                cpus and len(set(cpus)) == len(cpus) and min(cpus) >= 0,
-                f"cpus.{key} must be a nonempty list of distinct CPU numbers",
-            )
         check(
-            not set(self.server) & set(self.client),
-            "cpus.server and cpus.client must not overlap",
+            SHA256.fullmatch(self.sha256),
+            "catalog.sha256 must be a 64-character lowercase SHA-256 digest",
         )
 
 
@@ -139,13 +128,33 @@ class Scenario:
     model: Model
     workload: Workload
     runs: Runs
-    cpus: Cpus
+    catalog: CatalogPin | None = None
+
+
+# ---- command line ----------------------------------------------------------
+@dataclass(frozen=True)
+class Resources:
+    """CPUs and GPU of one invocation: they belong to the machine, not to what
+    is measured, so they come from the command line."""
+
+    server_cpus: list[int]
+    client_cpus: list[int]
     gpu: str  # one device index such as "0", or a GPU UUID
 
     def __post_init__(self):
+        for key in ("server_cpus", "client_cpus"):
+            cpus = getattr(self, key)
+            check(
+                cpus and len(set(cpus)) == len(cpus) and min(cpus) >= 0,
+                f"--{key.replace('_', '-')} must be distinct CPU numbers",
+            )
+        check(
+            not set(self.server_cpus) & set(self.client_cpus),
+            "--server-cpus and --client-cpus must not overlap",
+        )
         check(
             re.fullmatch(r"\d+|GPU-[\w-]+", self.gpu),
-            'gpu must be one device index such as "0" or a GPU UUID',
+            "--gpu must be one device index such as 0 or a GPU UUID",
         )
 
 
@@ -170,17 +179,17 @@ class Source:
 
 @dataclass(frozen=True)
 class Solution:
-    """How one engine is launched; nothing in it depends on the model."""
+    """How one engine is configured; nothing in it depends on the model, the
+    workload or the machine."""
 
-    engine: str  # a name in engines.ENGINES
+    engine: str  # a name in adapters.ADAPTERS
     source: Source
     env: dict[str, str]  # server environment, passed verbatim
     # SGLang ServerArgs, passed verbatim; SGLang validates names and values.
     server_settings: dict[str, Any] | None = None
 
     def __post_init__(self):
-        engines.get(self.engine)
-        managed = sorted(MANAGED_ENV & self.env.keys())
+        managed = sorted(adapters.get(self.engine).managed_env & self.env.keys())
         check(not managed, f"env sets runner-managed variables {managed}")
 
 
@@ -261,20 +270,18 @@ def load_scenario(path):
     return parse(Scenario, read_yaml(path), f"scenario {path.name}")
 
 
-def load_solution(path, scenario, catalog=False):
-    """How one engine is launched; returns (engine, Solution).
-
-    `catalog` says whether the run constrains beams to a catalog."""
+def load_solution(path, scenario):
+    """How one engine is configured; returns (its adapter, Solution)."""
     solution = parse(Solution, read_yaml(path), f"solution {path.name}")
-    engine = engines.get(solution.engine)
+    adapter = adapters.get(solution.engine)
     sections = {"server_settings"} if solution.server_settings is not None else set()
     check(
-        sections == set(engine.sections),
-        f"{engine.name} solutions take exactly the sections "
-        f"{sorted(engine.sections)} besides engine, source and env",
+        sections == set(adapter.sections),
+        f"{adapter.name} solutions take exactly the sections "
+        f"{sorted(adapter.sections)} besides engine, source and env",
     )
-    engine.validate(solution, scenario, catalog)
-    return engine, solution
+    adapter.validate(solution, scenario)
+    return adapter, solution
 
 
 def load_model(model, workload):

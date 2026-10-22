@@ -178,6 +178,10 @@ def context(engine, **overrides):
         "checkpoint_dtype": "float32",
         "manifest": MANIFEST,
         "cpus": {"server": "0-9", "client": "10"},
+        "added": {
+            "env": {"BENCH_PROFILE": "0"},
+            "server_settings": {"dtype": "bfloat16", "port": "PORT"},
+        },
         "command": "python3 run_benchmark.py",
     }
     return {**ctx, **overrides}
@@ -254,10 +258,12 @@ def test_report_prints_the_pins_that_reproduce_the_run():
     assert '"benchmark_code": "abc123"' in text  # the JSON copy
 
 
-def test_report_copies_the_solution_settings_as_yaml():
+def test_report_shows_the_solution_settings_and_what_the_benchmark_adds():
     text = report.render(context("vedantjh2-sglang"))
-    assert "```yaml\nenv:\n  SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: 'true'\n" in text
-    assert "server_settings:\n  page_size: 1\n```" in text
+    solution, added = text.split("Added by the benchmark")
+    assert "```yaml\nenv:\n  SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: 'true'\n" in solution
+    assert "server_settings:\n  page_size: 1\n```" in solution
+    assert "env:\n  BENCH_PROFILE: '0'\nserver_settings:\n  dtype: bfloat16\n" in added
     assert "scenario `111111111111`, solution `222222222222`" in text
 
 

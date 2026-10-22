@@ -1,7 +1,8 @@
-# Solution: how the SID-GR server is launched. Loaded into bench.config.Solution.
+# Solution: how the SID-GR server is configured. Loaded into bench.config.Solution.
 # The runner sets the request shape (GR_CONTEXT_LEN, GR_BEAM_WIDTH,
 # GR_DECODE_STEPS), the batch size, pool capacities and decode graph buckets
-# from the concurrency, the model path and the port; env must not.
+# from the scenario, the model path and the port; env must not. SID-GR builds
+# its model in bfloat16, so the scenario's model.dtype must be bfloat16.
 
 engine: sid-gr
 
@@ -13,6 +14,11 @@ source:
 # Server environment, passed verbatim. Values are strings: quote numbers.
 # OMP_NUM_THREADS and MKL_NUM_THREADS default to the scenario's server CPU count.
 env:
+  GR_DEVICE: cuda
+  GR_DECODE_BACKEND: real
+  # SGLang does not suppress special tokens under ignore_eos; "0" keeps the beams
+  # comparable with it (SID-GR's default, "1", excludes them).
+  GR_SUPPRESS_SPECIAL_TOKENS_ON_IGNORE_EOS: "0"
   GR_ENABLE_PREFILL_CACHE: "0"
   GR_RETURN_BEAM_DETAILS: "0"
   GR_PROFILE_CONTINUOUS_DECODE: "0"

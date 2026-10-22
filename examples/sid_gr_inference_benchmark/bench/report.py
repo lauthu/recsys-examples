@@ -4,14 +4,15 @@
 
 Every number is measured or observed at runtime; solution settings are copied
 verbatim from the configuration rather than interpreted. The context carries the
-typed Scenario and Solution from bench.config.
+typed Scenario and Solution from bench.config, and the settings the benchmark
+adds to the solution's (run_benchmark.added_settings).
 """
 
 import json
 from collections import defaultdict
 
 import yaml
-from bench import engines
+from bench import adapters
 from bench.common import summarize
 from bench.sunburst import phase_key
 from bench.trace import NO_PHASE, NO_SECTION
@@ -47,7 +48,7 @@ def latency_rows(clean):
 def setup_rows(ctx):
     """Hardware, software and workload; runtime rows are read from the server."""
     solution, clean, catalog = ctx["solution"], ctx["clean"], ctx["catalog"]
-    engine = engines.get(solution.engine)
+    adapter = adapters.get(solution.engine)
     workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
     machine, cpus, runtime = clean[0], ctx["cpus"], clean[0]["runtime"]
     manifest = ctx["manifest"]
@@ -62,11 +63,11 @@ def setup_rows(ctx):
     rows = [
         ["GPU", f"{machine['gpu']} (driver {machine['driver']})"],
         ["CPU", cpu + cpus["client"]],
-        ["Engine", f"{engine.title}, {source_text(manifest['source'])}"],
+        ["Engine", f"{adapter.title}, {source_text(manifest['source'])}"],
         ["Image", f"`{manifest['image']['id']}`"],
         ["Packages", ", ".join(packages)],
         ["Attention (observed)", backends],
-        ["CUDA graphs (observed)", engine.graph_usage(clean)],
+        ["CUDA graphs (observed)", adapter.graph_usage(clean)],
     ]
     if "overlap" in runtime:  # SGLang's scheduler; SID-GR has its own worker
         overlap = "on" if runtime["overlap"] else "off"
@@ -78,7 +79,7 @@ def setup_rows(ctx):
         ["Model", f"{model['id']} @ `{model['revision'][:12]}`; {weights}"],
         ["Workload", inputs],
     ]
-    rows += engine.setup_rows(solution, catalog)
+    rows += adapter.setup_rows(solution, catalog)
     if catalog:
         checked = sum(result["catalog_beams"] for result in clean + [ctx["profile"]])
         text = f"{catalog['name']}: {catalog['items']:,} items, sha256 "
@@ -133,7 +134,7 @@ def reproduce_rows(manifest):
 
 def render(ctx):
     solution, clean, trace = ctx["solution"], ctx["clean"], ctx["trace"]
-    engine = engines.get(solution.engine)
+    adapter = adapters.get(solution.engine)
     workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
     requests = trace["requests"]
 
@@ -211,7 +212,7 @@ def render(ctx):
     if solution.server_settings is not None:
         settings["server_settings"] = solution.server_settings
 
-    return f"""# {engine.title} HTTP beam-search benchmark
+    return f"""# {adapter.title} HTTP beam-search benchmark
 
 {scope}
 
@@ -248,10 +249,18 @@ The server window is the request handler (NVTX `bench/request`). Times are per r
 
 {table(["", ""], setup)}
 
-<details><summary>Solution settings passed to the server</summary>
+<details><summary>Server settings and environment</summary>
+
+From the solution file, passed verbatim:
 
 ```yaml
 {yaml.safe_dump(settings, sort_keys=False).rstrip()}
+```
+
+Added by the benchmark for this scenario and machine (`PORT` is chosen per run). The rest of the server's environment is the container's, without its `GR_*`, `SGLANG_*` and `MODEL_*` variables:
+
+```yaml
+{yaml.safe_dump(ctx["added"], sort_keys=False).rstrip()}
 ```
 
 </details>

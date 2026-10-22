@@ -12,15 +12,14 @@ source:
 env:
   PYTHONUNBUFFERED: "1"
 
-# SGLang ServerArgs, passed verbatim. The runner sets model_path, host, port and,
-# from the workload, CUDA graph sizes and max_running_requests.
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host and port
+# and, from the scenario, dtype, random_seed, CUDA graph sizes and
+# max_running_requests.
 server_settings:
-  dtype: bfloat16
   kv_cache_dtype: auto
   tp_size: 1                        # required: phase markers need one process
   skip_tokenizer_init: true         # requests send token IDs
   disable_radix_cache: true         # no prefix reuse between requests
-  random_seed: 42
   prefill_attention_backend: flashinfer
   decode_attention_backend: flashinfer
   disable_overlap_schedule: true    # false runs SGLang's overlap scheduler

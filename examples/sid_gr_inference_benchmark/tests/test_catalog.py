@@ -6,7 +6,7 @@ import struct
 from types import SimpleNamespace
 
 import pytest
-from bench import catalog, engines
+from bench import adapters, catalog
 from bench.config import SidCodebooks
 
 PATHS = [
@@ -71,7 +71,7 @@ def test_parse_needs_beam_width_first_tokens():
 
 
 def test_sglang_trie_contains_every_path():
-    legacy = engines.get("sglang-beam-search-new")
+    legacy = adapters.get("sglang-beam-search-new")
     paths = {tuple(p): i for i, p in enumerate(PATHS)}
     data = pickle.loads(legacy.convert_catalog(paths, None, 5000))
     assert data["num_sequences"] == 16 and data["max_depth"] == data["min_depth"] == 3
@@ -89,7 +89,7 @@ def test_sglang_trie_contains_every_path():
 def test_vedantjh2_round_trip():
     model = SimpleNamespace(sid_codebooks=SidCodebooks(1000, 1000))
     paths = {tuple(p): i for i, p in enumerate(PATHS)}
-    data = engines.get("vedantjh2-sglang").convert_catalog(paths, model, 5000)
+    data = adapters.get("vedantjh2-sglang").convert_catalog(paths, model, 5000)
     size = struct.unpack("<Q", data[:8])[0]
     header = json.loads(data[8 : 8 + size])
     assert size % 8 == 0 and header["__metadata__"]["token_start"] == "1000"
@@ -119,14 +119,14 @@ def test_vedantjh2_round_trip():
 
 def test_vedantjh2_rejects_tokens_outside_codebooks():
     with pytest.raises(ValueError, match="sid_codebooks ranges"):
-        engines.trie_output_head(
+        adapters.trie_output_head(
             {(1000, 1999, 3000): 0},
             token_start=1000,
             codebook_size=1000,
             vocab_size=5000,
         )
     with pytest.raises(ValueError, match="vocabulary"):
-        engines.trie_output_head(
+        adapters.trie_output_head(
             {(1000, 2000, 3000): 0},
             token_start=1000,
             codebook_size=1000,

@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 import pytest
-from bench import client, engines
+from bench import adapters, client
 from bench.common import read_json, write_json
 
 PATHS = [[1000 + a, 2000, 3000] for a in range(4)]
@@ -43,7 +43,8 @@ class Handler(BaseHTTPRequestHandler):
         counters = {"prefill.graph_replays": served[0], "decode.graph_replays": 2 * served[0],
                     "decode.eager_fallbacks": None}
         catalog = {"source": "/work/catalog.jsonl", "item_count": len(paths)}
-        runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1]}
+        runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1],
+                   "dtype": "bfloat16"}
         self.reply({"/ready": {"ready": True}, "/catalog/status": {"catalog": catalog},
                     "/pilot/runtime": runtime}[self.path])
 
@@ -78,7 +79,7 @@ def fake_server(tmp_path, port, mode="valid"):
     return [sys.executable, str(script), str(port), mode, json.dumps(PATHS)]
 
 
-def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1):
+def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1, dtype="bfloat16"):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
     write_json(
@@ -98,6 +99,7 @@ def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1):
         "requests": 3,
         "profile_requests": 1,
         "vocab_size": 5000,
+        "dtype": dtype,
         "env": {},
         "server_settings": None,
         "server_cpus": sorted(os.sched_getaffinity(0))[:1],  # a CPU this job has
@@ -106,7 +108,7 @@ def run_fake(tmp_path, monkeypatch, mode="valid", concurrency=1):
         "catalog": catalog,
     }
     monkeypatch.setattr(
-        engines.get("sid-gr"),
+        adapters.get("sid-gr"),
         "server",
         lambda plan, port, profile: (
             fake_server(tmp_path, port, mode),
@@ -147,6 +149,21 @@ def test_invalid_beams_fail_the_run(tmp_path, monkeypatch):
         run_fake(tmp_path, monkeypatch, mode="duplicate")
 
 
+def test_weights_in_another_dtype_than_the_scenario_fail_the_run(tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="holds bfloat16 weights"):
+        run_fake(tmp_path, monkeypatch, dtype="float16")
+
+
+def test_the_server_sees_the_plan_settings_not_the_image_ones(monkeypatch):
+    monkeypatch.setenv("SGLANG_FROM_IMAGE", "1")
+    monkeypatch.setenv("BENCH_KEPT", "1")
+    plan = {"env": {"SGLANG_X": "2"}, "server_cpus": [4, 5], "workload": WORKLOAD}
+    argv, env = client.launch(adapters.get("sglang"), plan, 8000, profile=False)
+    assert argv[:3] == ["taskset", "--cpu-list", "4,5"]
+    assert "SGLANG_FROM_IMAGE" not in env and env["BENCH_KEPT"] == "1"
+    assert env["SGLANG_X"] == "2" and env["OMP_NUM_THREADS"] == "2"
+
+
 def test_profile_control_accepts_sglang_plain_text(tmp_path):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -156,7 +173,7 @@ def test_profile_control_accepts_sglang_plain_text(tmp_path):
         client.wait_ready(server, port, "/ready", timeout=30)
         for engine in ("sid-gr", "vedantjh2-sglang"):
             for start in (True, False):
-                engines.get(engine).profile(port, start)
+                adapters.get(engine).profile(port, start)
     finally:
         server.kill()
         server.wait()
@@ -165,10 +182,10 @@ def test_profile_control_accepts_sglang_plain_text(tmp_path):
 def test_sglang_scores_are_converted_to_cumulative_logprob():
     beam = {"output_ids": [1, 2, 3], "meta_info": {"sequence_score": -0.5}}
     response = {"meta_info": {"id": "r", "beam_results": [beam]}}
-    engine = engines.get("vedantjh2-sglang")
-    assert engine.beams(response, "r") == [([1, 2, 3], -1.5)]
+    adapter = adapters.get("vedantjh2-sglang")
+    assert adapter.beams(response, "r") == [([1, 2, 3], -1.5)]
     with pytest.raises(ValueError, match="does not belong"):
-        engine.beams(response, "other")
+        adapter.beams(response, "other")
 
 
 VEDANTJH2_CASES = [
@@ -202,14 +219,14 @@ def test_vedantjh2_checks(shared, changes, message):
     }
     env = {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": shared}
     plan = {"env": env, "catalog": {"items": 256}}
-    engine = engines.get("vedantjh2-sglang")
+    adapter = adapters.get("vedantjh2-sglang")
     if message is None:
-        engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+        adapter.check_counters(plan, counters, 4, {"length_penalty": 1.0})
     else:
         with pytest.raises(RuntimeError, match=message):
-            engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+            adapter.check_counters(plan, counters, 4, {"length_penalty": 1.0})
     with pytest.raises(RuntimeError, match="length penalty"):
-        engine.check_counters(plan, counters, 4, {"length_penalty": 0.5})
+        adapter.check_counters(plan, counters, 4, {"length_penalty": 0.5})
 
 
 @pytest.mark.parametrize(
@@ -225,20 +242,20 @@ def test_vedantjh2_without_a_catalog_must_not_run_the_trie_head(name):
         "vedantjh2.shared_attention": 0,
     }
     plan = {"env": {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"}, "catalog": None}
-    engine = engines.get("vedantjh2-sglang")
+    adapter = adapters.get("vedantjh2-sglang")
     if name is None:
-        engine.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+        adapter.check_counters(plan, counters, 4, {"length_penalty": 1.0})
         return
     with pytest.raises(RuntimeError, match="trie output head ran without a catalog"):
-        engine.check_counters(plan, {**counters, name: 8}, 4, {"length_penalty": 1.0})
+        adapter.check_counters(plan, {**counters, name: 8}, 4, {"length_penalty": 1.0})
 
 
 def test_public_sglang_uses_native_beam_width_and_checks_the_length_penalty():
-    engine = engines.get("sglang")
+    adapter = adapters.get("sglang")
     row = {"request_id": "r", "input_ids": [1]}
-    params = engine.payload(row, WORKLOAD)["sampling_params"]
+    params = adapter.payload(row, WORKLOAD)["sampling_params"]
     assert params["beam_width"] == 4 and params["n"] == 4
     assert "use_beam_search" not in params
-    engine.check_counters({"env": {}}, {}, 1, {"length_penalty": 1.0})
+    adapter.check_counters({"env": {}}, {}, 1, {"length_penalty": 1.0})
     with pytest.raises(RuntimeError, match="length penalty"):
-        engine.check_counters({"env": {}}, {}, 1, {"length_penalty": 0.5})
+        adapter.check_counters({"env": {}}, {}, 1, {"length_penalty": 0.5})

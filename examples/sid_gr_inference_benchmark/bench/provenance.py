@@ -11,7 +11,7 @@ import hashlib
 import json
 import subprocess
 
-from bench.engines import fail
+from bench.common import fail
 
 # Files that define a checkpoint's numerics; tokenizer files are not read.
 MODEL_SUFFIXES = (".safetensors", ".safetensors.index.json")

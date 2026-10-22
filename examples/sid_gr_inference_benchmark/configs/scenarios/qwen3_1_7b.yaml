@@ -1,5 +1,6 @@
-# Scenario: what is measured. Every solution in one run gets this file.
-# Loaded into bench.config.Scenario; unknown keys and wrong types fail.
+# Scenario: what is measured. Every solution in one run gets this file; the
+# command line gives the CPUs and GPU. Loaded into bench.config.Scenario;
+# unknown keys and wrong types fail.
 
 model:
   id: Qwen/Qwen3-1.7B
@@ -11,6 +12,8 @@ model:
     model-00001-of-00002.safetensors: "169ad53ec313c3a34b06c0809216e4fc072cce444a5d4ff2b59690d064130ed5"
     model-00002-of-00002.safetensors: "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"
     model.safetensors.index.json: "0d660e94b165eb912669a5249dff44b83188c4777a07ddb9611fb78d91b0578d"
+
+  dtype: bfloat16        # weights and activations while serving
 
   # Semantic-ID token layout, read only by engines that decode a catalog through
   # an SID trie output head (vedantjh2-sglang): the token at depth d lies in
@@ -33,8 +36,7 @@ runs:
   warmups: 10           # unmeasured requests before them
   profile_requests: 3   # requests captured by the profiled process, one at a time
 
-cpus:                   # disjoint; the container is limited to both
-  server: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-  client: [10]
-
-gpu: "0"                # one device index or a GPU UUID
+# Optional: constrain every beam to a catalog (README, Catalog filtering). The
+# file is passed with --catalog and must have this SHA-256.
+# catalog:
+#   sha256: "<SHA-256 of the catalog JSONL>"

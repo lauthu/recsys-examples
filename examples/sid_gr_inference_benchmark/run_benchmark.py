@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Benchmark HTTP beam-search solutions on one scenario, each in Docker.
 
-A scenario (configs/scenarios/*.yaml) fixes the model, workload and runs; a
-solution (configs/solutions/*.yaml) fixes how one engine is launched. Every clean run and the profiled run is a fresh container and server process.
-Each solution's directory receives report.md, sunburst.svg and profile.nsys-rep;
-with several solutions, OUTPUT also gets comparison.md. Intermediate files are
-kept in .work only when a run fails.
+A scenario (configs/scenarios/*.yaml) fixes what is measured: the model, the
+workload, the runs and an optional catalog. A solution (configs/solutions/*.yaml)
+fixes how one engine is configured. The command line gives the paths, CPUs and
+GPU of this invocation. Every clean run and the profiled run is a fresh
+container and server process. Each solution's directory receives report.md,
+sunburst.svg and profile.nsys-rep; with several solutions, OUTPUT also gets
+comparison.md. Intermediate files are kept in .work only when a run fails.
 """
 
 import argparse
@@ -22,9 +24,11 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import yaml
 from bench import catalog, compare, provenance, report, sunburst, trace
-from bench.common import read_json, write_json
+from bench.common import CACHE_ENV, fail, read_json, write_json
 from bench.config import (
+    Resources,
     Scenario,
     Solution,
     load_model,
@@ -32,15 +36,10 @@ from bench.config import (
     load_solution,
     make_workload,
 )
-from bench.engines import fail
 
 ROOT = Path(__file__).resolve().parent
 BENCH = ROOT / "bench"
 LABEL = "sid-gr-inference-benchmark"
-CACHE_ENV = """XDG_CACHE_HOME HF_HOME TORCH_HOME TORCH_EXTENSIONS_DIR TRITON_CACHE_DIR
-    TORCHINDUCTOR_CACHE_DIR CUDA_CACHE_PATH FLASHINFER_WORKSPACE_BASE TVM_FFI_CACHE_DIR
-    CUTE_DSL_CACHE_DIR QUACK_CACHE_DIR SGLANG_CACHE_DIR SGLANG_JIT_CACHE_DIR
-    NUMBA_CACHE_DIR MPLCONFIGDIR""".split()
 
 
 @dataclass
@@ -48,7 +47,7 @@ class Run:
     """One solution to measure: its configs, source checkout, image and output."""
 
     name: str  # the solution file name without .yaml
-    engine: object
+    adapter: object  # bench.adapters.Adapter of the solution's engine
     scenario: Scenario
     solution: Solution
     source: Path
@@ -71,6 +70,17 @@ def cpu_list(cpus):
         else:
             spans.append([cpu, cpu])
     return ",".join(f"{a}-{b}" if a != b else str(a) for a, b in spans)
+
+
+def cpu_numbers(text):
+    """ "0-2,5" -> [0, 1, 2, 5]; the inverse of cpu_list."""
+    cpus = []
+    for part in text.split(","):
+        first, dash, last = part.partition("-")
+        if not first.isdigit() or (dash and not last.isdigit()):
+            raise argparse.ArgumentTypeError(f"{text!r} is not a CPU list like 0-2,5")
+        cpus += range(int(first), int(last or first) + 1)
+    return cpus
 
 
 def git(path, *args):
@@ -97,7 +107,7 @@ def input_state(args, run):
         (p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in args.model.iterdir()
     ]
     return {
-        "source": checkout(run.source, *run.engine.fingerprint),
+        "source": checkout(run.source, *run.adapter.fingerprint),
         "tools": checkout(ROOT, "bench", untracked="normal")[0],
         "tools_hash": hashlib.sha256(b"".join(files)).hexdigest(),
         "model": sorted(model),
@@ -105,11 +115,11 @@ def input_state(args, run):
 
 
 def docker_command(args, run, cache, image, name, phase):
-    engine, scenario = run.engine, run.scenario
-    view = engine.model_view and args.catalog
+    adapter, resources = run.adapter, args.resources
+    view = adapter.model_view and run.scenario.catalog is not None
     model = "/model-source" if view else "/model"
     mounts = [(BENCH, "/benchmark-tools/bench", True), (run.work, "/work", False)]
-    mounts += [(cache, "/cache", False), (run.source, engine.mount, True)]
+    mounts += [(cache, "/cache", False), (run.source, adapter.mount, True)]
     mounts += [(args.model, model, True)]
     if view:  # links to /model-source plus the generated trie head
         mounts.append((run.work / "model", "/model", True))
@@ -117,9 +127,9 @@ def docker_command(args, run, cache, image, name, phase):
     env.update(HOME="/cache/home", USER="benchmark", LOGNAME="benchmark")
     env.update(PYTHONPATH="/benchmark-tools", PYTHONDONTWRITEBYTECODE="1")
     env.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
-    cpus = cpu_list(scenario.cpus.server + scenario.cpus.client)
+    cpus = cpu_list(resources.server_cpus + resources.client_cpus)
     argv = ["docker", "run", "--rm", "--init", "--name", name, "--label", LABEL]
-    argv += ["--network", "none", "--gpus", f"device={scenario.gpu}"]
+    argv += ["--network", "none", "--gpus", f"device={resources.gpu}"]
     argv += ["--cpuset-cpus", cpus, "--user", f"{os.getuid()}:{os.getgid()}"]
     argv += ["--shm-size", "4g", "--cap-add", "SYS_PTRACE"]
     argv += ["--security-opt", "seccomp=unconfined"]
@@ -144,49 +154,80 @@ def run_container(argv, name, log):
         fail(f"container exited with {code.returncode}; see {log} and {server_log}")
 
 
+def parse_catalog(args, scenario, vocab):
+    """(bytes, token paths, identity) of the --catalog file, checked against the
+    workload."""
+    workload = scenario.workload
+    data = args.catalog.read_bytes()
+    paths, info = catalog.parse(
+        data,
+        output_tokens=workload.output_tokens,
+        beam_width=workload.beam_width,
+        vocab_size=vocab,
+    )
+    return data, paths, {**info, "name": args.catalog.name}
+
+
+def server_source(adapter):
+    """Where the server reads the catalog in the container."""
+    if adapter.model_view:
+        return f"/model/{adapter.catalog_file}"
+    return f"/work/{adapter.catalog_file or 'catalog.jsonl'}"
+
+
+def make_plan(args, run, vocab, catalog_items):
+    """plan.json: the container reads this, never the YAML files."""
+    scenario, solution, resources = run.scenario, run.solution, args.resources
+    plan = {"engine": run.adapter.name, "workload": asdict(scenario.workload)}
+    plan.update(vocab_size=vocab, dtype=scenario.model.dtype)
+    plan.update(warmups=scenario.runs.warmups, requests=scenario.runs.requests)
+    plan.update(profile_requests=scenario.runs.profile_requests)
+    plan.update(env=solution.env, server_settings=solution.server_settings)
+    plan.update(server_cpus=resources.server_cpus, client_cpus=resources.client_cpus)
+    plan.update(workload_path="/work/workload.json", catalog=None)
+    if catalog_items is not None:
+        jsonl = "/work/catalog.jsonl"
+        source = server_source(run.adapter)
+        plan["catalog"] = dict(path=jsonl, server_path=jsonl, server_source=source)
+        plan["catalog"]["items"] = catalog_items
+    return plan
+
+
 def prepare(args, run, model_config, workload_rows):
     """Write plan.json, the workload and the engine's catalog files."""
-    engine, solution, work = run.engine, run.solution, run.work
-    workload, runs = run.scenario.workload, run.scenario.runs
+    adapter, work = run.adapter, run.work
     vocab = model_config["vocab_size"]
-    plan_catalog, info = None, None
+    info = None
     if args.catalog:
-        data = args.catalog.read_bytes()
-        paths, info = catalog.parse(
-            data,
-            output_tokens=workload.output_tokens,
-            beam_width=workload.beam_width,
-            vocab_size=vocab,
-        )
-        info["name"] = args.catalog.name
+        data, paths, info = parse_catalog(args, run.scenario, vocab)
         (work / "catalog.jsonl").write_bytes(data)
-        source = "/work/catalog.jsonl"
-        if engine.model_view:
-            source, view = f"/model/{engine.catalog_file}", work / "model"
-            view.mkdir()
-            for item in args.model.iterdir():
-                if item.name != engine.catalog_file:
-                    (view / item.name).symlink_to(f"/model-source/{item.name}")
-            native = engine.convert_catalog(paths, run.scenario.model, vocab)
-            (view / engine.catalog_file).write_bytes(native)
-        elif engine.catalog_file:
-            source = f"/work/{engine.catalog_file}"
-            native = engine.convert_catalog(paths, run.scenario.model, vocab)
-            (work / engine.catalog_file).write_bytes(native)
-        jsonl = "/work/catalog.jsonl"
-        plan_catalog = dict(path=jsonl, server_path=jsonl, server_source=source)
-        plan_catalog["items"] = info["items"]
+        if adapter.catalog_file:
+            native = adapter.convert_catalog(paths, run.scenario.model, vocab)
+            directory = work
+            if adapter.model_view:  # links to /model-source plus the native file
+                directory = work / "model"
+                directory.mkdir()
+                for item in args.model.iterdir():
+                    if item.name != adapter.catalog_file:
+                        (directory / item.name).symlink_to(f"/model-source/{item.name}")
+            (directory / adapter.catalog_file).write_bytes(native)
     write_json(work / "workload.json", workload_rows)
-    # The container reads this generated JSON; it never sees the YAML files.
-    plan = {"engine": engine.name, "workload": asdict(workload), "vocab_size": vocab}
-    plan.update(warmups=runs.warmups, requests=runs.requests)
-    plan.update(profile_requests=runs.profile_requests)
-    plan.update(env=solution.env, server_settings=solution.server_settings)
-    cpus = run.scenario.cpus
-    plan.update(server_cpus=cpus.server, client_cpus=cpus.client)
-    plan.update(workload_path="/work/workload.json", catalog=plan_catalog)
+    plan = make_plan(args, run, vocab, info["items"] if info else None)
     write_json(work / "plan.json", plan)
     return info
+
+
+def added_settings(run, plan):
+    """What the benchmark adds to the solution's env and server_settings for this
+    scenario and machine; PORT stands for the port, which differs per run."""
+    env = run.adapter.server(plan, "PORT", profile=False)[1]
+    added = {
+        "env": {k: v for k, v in sorted(env.items()) if run.solution.env.get(k) != v}
+    }
+    settings = run.adapter.server_args(plan, "PORT")
+    if settings is not None:
+        added["server_settings"] = settings
+    return added
 
 
 def parse_args(argv):
@@ -204,7 +245,7 @@ def parse_args(argv):
         "--scenario",
         type=Path,
         required=True,
-        help="scenario YAML: model pin, workload, runs, CPUs and GPU",
+        help="scenario YAML: model pin and dtype, workload, runs, optional catalog pin",
     )
     parser.add_argument(
         "--model",
@@ -212,7 +253,24 @@ def parse_args(argv):
         required=True,
         help="checkpoint directory matching the scenario's model pin",
     )
-    parser.add_argument("--catalog", type=Path, help="JSONL items that constrain beams")
+    parser.add_argument(
+        "--server-cpus",
+        type=cpu_numbers,
+        required=True,
+        help="CPUs for the server, such as 0-9 or 4-6,20-22",
+    )
+    parser.add_argument(
+        "--client-cpus",
+        type=cpu_numbers,
+        required=True,
+        help="CPUs for the client, apart from the server CPUs",
+    )
+    parser.add_argument(
+        "--gpu", required=True, help="one GPU: a device index such as 0, or a UUID"
+    )
+    parser.add_argument(
+        "--catalog", type=Path, help="the catalog JSONL that the scenario pins"
+    )
     parser.add_argument("--output", type=Path, required=True, help="new or empty dir")
     parser.add_argument(
         "--cache-dir", type=Path, help="JIT cache (default: OUTPUT/../.cache/IMAGE)"
@@ -228,28 +286,49 @@ def parse_args(argv):
         help="run although a source differs from its pinned commit; the report "
         "marks the result as not reproducible",
     )
-    parser.add_argument("--dry-run", action="store_true", help="print docker commands")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print what the benchmark adds to each solution's settings, and the "
+        "docker commands",
+    )
     args = parser.parse_args(argv)
     for name in ("scenario", "model", "catalog", "output", "cache_dir"):
         if getattr(args, name):
             setattr(args, name, getattr(args, name).expanduser().resolve())
+    args.resources = Resources(args.server_cpus, args.client_cpus, args.gpu)
     return args
+
+
+def check_catalog(args, scenario):
+    """The scenario says whether beams follow a catalog; --catalog says where it is."""
+    if scenario.catalog is None:
+        if args.catalog:
+            fail("--catalog needs a scenario that pins it in catalog.sha256")
+        return
+    if not args.catalog:
+        fail("the scenario pins a catalog; give its file with --catalog")
+    if provenance.sha256_file(args.catalog) != scenario.catalog.sha256:
+        fail(f"{args.catalog} differs from the scenario's catalog.sha256")
 
 
 def build_runs(args, scenario):
     runs = []
     for solution_path, source, image in args.solution:
         solution_path = Path(solution_path).expanduser().resolve()
-        engine, solution = load_solution(solution_path, scenario, bool(args.catalog))
+        adapter, solution = load_solution(solution_path, scenario)
         source = Path(source).expanduser().resolve()
-        if not (source / engine.entry).is_file():
-            fail(f"{source} is not {engine.source_label}: no {engine.entry}")
-        if args.catalog and not engine.catalog_supported:
-            fail(f"{engine.title} cannot constrain beams to a catalog; drop --catalog")
+        if not (source / adapter.entry).is_file():
+            fail(f"{source} is not {adapter.source_label}: no {adapter.entry}")
+        if scenario.catalog and not adapter.catalog_supported:
+            fail(
+                f"{adapter.title} cannot constrain beams to a catalog; "
+                "use a scenario without one"
+            )
         name = solution_path.stem
         output = args.output if len(args.solution) == 1 else args.output / name
         runs.append(
-            Run(name, engine, scenario, solution, source, image, output, solution_path)
+            Run(name, adapter, scenario, solution, source, image, output, solution_path)
         )
     if len({run.name for run in runs}) != len(runs):
         fail("--solution configs need distinct file names")
@@ -261,6 +340,7 @@ def build_runs(args, scenario):
 def main(argv=None):
     args = parse_args(argv)
     scenario = load_scenario(args.scenario)
+    check_catalog(args, scenario)
     model_config = load_model(args.model, scenario.workload)
     runs = build_runs(args, scenario)
     if args.output.exists() and any(args.output.iterdir()):
@@ -268,7 +348,13 @@ def main(argv=None):
     phases = [f"clean_{i}" for i in range(1, scenario.runs.clean + 1)]
     phases.append("profile")
     if args.dry_run:
+        vocab, items = model_config["vocab_size"], None
+        if args.catalog:
+            items = parse_catalog(args, scenario, vocab)[2]["items"]
         for run in runs:
+            added = added_settings(run, make_plan(args, run, vocab, items))
+            print(f"# {run.name}: added to the solution's settings (PORT is per run)")
+            print(yaml.safe_dump(added, sort_keys=False).rstrip())
             cache = args.cache_dir or args.output.parent / ".cache"
             for phase in phases:
                 print(
@@ -283,7 +369,7 @@ def main(argv=None):
             "source": provenance.verify_source(
                 run.source,
                 run.solution.source,
-                run.engine.fingerprint,
+                run.adapter.fingerprint,
                 args.allow_dirty,
             ),
             "image": provenance.image_info(run.image),
@@ -333,7 +419,7 @@ def manifest(args, run, before, model, profile):
         **run.manifest,
         "model": model,
         "benchmark_code": before["tools"],
-        "recipe": run.engine.recipe,
+        "recipe": run.adapter.recipe,
         "configs": {
             "scenario": provenance.sha256_file(args.scenario),
             "solution": provenance.sha256_file(run.solution_path),
@@ -343,9 +429,9 @@ def manifest(args, run, before, model, profile):
 
 
 def write_outputs(args, run, phases, catalog_info, before, model, checkpoint_dtype):
-    work, cpus = run.work, run.scenario.cpus
+    work, resources = run.work, args.resources
     summary = trace.analyze(work / "profile/trace.sqlite")
-    title = f"{run.engine.title} · {model['id'].split('/')[-1]}"
+    title = f"{run.adapter.title} · {model['id'].split('/')[-1]}"
     subtitle = f"Server time per request, mean of {summary['requests']} profiled"
     subtitle += " requests: phase › section › kernel family or non-kernel time"
     svg = sunburst.render(
@@ -366,7 +452,11 @@ def write_outputs(args, run, phases, catalog_info, before, model, checkpoint_dty
         "manifest": manifest(
             args, run, before, model, read_json(work / "profile/result.json")
         ),
-        "cpus": {"server": cpu_list(cpus.server), "client": cpu_list(cpus.client)},
+        "cpus": {
+            "server": cpu_list(resources.server_cpus),
+            "client": cpu_list(resources.client_cpus),
+        },
+        "added": added_settings(run, read_json(work / "plan.json")),
         "command": shlex.join(["python3", *sys.argv]),
         # The first clean run's beams per request, for the cross-engine comparison.
         "outputs": read_json(work / phases[0] / "outputs.json"),

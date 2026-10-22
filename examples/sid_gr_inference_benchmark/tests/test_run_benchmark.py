@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import argparse
 import dataclasses
+import hashlib
 import json
 import re
 from argparse import Namespace
@@ -8,8 +10,8 @@ from argparse import Namespace
 import pytest
 import run_benchmark as runner
 import yaml
+from bench import adapters
 from bench import config as configs
-from bench import engines
 from bench.common import read_json
 
 CONFIGS = ("sid_gr", "sglang", "sglang_beam_search_new", "vedantjh2_sglang")
@@ -38,6 +40,11 @@ def shipped():
     return configs.load_scenario(path("qwen3_0_6b"))
 
 
+def pinned(found, sha256="0" * 64):
+    """The scenario, constrained to a catalog."""
+    return dataclasses.replace(found, catalog=configs.CatalogPin(sha256=sha256))
+
+
 def override(value, changes):
     """Apply dotted-path overrides such as {"workload.seed": 1}."""
     for dotted, item in changes.items():
@@ -60,12 +67,14 @@ def test_shipped_configs_load_into_typed_classes():
         found = configs.load_scenario(path(name))
         assert isinstance(found.workload, configs.Workload)
         assert found.model.revision == raw(name)["model"]["revision"]
+        assert found.model.dtype == "bfloat16" and found.catalog is None
         layout = configs.SidCodebooks(token_start=1000, codebook_size=1000)
         assert found.model.sid_codebooks == layout
     for name in CONFIGS:
-        for catalog in (False, name != PUBLIC):
-            engine, found = configs.load_solution(path(name), shipped(), catalog)
-            assert isinstance(found, configs.Solution) and engine.name == found.engine
+        scenarios = [shipped()] + ([pinned(shipped())] if name != PUBLIC else [])
+        for scenario_ in scenarios:
+            adapter, found = configs.load_solution(path(name), scenario_)
+            assert isinstance(found, configs.Solution) and adapter.name == found.engine
             assert isinstance(found.source, configs.Source)
 
 
@@ -83,16 +92,14 @@ def test_every_solution_runs_with_any_scenario(tmp_path):
 INVALID_SCENARIO = [
     ({"extra": 1}, r"unknown keys \['extra'\]"),
     ({"workload.extra": 1}, r"scenario config.yaml.workload has unknown keys"),
-    ({"cpus.client": [9]}, "overlap"),
-    ({"cpus.client": 10}, "cpus.client must be a list"),
-    ({"cpus.client": [True]}, r"cpus.client\[0\] must be int, not bool"),
+    ({"cpus": {"server": [0], "client": [1]}}, r"unknown keys \['cpus'\]"),
     ({"workload.output_tokens": 1}, "workload.output_tokens must be >= 2"),
     ({"workload.beam_width": 1.5}, "workload.beam_width must be int, not float"),
     ({"workload.concurrency": 0}, "workload.concurrency must be >= 1"),
     ({"runs.clean": "3"}, "runs.clean must be int, not str"),
-    ({"gpu": 0}, "gpu must be str, not int"),
-    ({"gpu": "0,1"}, "one device index"),
     ({"model.revision": "main"}, "40-character Hub commit"),
+    ({"model.dtype": "half"}, "model.dtype must be one of bfloat16, float16"),
+    ({"catalog": {"sha256": "abc"}}, "catalog.sha256 must be a 64-character"),
     ({"model.sha256": {"model.safetensors": "0" * 64}}, "including config.json"),
     ({"model.sid_codebooks.codebook_size": 0}, "codebook_size must be >= 1"),
     ({"model.sid_codebooks.depth": 3}, "sid_codebooks has unknown keys"),
@@ -114,8 +121,8 @@ def test_a_scenario_with_a_missing_section_fails(tmp_path):
 
 def test_yaml_duplicate_keys_and_syntax_errors_fail(tmp_path):
     file = tmp_path / "config.yaml"
-    file.write_text(path("qwen3_0_6b").read_text() + '\ngpu: "1"\n')
-    with pytest.raises(ValueError, match=r"duplicate keys \['gpu'\]"):
+    file.write_text(path("qwen3_0_6b").read_text() + "\nruns:\n  clean: 1\n")
+    with pytest.raises(ValueError, match=r"duplicate keys \['runs'\]"):
         configs.load_scenario(file)
     file.write_text("workload: [1,\n")
     with pytest.raises(ValueError, match="config.yaml"):
@@ -140,6 +147,10 @@ INVALID_SOLUTION = [
     (PUBLIC, {"server_settings.cuda_graph_bs_decode": [256]}, "must not set"),
     (LEGACY, {"server_settings.cuda_graph_bs_prefill": [2048]}, "must not set"),
     (PUBLIC, {"server_settings.max_running_requests": 1280}, "must not set"),
+    (PUBLIC, {"server_settings.dtype": "float16"}, "must not set"),
+    (VEDANTJH2, {"server_settings.random_seed": 1}, "must not set"),
+    (VEDANTJH2, {"env.SGLANG_PROFILE_V2": "1"}, "runner-managed"),
+    (SID, {"env.PYTHON_BIN": "python3"}, "runner-managed"),
     (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
     (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
 ]
@@ -158,24 +169,41 @@ def test_native_beam_search_may_use_the_overlap_scheduler(tmp_path, name):
     assert found.server_settings["disable_overlap_schedule"] is False
 
 
-def test_engines_size_batches_for_the_requests_in_flight():
+def test_adapters_size_batches_for_the_requests_in_flight():
     workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
-    workload.update(concurrency=3, seed=0)
+    workload.update(concurrency=3, seed=7)
+    plan = {"workload": workload, "env": {}, "catalog": None, "server_cpus": [4, 5]}
+    plan["dtype"] = "bfloat16"
     # Every beam holds a request slot; beam-search-new also keeps the request's.
-    assert engines.sglang_settings(workload) == {
+    assert adapters.get("sglang").server_args(plan, 8000) == {
+        "model_path": "/model",
+        "host": "127.0.0.1",
+        "port": 8000,
+        "dtype": "bfloat16",
+        "random_seed": 7,
         "cuda_graph_bs_decode": [256, 512, 768],
         "cuda_graph_bs_prefill": [2048, 4096, 6144],
         "max_running_requests": 3 * 257,
     }
-    plan = {"workload": workload, "env": {}, "catalog": None, "server_cpus": [4, 5]}
-    env = engines.get("sid-gr").server(plan, 8000, profile=False)[1]
+    env = adapters.get("sid-gr").server(plan, 8000, profile=False)[1]
     assert env["GR_MAX_BATCH_SIZE"] == env["GR_BEAM_KV_POOL_CAPACITY"] == "3"
     assert env["GR_CONTEXT_KV_POOL_CAPACITY"] == "3"
     assert env["GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS"] == "1,2,3"
     assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == "2"  # server CPUs
     plan["env"] = {"OMP_NUM_THREADS": "1"}  # a solution may choose its own
-    env = engines.get("sglang").server(plan, 8000, profile=False)[1]
+    env = adapters.get("sglang").server(plan, 8000, profile=False)[1]
     assert env["OMP_NUM_THREADS"] == "1" and env["MKL_NUM_THREADS"] == "2"
+
+
+def test_sglang_adapters_set_only_the_settings_solutions_may_not():
+    workload = {"context_length": 8, "beam_width": 2, "output_tokens": 3}
+    plan = {"workload": {**workload, "concurrency": 1, "seed": 0}, "dtype": "float16"}
+    plan["catalog"] = {"server_source": "/work/catalog.pkl"}
+    for adapter in adapters.ADAPTERS.values():
+        settings = adapter.server_args(plan, 8000)
+        assert settings is None or settings.keys() <= adapter.managed_settings
+    legacy = adapters.get("sglang-beam-search-new").server_args(plan, 8000)
+    assert legacy["beam_search_constraint_dict"] == "/work/catalog.pkl"
 
 
 def test_sglang_solutions_need_server_settings(tmp_path):
@@ -191,12 +219,20 @@ def test_vedantjh2_trie_head_needs_three_tokens_and_the_sid_layout():
     four = dataclasses.replace(found, workload=four)
     configs.load_solution(path(VEDANTJH2), four)  # native beam search: any length
     with pytest.raises(ValueError, match="exactly three SID codebooks"):
-        configs.load_solution(path(VEDANTJH2), four, catalog=True)
+        configs.load_solution(path(VEDANTJH2), pinned(four))
     plain = dataclasses.replace(found.model, sid_codebooks=None)
     plain = dataclasses.replace(found, model=plain)
     configs.load_solution(path(VEDANTJH2), plain)
     with pytest.raises(ValueError, match="needs model.sid_codebooks"):
-        configs.load_solution(path(VEDANTJH2), plain, catalog=True)
+        configs.load_solution(path(VEDANTJH2), pinned(plain))
+
+
+def test_sid_gr_serves_only_bfloat16():
+    half = dataclasses.replace(shipped().model, dtype="float16")
+    half = dataclasses.replace(shipped(), model=half)
+    configs.load_solution(path(PUBLIC), half)  # SGLang takes the scenario's dtype
+    with pytest.raises(ValueError, match="builds its model in bfloat16"):
+        configs.load_solution(path(SID), half)
 
 
 def test_any_checkpoint_dtype_loads(tmp_path):
@@ -224,26 +260,34 @@ def test_cpu_list():
     assert runner.cpu_list([10, 0, 1, 2, 5, 30, 31]) == "0-2,5,10,30-31"
 
 
+def test_cpu_numbers_reads_what_cpu_list_writes():
+    assert runner.cpu_numbers("0-2,5,10,30-31") == [0, 1, 2, 5, 10, 30, 31]
+    for text in ("5-", "a", "1,,2"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            runner.cpu_numbers(text)
+
+
 def arguments(tmp_path, catalog=None):
     model = tmp_path / "model"
     model.mkdir(exist_ok=True)
     (model / "config.json").write_text(
         json.dumps({"torch_dtype": "bfloat16", "vocab_size": 5000})
     )
-    for name in ("model.safetensors", engines.TRIE_HEAD_FILE):
+    for name in ("model.safetensors", adapters.TRIE_HEAD_FILE):
         (model / name).write_text("")
-    return Namespace(model=model, catalog=catalog)
+    resources = configs.Resources(list(range(10)), [10], "0")
+    return Namespace(model=model, catalog=catalog, resources=resources)
 
 
-def make_run(tmp_path, name, output=None):
-    found = shipped()
-    engine, config = configs.load_solution(path(name), found)
+def make_run(tmp_path, name, output=None, catalog=False):
+    found = pinned(shipped()) if catalog else shipped()
+    adapter, config = configs.load_solution(path(name), found)
     output = output or tmp_path / "out"
-    return runner.Run(name, engine, found, config, tmp_path / "src", "img", output)
+    return runner.Run(name, adapter, found, config, tmp_path / "src", "img", output)
 
 
 def test_docker_command_isolates_labels_and_mounts(tmp_path):
-    run = make_run(tmp_path, VEDANTJH2, tmp_path)
+    run = make_run(tmp_path, VEDANTJH2, tmp_path, catalog=True)
     argv = runner.docker_command(
         arguments(tmp_path, write_catalog(tmp_path)),
         run,
@@ -278,8 +322,16 @@ def write_catalog(tmp_path):
     return catalog
 
 
+def catalog_scenario(tmp_path):
+    """A scenario file that pins the catalog write_catalog writes."""
+    data = write_catalog(tmp_path).read_bytes()
+    return write(
+        tmp_path, scenario(catalog={"sha256": hashlib.sha256(data).hexdigest()})
+    )
+
+
 def prepare(tmp_path, name):
-    run = make_run(tmp_path, name)
+    run = make_run(tmp_path, name, catalog=True)
     run.work.mkdir(parents=True)
     rows = configs.make_workload(run.scenario, {"vocab_size": 5000})
     info = runner.prepare(
@@ -298,10 +350,11 @@ def test_prepare_writes_plan_and_vedantjh2_model_view(tmp_path):
     assert plan["workload"] == raw("qwen3_0_6b")["workload"]
     assert plan["server_settings"] == raw(VEDANTJH2)["server_settings"]
     assert plan["server_cpus"] == list(range(10)) and plan["client_cpus"] == [10]
+    assert plan["dtype"] == "bfloat16"
     view = run.work / "model"
     assert (view / "config.json").readlink().as_posix() == "/model-source/config.json"
     # The trie output head is generated, not linked to the original checkpoint.
-    assert not (view / engines.TRIE_HEAD_FILE).is_symlink()
+    assert not (view / adapters.TRIE_HEAD_FILE).is_symlink()
 
 
 def test_prepare_converts_the_catalog_to_each_engines_native_form(tmp_path):
@@ -331,8 +384,8 @@ def test_vedantjh2_without_a_catalog_serves_the_checkpoint_as_is(tmp_path):
 
 
 def fake_sources(tmp_path):
-    for engine in engines.ENGINES.values():
-        entry = tmp_path / engine.mount.strip("/") / engine.entry
+    for adapter in adapters.ADAPTERS.values():
+        entry = tmp_path / adapter.mount.strip("/") / adapter.entry
         entry.parent.mkdir(parents=True, exist_ok=True)
         entry.write_text("")
     return tmp_path / "source", tmp_path / "sglang"
@@ -343,6 +396,7 @@ def command(tmp_path, *engine_names):
     argv = ["--scenario", str(path("qwen3_0_6b"))]
     argv += ["--model", str(arguments(tmp_path).model), "--dry-run"]
     argv += ["--output", str(tmp_path / "out")]
+    argv += ["--server-cpus", "0-9", "--client-cpus", "10", "--gpu", "0"]
     for name in engine_names:
         source = sid_gr if name == SID else sglang
         argv += ["--solution", str(path(name)), str(source), "img"]
@@ -354,6 +408,50 @@ def test_dry_run_prints_every_phase_and_writes_nothing(tmp_path, capsys):
     # three clean runs, one profile
     assert capsys.readouterr().out.count("docker run") == 4
     assert not (tmp_path / "out").exists()
+
+
+def dry_run_additions(out):
+    """{solution name: what the benchmark adds}, read back from --dry-run output."""
+    found = {}
+    for block in out.split("# ")[1:]:
+        name, _, rest = block.partition(": added")
+        found[name] = yaml.safe_load(rest.split("\n", 1)[1].split("docker run")[0])
+    return found
+
+
+def test_dry_run_prints_what_the_benchmark_adds(tmp_path, capsys):
+    argv = command(tmp_path, SID, LEGACY)
+    argv[1] = str(catalog_scenario(tmp_path))
+    assert runner.main(argv + ["--catalog", str(tmp_path / "items.jsonl")]) == 0
+    added = dry_run_additions(capsys.readouterr().out)
+    sid, legacy = added[SID], added[LEGACY]
+    assert sid["env"]["GR_BEAM_WIDTH"] == "256" and "server_settings" not in sid
+    assert sid["env"]["GR_CATALOG_JSONL"] == "/work/catalog.jsonl"
+    settings = legacy["server_settings"]
+    assert settings["beam_search_constraint_dict"] == "/work/catalog.pkl"
+    assert settings["max_running_requests"] == 257 and settings["random_seed"] == 42
+    # Only variables the benchmark manages, and the thread defaults: nothing from
+    # this shell and nothing the solution already sets.
+    for name, engine in ((SID, "sid-gr"), (LEGACY, "sglang-beam-search-new")):
+        allowed = adapters.get(engine).managed_env | {
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+        }
+        assert added[name]["env"].keys() <= allowed
+
+
+def test_cpus_and_gpu_come_from_the_command_line(tmp_path):
+    argv = command(tmp_path, SID)
+    assert runner.parse_args(argv).resources == configs.Resources(
+        list(range(10)), [10], "0"
+    )
+    argv[argv.index("--client-cpus") + 1] = "9"
+    with pytest.raises(ValueError, match="must not overlap"):
+        runner.parse_args(argv)
+    argv[argv.index("--client-cpus") + 1] = "10"
+    argv[argv.index("--gpu") + 1] = "0,1"
+    with pytest.raises(ValueError, match="one device index"):
+        runner.parse_args(argv)
 
 
 def test_several_solutions_get_their_own_directories(tmp_path, capsys):
@@ -387,8 +485,22 @@ def test_duplicate_solutions_are_rejected(tmp_path):
 
 def test_public_sglang_cannot_take_a_catalog(tmp_path):
     argv = command(tmp_path, PUBLIC) + ["--catalog", str(write_catalog(tmp_path))]
+    argv[1] = str(catalog_scenario(tmp_path))
     with pytest.raises(ValueError, match="cannot constrain beams"):
         runner.main(argv)
+
+
+def test_the_catalog_file_and_the_scenario_pin_go_together(tmp_path):
+    catalog = ["--catalog", str(write_catalog(tmp_path))]
+    with pytest.raises(ValueError, match="needs a scenario that pins it"):
+        runner.main(command(tmp_path, SID) + catalog)
+    argv = command(tmp_path, SID)
+    argv[1] = str(catalog_scenario(tmp_path))
+    with pytest.raises(ValueError, match="give its file with --catalog"):
+        runner.main(argv)
+    (tmp_path / "items.jsonl").write_text("{}\n")
+    with pytest.raises(ValueError, match="differs from the scenario's catalog.sha256"):
+        runner.main(argv + catalog)
 
 
 def test_reference_must_be_a_given_engine(tmp_path):
@@ -401,10 +513,10 @@ def test_every_engine_has_an_image_recipe_and_a_build_case():
     build = (runner.ROOT / "images/build.sh").read_text()
     cases = re.findall(r"^  ([\w| -]+)\)$", build, re.M)
     built = {name.strip() for case in cases for name in case.split("|")}
-    assert built == set(engines.ENGINES)
-    for engine in engines.ENGINES.values():
-        if engine.recipe.startswith("images/"):
-            assert (runner.ROOT / engine.recipe).is_file(), engine.name
+    assert built == set(adapters.ADAPTERS)
+    for adapter in adapters.ADAPTERS.values():
+        if adapter.recipe.startswith("images/"):
+            assert (runner.ROOT / adapter.recipe).is_file(), adapter.name
 
 
 def finished_run(tmp_path, name):
