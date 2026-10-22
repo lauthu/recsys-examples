@@ -37,8 +37,9 @@ import threading
 from collections import Counter
 from pathlib import Path
 
-from bench import adapters  # PYTHONPATH has /benchmark-tools
-from bench.patching import Patch, apply
+# Only bench.patching: more modules in this process put a ~220 ms stall into one
+# round of measured requests at concurrency 4 (seen when it imported bench.adapters).
+from bench.patching import Patch, apply  # PYTHONPATH has /benchmark-tools
 
 PROFILE = os.environ.get("BENCH_PROFILE") == "1"
 PACKAGES = (
@@ -282,7 +283,7 @@ def main():
     sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != here]
     sys.path[:0] = [str(entrypoint.parent), str(entrypoint.parent.parent / "src")]
     sys.argv = [str(entrypoint), *sys.argv[2:]]
-    applied.extend(apply(patches(), adapters.get("sid-gr").features, PROFILE))
+    applied.extend(apply(patches(), frozenset(), PROFILE))  # no entry needs a feature
     runpy.run_path(str(entrypoint), run_name="__main__")
 
 

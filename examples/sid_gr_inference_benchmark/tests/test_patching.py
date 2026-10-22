@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 import contextlib
+import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 from bench import adapters, server_sglang, server_sid_gr
@@ -94,6 +96,23 @@ def test_latency_runs_patch_only_counters_and_routes():
         "shared_context_attention",
     ]
     assert always(server_sid_gr, "sid-gr") == ["GRHTTPServingAdapter._dispatch"]
+
+
+def test_the_sid_gr_launcher_loads_nothing_else_from_bench():
+    code = "import sys, bench.server_sid_gr; print(sorted(m for m in sys.modules if m.startswith('bench')))"
+    root = Path(__file__).resolve().parents[1]
+    done = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert done.stdout.split() == [
+        "['bench',",
+        "'bench.patching',",
+        "'bench.server_sid_gr']",
+    ]
 
 
 def test_overlap_scheduler_copies_keep_their_batch_phase(monkeypatch):
