@@ -211,18 +211,21 @@ workload:
   the largest level (CUDA graph sizes, request slots, SID-GR's batch and pools),
   and every clean server process measures all levels in turn, so only the load
   changes between levels. `clean_i` starts at the i-th level and wraps around,
-  so no level always runs first. Every level sends the same prompts after its
-  own warmups, and the runtime counters the checks use cover measured requests
-  only. The profiled process still sends its requests one at a time.
+  so no level always runs first. Each level sends its own warmup and measured
+  requests, with new IDs and tokens but the same seeded lengths, so no server
+  sees a request twice and none can answer one level from another; every engine
+  gets the same requests at a level. The runtime counters the checks use cover
+  measured requests only. The profiled process sends the first level's requests,
+  one at a time.
 - **Prefill CUDA graphs with variable lengths.** SGLang replays a prefill graph
   only when padding a batch up to a captured size at most doubles it, and runs
   the batch eagerly otherwise. With `min_context_length`, the adapter captures
   sizes in 1.5x steps from `min_context_length` up to the largest level ×
-  `context_length`, so a batch pads by less than 1.5x. SID-GR captures one
-  prefill graph per prompt length the first time it sees it, during serving;
-  the run fails if any is captured during measured requests, so a variable-length
-  scenario needs `GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "1"` in the SID-GR
-  solution's `env`.
+  `context_length`, so a batch pads by less than 1.5x. SID-GR keys its prefill
+  and decode graphs by prompt length and captures them only at startup, for
+  `context_length`: other lengths run without CUDA graphs, which the report's
+  CUDA graph row shows, and a run fails if a graph is captured during measured
+  requests.
 - **Reports.** Each report tables every level and, with variable lengths, the
   mean latency per quarter of the length range at each level; the comparison
   holds one latency table per level, agreement with the reference at the same

@@ -4,8 +4,8 @@
 #
 # Load: qwen3_0_6b.yaml with prompt lengths from 256 to 2,048 tokens and four
 # concurrency levels, each measured in every clean server process (README,
-# Concurrency levels and prompt lengths). SID-GR needs its prefill CUDA graphs
-# off for variable lengths: GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "1".
+# Concurrency levels and prompt lengths). SID-GR runs prompts shorter than
+# context_length without CUDA graphs.
 
 model:
   id: Qwen/Qwen3-0.6B

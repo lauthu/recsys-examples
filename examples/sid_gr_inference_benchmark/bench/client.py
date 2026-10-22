@@ -153,6 +153,13 @@ def check_server(adapter, plan, port, runtime):
         )
 
 
+def level_blocks(rows, plan):
+    """{concurrency: its requests}: workload.json holds one block per level, in
+    level order (bench.config.make_workload)."""
+    size = plan["warmups"] + max(plan["requests"], plan["profile_requests"])
+    return {k: rows[i * size : (i + 1) * size] for i, k in enumerate(plan["levels"])}
+
+
 def level_order(levels, name):
     """Concurrency levels in the order run `name` measures them. clean_i rotates
     them by i - 1, so no level always runs first; the profiled run sends one
@@ -168,9 +175,8 @@ def run(plan, name, profile, work=Path("/work")):
     directory.mkdir(parents=True, exist_ok=True)
     adapter, workload = adapters.get(plan["engine"]), plan["workload"]
     warmups = plan["warmups"]
-    rows = read_json(plan["workload_path"])
+    blocks = level_blocks(read_json(plan["workload_path"]), plan)
     count = plan["profile_requests"] if profile else plan["requests"]
-    measured = rows[warmups : warmups + count]
     paths = None
     if plan["catalog"]:
         data = Path(plan["catalog"]["path"]).read_bytes()
@@ -196,6 +202,9 @@ def run(plan, name, profile, work=Path("/work")):
         os.sched_setaffinity(0, plan["client_cpus"])  # client threads inherit it
         counters, outputs = {}, {}
         for concurrency in order:
+            # Each level sends its own requests; the profiled run, the first level's.
+            rows = blocks[plan["levels"][0]] if profile else blocks[concurrency]
+            measured = rows[warmups : warmups + count]
             warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
             for row, (response, _) in zip(rows[:warmups], warm):
                 validate(adapter, plan, row, response, paths)
@@ -230,11 +239,11 @@ def run(plan, name, profile, work=Path("/work")):
             )
         # Once, after timing: the server's full settings and its environment.
         config = call(port, "GET", "/pilot/config")
-        adapter.check_counters(plan, counters, len(measured) * len(order), after)
+        adapter.check_counters(plan, counters, count * len(order), after)
         result.update(runtime=after, counters=counters, catalog_beams=None)
         result.update(config=config, server_command=argv)
         if paths is not None:
-            beams = len(measured) * len(order) * workload["beam_width"]
+            beams = count * len(order) * workload["beam_width"]
             result["catalog_beams"] = beams
     finally:
         stop(process, pid, profile)

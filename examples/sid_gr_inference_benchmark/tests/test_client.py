@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 port, mode, paths = int(sys.argv[1]), sys.argv[2], json.loads(sys.argv[3])
 served, in_flight, lock = [0], [0, 0], threading.Lock()  # in flight: [now, max]
+seen = set()  # a request ID sent twice fails, as a server could answer it from memory
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -57,6 +58,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply("Start profiling.\\n")
         if self.path.startswith("/pilot/profile/"):
             return self.reply({"capturing": self.path.endswith("start")})
+        if request["rid"] in seen:
+            self.send_response(409)
+            self.end_headers()
+            return
+        seen.add(request["rid"])
         with lock:
             served[0] += 1
             in_flight[0] += 1
@@ -92,9 +98,13 @@ def run_fake(
 ):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
-    write_json(
+    blocks = len(concurrency) if isinstance(concurrency, list) else 1
+    write_json(  # one block of 2 warmups + 3 measured requests per level
         tmp_path / "workload.json",
-        [{"request_id": f"request-{i}", "input_ids": [5, 6, 7, 8]} for i in range(5)],
+        [
+            {"request_id": f"request-{i}", "input_ids": [5, 6, 7, 8]}
+            for i in range(5 * blocks)
+        ],
     )
     catalog = {
         "path": str(tmp_path / "catalog.jsonl"),
@@ -177,12 +187,11 @@ def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
     # Each level's warmups fall between snapshots: 3 levels x 3 measured requests.
     assert result["counters"]["prefill.graph_replays"] == 9
     assert result["catalog_beams"] == 3 * 3 * 4
+    # Each level sends its own block of requests; the fake server rejects repeats.
     outputs = read_json(tmp_path / "clean_2/outputs.json")
-    assert sorted(outputs) == ["1", "2", "3"]
-    assert all(
-        sorted(level) == ["request-2", "request-3", "request-4"]
-        for level in outputs.values()
-    )
+    assert sorted(outputs["1"]) == ["request-2", "request-3", "request-4"]
+    assert sorted(outputs["2"]) == ["request-7", "request-8", "request-9"]
+    assert sorted(outputs["3"]) == ["request-12", "request-13", "request-14"]
 
 
 def test_level_order_rotates_between_clean_runs():

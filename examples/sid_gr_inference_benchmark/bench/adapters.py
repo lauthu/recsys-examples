@@ -207,14 +207,13 @@ class SidGrAdapter(Adapter):
         }
 
     def check_counters(self, plan, counters, requests, runtime):
-        # SID-GR keys prefill graphs by prompt length and captures a new one on first
-        # sight, so with variable lengths captures would land in measured latency.
+        # SID-GR keys its CUDA graphs by prompt length and captures them only at
+        # startup; a capture during measured requests would land in their latency.
         captures = counters.get("prefill.graph_captures")
         if captures:
             raise RuntimeError(
                 f"SID-GR captured {captures} prefill CUDA graphs during measured "
-                "requests; for variable prompt lengths set "
-                'GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "1" in the solution'
+                "requests"
             )
 
     def graph_usage(self, clean):

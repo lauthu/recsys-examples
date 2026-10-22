@@ -321,23 +321,36 @@ def load_model(model, workload):
     return config
 
 
+def requests_per_level(runs):
+    """Warmup and measured requests of one concurrency level."""
+    return runs.warmups + max(runs.requests, runs.profile_requests)
+
+
 def make_workload(scenario, model_config):
-    """Seeded random token IDs without special tokens, and seeded lengths with
-    min_context_length; identical for every engine and concurrency level."""
+    """Seeded random token IDs without special tokens, identical for every engine.
+
+    Each concurrency level gets its own block of requests_per_level requests, in
+    level order, with new IDs and tokens, so a server never sees a request twice
+    and cannot answer one level from another. With min_context_length, the
+    seeded lengths are the same in every block.
+    """
     workload, runs = scenario.workload, scenario.runs
     special = set()
     for key in ("bos_token_id", "eos_token_id", "pad_token_id"):
         value = model_config.get(key)
         special.update(value if isinstance(value, list) else [value])
     allowed = [t for t in range(model_config["vocab_size"]) if t not in special]
+    count = requests_per_level(runs)
+    lengths = [workload.context_length] * count
+    if workload.min_context_length is not None:
+        draw = random.Random(f"{workload.seed}/lengths")
+        low, high = workload.min_context_length, workload.context_length
+        lengths = [draw.randint(low, high) for _ in range(count)]
     rng = random.Random(workload.seed)
-    count = runs.warmups + max(runs.requests, runs.profile_requests)
-    rows = []
-    for _ in range(count):
-        length = workload.context_length
-        if workload.min_context_length is not None:
-            length = rng.randint(workload.min_context_length, length)
-        rows.append(rng.choices(allowed, k=length))
     return [
-        {"request_id": f"request-{i}", "input_ids": row} for i, row in enumerate(rows)
+        {
+            "request_id": f"request-{i}",
+            "input_ids": rng.choices(allowed, k=lengths[i % count]),
+        }
+        for i in range(count * len(workload.levels))
     ]

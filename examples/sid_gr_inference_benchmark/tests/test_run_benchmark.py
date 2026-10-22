@@ -288,6 +288,20 @@ def test_workload_is_seeded_and_skips_special_tokens(tmp_path):
     assert {t for row in rows for t in row["input_ids"]} <= set(range(3, 50))
 
 
+def test_every_level_gets_new_requests_of_the_same_lengths(tmp_path):
+    changes = {"workload.context_length": 64, "workload.min_context_length": 8}
+    changes["workload.concurrency"] = [4, 1]
+    value = configs.load_scenario(write(tmp_path, scenario(**changes)))
+    model = {"vocab_size": 50, "bos_token_id": 0, "eos_token_id": [1, 2]}
+    rows = configs.make_workload(value, model)
+    size = configs.requests_per_level(value.runs)
+    first, second = rows[:size], rows[size:]
+    assert len(rows) == 2 * size == 420
+    assert len({row["request_id"] for row in rows}) == len(rows)
+    assert all(a["input_ids"] != b["input_ids"] for a, b in zip(first, second))
+    assert [len(r["input_ids"]) for r in first] == [len(r["input_ids"]) for r in second]
+
+
 def test_variable_prompt_lengths_are_seeded_and_bounded(tmp_path):
     changes = {"workload.context_length": 64, "workload.min_context_length": 8}
     value = configs.load_scenario(write(tmp_path, scenario(**changes)))
