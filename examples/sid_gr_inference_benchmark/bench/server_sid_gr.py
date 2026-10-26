@@ -17,9 +17,12 @@ Same
 Different, and nothing else
   - PATCHES: the methods listed there. Hooks follow the rules in
     bench/patching.py: original arguments and results, no GPU sync.
-  - The one "always" entry adds four routes and leaves every other route to
-    the original dispatcher (about 85 ns per request):
-        GET  /pilot/runtime        packages, attention backends, CUDA graph counters
+  - "always" entries add four routes and leave every other route to the
+    original dispatcher (about 85 ns per request), and note when each request's
+    handler starts and returns and when each prefill and decode step starts and
+    ends (time.perf_counter_ns, a few microseconds per step):
+        GET  /pilot/runtime        packages, attention backends, CUDA graph counters,
+                                   and the request and step times, which it then forgets
         GET  /pilot/config         the server's build_info and environment, read
                                    once after the measured requests
         POST /pilot/profile/start  cudaProfilerStart (BENCH_PROFILE=1 only)
@@ -36,6 +39,7 @@ import os
 import runpy
 import sys
 import threading
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -67,8 +71,18 @@ def patches():
         Patch(
             f"{http}._handle_sglang_generate",
             request_range,
-            "NVTX request range",
-            profile_only=True,
+            "notes when the handler starts and returns; NVTX request range when "
+            "profiling",
+        ),
+        Patch(
+            f"{executor}._run_prefill",
+            step_times(decode=False),
+            "notes a prefill step's requests, start and end",
+        ),
+        Patch(
+            f"{executor}._run_decode_batch",
+            step_times(decode=True),
+            "notes a decode step's requests, rows, start and end",
         ),
         Patch(
             f"{executor}._run_prefill",
@@ -106,6 +120,10 @@ def patches():
 # ---- state the hooks share --------------------------------------------------
 _capturing = False
 _scope = threading.local()  # request IDs of the phase running on this thread
+# Handler threads and the worker add records; /pilot/runtime takes them.
+_records = threading.Lock()
+_requests: dict[str, list[int]] = {}  # rid: [handler start, return] in ns
+_steps: list[dict] = []
 
 
 @contextlib.contextmanager
@@ -184,6 +202,8 @@ def runtime(serving):
         # A disabled graph runner has no status; None keeps that distinct from 0.
         prefill_status = prefill_graph.status() if prefill_graph is not None else {}
         decode_status = decode_graph.status() if decode_graph is not None else {}
+        # Under the worker lock: a tick, with the steps it records, has finished.
+        records = taken_records()
     return {
         "pid": os.getpid(),
         "packages": {name: _version(name) for name in PACKAGES.split()},
@@ -206,8 +226,18 @@ def runtime(serving):
                 "decode_cuda_graph_fallback_eager_count"
             ),
         },
+        **records,
         "patches": [patch.target for patch in applied],
     }
+
+
+def taken_records():
+    """The request and step times gathered since the last call."""
+    with _records:
+        records = {"requests": dict(_requests), "steps": list(_steps)}
+        _requests.clear()
+        _steps.clear()
+    return records
 
 
 def profile(serving, start):
@@ -230,15 +260,50 @@ def profile(serving, start):
     return {"capturing": _capturing}
 
 
-# ---- profile-only hooks ------------------------------------------------------
+# ---- always-on hooks: request and step times ----------------------------------
 def request_range(original):
     def wrapped(self, payload):
-        with nvtx("request", payload.get("rid") or payload.get("request_id")):
-            return original(self, payload)
+        rid = payload.get("rid") or payload.get("request_id")
+        started = time.perf_counter_ns()
+        try:
+            with nvtx("request", rid):
+                return original(self, payload)
+        finally:
+            if rid is not None:
+                with _records:
+                    _requests[str(rid)] = [started, time.perf_counter_ns()]
 
     return wrapped
 
 
+def step_times(decode):
+    def make(original):
+        def wrapped(self, *args):
+            # _run_prefill(request_ids) or _run_decode_batch(decode_batch, states)
+            ids = args[0].request_ids if decode else args[0]
+            started = time.perf_counter_ns()
+            try:
+                return original(self, *args)
+            finally:
+                step = {
+                    "kind": "decode" if decode else "prefill",
+                    "requests": [str(rid) for rid in ids],
+                    "rows": len(ids) * args[0].beam_width if decode else len(ids),
+                    "tokens": None,
+                    "scheduled_ns": started,
+                    "launched_ns": started,
+                    "finished_ns": time.perf_counter_ns(),
+                }
+                if ids:  # _run_prefill returns at once without requests
+                    with _records:
+                        _steps.append(step)
+
+        return wrapped
+
+    return make
+
+
+# ---- profile-only hooks ------------------------------------------------------
 def phase_range(decode):
     def make(original):
         def wrapped(self, *args):

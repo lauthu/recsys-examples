@@ -6,9 +6,10 @@
 
 Starts the server and, for each concurrency level in turn (level_order), sends
 warmup and then measured requests from a closed loop of that many clients (a new
-loopback connection per request); checks every returned beam and writes
-/work/<run>/result.json, with the server's full settings and environment read
-once after the last level's measured requests. With --profile the
+loopback connection per request); checks every returned beam, splits each
+request's latency into phases from the server's handler and step times
+(timeline) and writes /work/<run>/result.json, with the server's full settings
+and environment read once after the last level's measured requests. With --profile the
 server runs under Nsight Systems, requests go one at a time and the capture
 covers only the measured ones; the report is exported to SQLite after the
 server exits.
@@ -26,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from bench import adapters, catalog
-from bench.common import call, read_json, write_json
+from bench.common import PHASES, call, read_json, write_json
 
 # Capture only between cudaProfilerStart/Stop; trace CUDA graph replays per node.
 NSYS = (
@@ -68,18 +69,76 @@ def wait_ready(process, port, path, timeout=1800):
 
 
 def send(port, body, timeout=120):
-    """POST /generate; latency covers JSON encoding through the parsed response."""
+    """POST /generate; (response, sent, replied) in perf_counter_ns, the clock the
+    server records with: from JSON encoding through the parsed response."""
     start = time.perf_counter_ns()
     response = call(port, "POST", "/generate", body, timeout)
-    return response, (time.perf_counter_ns() - start) / 1e6
+    return response, start, time.perf_counter_ns()
 
 
 def send_all(port, adapter, rows, workload, concurrency):
-    """[(response, ms)] in row order; each client sends its next row on a reply."""
+    """[(response, sent, replied)] in row order; each client sends its next row on
+    a reply."""
     with ThreadPoolExecutor(concurrency) as clients:
         return list(
             clients.map(lambda row: send(port, adapter.payload(row, workload)), rows)
         )
+
+
+def timeline(measured, timed, runtime, output_tokens):
+    """Where each measured request's time went, and the level's engine steps.
+
+    The client's send and reply times and the server's handler and step times
+    share one clock, so a request's latency splits exactly into: outside the
+    server's handler (client and HTTP), queue (handler start to the start of its
+    first prefill step), prefill, decode (prefill end to its last step's end) and
+    return (last step's end to the handler's return). Returns ({phase: [ms per
+    request]}, [[kind, requests, rows, tokens, schedule ms, step ms]]).
+    """
+    handled, steps = runtime["requests"], runtime["steps"]
+    by_request = {}
+    for step in steps:
+        for rid in step["requests"]:
+            by_request.setdefault(rid, []).append(step)
+    phases = {name: [] for name in PHASES}
+    for row, (_, sent, replied) in zip(measured, timed):
+        rid = row["request_id"]
+        mine = by_request.get(rid, [])
+        prefill = [step for step in mine if step["kind"] == "prefill"]
+        decode = len(mine) - len(prefill)
+        if rid not in handled or not prefill or decode != output_tokens - 1:
+            raise RuntimeError(
+                f"{rid}: the server recorded {len(prefill)} prefill and {decode} "
+                f"decode steps (expected at least 1 and {output_tokens - 1}) and "
+                f"{'a' if rid in handled else 'no'} handler time"
+            )
+        started, returned = handled[rid]
+        first = min(step["scheduled_ns"] for step in prefill)
+        prefilled = max(step["finished_ns"] for step in prefill)
+        finished = max(step["finished_ns"] for step in mine)
+        spans = {
+            "outside": (replied - sent) - (returned - started),
+            "queue": first - started,
+            "prefill": prefilled - first,
+            "decode": finished - prefilled,
+            "return": returned - finished,
+        }
+        if min(spans.values()) < 0:
+            raise RuntimeError(f"{rid}: the client and server times disagree: {spans}")
+        for name, ns in spans.items():
+            phases[name].append(ns / 1e6)
+    level_steps = [
+        [
+            step["kind"],
+            len(step["requests"]),
+            step["rows"],
+            step["tokens"],
+            (step["launched_ns"] - step["scheduled_ns"]) / 1e6,
+            (step["finished_ns"] - step["scheduled_ns"]) / 1e6,
+        ]
+        for step in steps
+    ]
+    return phases, level_steps
 
 
 def check(result, workload, vocab_size):
@@ -206,8 +265,9 @@ def run(plan, name, profile, work=Path("/work")):
             rows = blocks[plan["levels"][0]] if profile else blocks[concurrency]
             measured = rows[warmups : warmups + count]
             warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
-            for row, (response, _) in zip(rows[:warmups], warm):
+            for row, (response, *_) in zip(rows[:warmups], warm):
                 validate(adapter, plan, row, response, paths)
+            # Also takes the warmups' request and step times, which are dropped.
             before = call(port, "GET", "/pilot/runtime")
             pid = before["pid"]
             check_server(adapter, plan, port, before)
@@ -227,14 +287,18 @@ def run(plan, name, profile, work=Path("/work")):
             # Output checks run after timing so they never delay the next request.
             outputs[str(concurrency)] = {
                 row["request_id"]: validate(adapter, plan, row, response, paths)
-                for row, (response, _) in zip(measured, timed)
+                for row, (response, *_) in zip(measured, timed)
             }
-            latency = [ms for _, ms in timed]
+            latency = [(replied - sent) / 1e6 for _, sent, replied in timed]
+            phases, steps = timeline(measured, timed, after, workload["output_tokens"])
+            del after["requests"], after["steps"]  # kept per level, not in runtime
             result["levels"].append(
                 {
                     "concurrency": concurrency,
                     "latency_ms": latency,
                     "duration_s": duration,
+                    "phases_ms": phases,
+                    "steps": steps,
                 }
             )
         # Once, after timing: the server's full settings and its environment.

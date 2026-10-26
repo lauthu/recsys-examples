@@ -64,9 +64,9 @@ def test_comparison_table_uses_the_first_engine_as_reference():
     )
     # Every request takes the same time, so each interval is a single point.
     row = "| [sid_gr](sid_gr/report.md) (SID-GR) | 10.000 [10.00, 10.00] | 10.000 |"
-    assert row in text and "| 80.00 [80.00, 80.00] | reference |" in text
+    assert row in text and "| 10.000 [10.00, 10.00] | reference |" in text
     assert "| +50.0% [+50.0%, +50.0%] |" in text
-    assert "| Engine | Mean ms | p50 ms | p95 ms | p99 ms | Requests/s |" in text
+    assert "| Engine | Mean ms | p50 ms | p95 ms | p99 ms | Mean vs reference |" in text
     assert "| sglang_beam_search_new | 0.0% | 100.0% (100.0%) | 0.0% |" in text
     assert "Output agreement with sid_gr" in text
 
@@ -140,3 +140,20 @@ def test_chart_ticks_are_clean_and_end_labels_never_collide():
     same = [(1, 10.0, 20.0), (2, 15.0, 30.0)]
     svg = chart.render({"a": same, "b": same}, "t", "s")
     assert svg.count('class="label"') == 1  # the legend still names both
+
+
+def test_comparison_has_a_service_level_table():
+    first = with_outputs("sglang", [A, B], {1: 10.0, 4: 20.0}, concurrency=(1, 4))
+    second = with_outputs("vedantjh2-sglang", [B, A], 20.0, concurrency=(1, 4))
+    text = compare.render([first, second], ["sglang", "vedantjh2"], "sglang")
+    section = text.split("## Service level")[1].split("## ")[0]
+    assert (
+        "| Engine | Concurrency | Requests/s | Queue ms | Prefill ms | Decode ms |"
+        in section
+    )
+    assert (
+        "| sglang | 4 | 80.00 [80.00, 80.00] | 1.000 | 4.000 | 4.000 | 4.000 (1.00) | 2.000 (1.00) |"
+        in section
+    )
+    # The request-level tables keep latency only.
+    assert "| Engine | Mean ms | p50 ms | p95 ms | p99 ms | Mean vs reference |" in text

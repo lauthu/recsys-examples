@@ -74,7 +74,7 @@ def test_launcher_tables_are_well_formed(launcher):
         assert patch.needs is None or patch.needs in known
 
 
-def test_latency_runs_patch_only_counters_and_routes():
+def test_latency_runs_patch_only_counters_step_times_and_routes():
     def always(launcher, engine):
         features = adapters.get(engine).features
         return [
@@ -82,22 +82,27 @@ def test_latency_runs_patch_only_counters_and_routes():
             for p in selected(launcher.patches(), features, False)
         ]
 
-    assert always(server_sglang, "sglang-beam-search-new") == [
+    steps = [
         "Scheduler.get_internal_state",
         "ModelRunner.forward",
+        "Scheduler.get_next_batch_to_run",
+        "Scheduler.run_batch",
+        "Scheduler.process_batch_result",
+        "ScheduleBatch.copy",
     ]
-    assert always(server_sglang, "sglang") == [
-        "Scheduler.get_internal_state",
-        "ModelRunner.forward",
-        "BeamGroup.finalize",
-    ]
+    assert always(server_sglang, "sglang-beam-search-new") == steps
+    assert always(server_sglang, "sglang") == [*steps, "BeamGroup.finalize"]
     assert always(server_sglang, "vedantjh2-sglang") == [
-        "Scheduler.get_internal_state",
-        "ModelRunner.forward",
+        *steps,
         "BeamGroup.finalize",
         "shared_context_attention",
     ]
-    assert always(server_sid_gr, "sid-gr") == ["GRHTTPServingAdapter._dispatch"]
+    assert always(server_sid_gr, "sid-gr") == [
+        "GRHTTPServingAdapter._dispatch",
+        "GRHTTPServingAdapter._handle_sglang_generate",
+        "GRContinuousServingExecutor._run_prefill",
+        "GRContinuousServingExecutor._run_decode_batch",
+    ]
 
 
 def test_the_sid_gr_launcher_loads_nothing_else_from_bench():
@@ -203,7 +208,7 @@ def test_overlap_scheduler_copies_keep_their_batch_phase(monkeypatch):
             self.reqs = [types.SimpleNamespace(rid="r1")]
             self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
 
-        copy = server_sglang.keep_phase(
+        copy = server_sglang.keep_step(
             lambda self: Batch(self.forward_mode.is_decode())
         )
 
@@ -232,3 +237,54 @@ def test_overlap_scheduler_copies_keep_their_batch_phase(monkeypatch):
         "decode_1",
         "decode_2",
     ]
+
+
+def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
+    """Each step is recorded once, with its kind, requests and rows, whether its
+    results are processed right away or, with overlap, from a copy one step late."""
+    for name, value in (("_steps", []), ("_open_steps", {}), ("_running", None)):
+        monkeypatch.setattr(server_sglang, name, value)
+
+    class Batch:
+        def __init__(self, decode, rids):
+            self.reqs = [types.SimpleNamespace(rid=rid) for rid in rids]
+            self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
+            self.extend_num_tokens = 8
+
+        copy = server_sglang.keep_step(
+            lambda self: Batch(
+                self.forward_mode.is_decode(), [r.rid for r in self.reqs]
+            )
+        )
+
+    def forward(self, batch):  # the forward notes its rows on the running step
+        server_sglang._running["rows"] = 4 * len(batch.reqs)
+
+    class Scheduler:
+        get_next_batch_to_run = server_sglang.note_schedule(lambda self: None)
+        run_batch = server_sglang.open_step(forward)
+        process_batch_result = server_sglang.close_step(lambda self, b, r: None)
+
+    scheduler = Scheduler()
+    prefill, running = Batch(False, ["r1", "r1"]), Batch(True, ["r1", "r2"])
+    queue = []
+    for batch in (prefill, running, running):  # overlap: process the previous copy
+        scheduler.get_next_batch_to_run()
+        scheduler.run_batch(batch)
+        queue.append(batch.copy())
+        if len(queue) > 1:
+            scheduler.process_batch_result(queue.pop(0), None)
+    scheduler.process_batch_result(queue.pop(0), None)
+    scheduler.get_next_batch_to_run()
+    scheduler.run_batch(prefill)  # without overlap: the batch itself
+    scheduler.process_batch_result(prefill, None)
+    steps = server_sglang.taken(server_sglang._steps)
+    assert [(s["kind"], s["requests"], s["rows"], s["tokens"]) for s in steps] == [
+        ("prefill", ["r1"], 8, 8),
+        ("decode", ["r1", "r2"], 8, None),
+        ("decode", ["r1", "r2"], 8, None),
+        ("prefill", ["r1"], 8, 8),
+    ]
+    for s in steps:
+        assert s["scheduled_ns"] <= s["launched_ns"] <= s["finished_ns"]
+    assert server_sglang._steps == []  # taken records are forgotten

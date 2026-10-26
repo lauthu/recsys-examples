@@ -179,9 +179,23 @@ PROFILED = {
 
 
 def levels(*concurrency, latency=(10.0, 12.0, 14.0, 16.0)):
-    """A run's measured levels, each with the same latencies."""
+    """A run's measured levels, each with the same latencies: 1 ms outside the
+    server, 1 ms queued, 4 ms prefill and 4 ms decode, the rest returning; one
+    4 ms prefill step and two 2 ms decode steps per request."""
+    n = len(latency)
+    phases = {"outside": [1.0] * n, "queue": [1.0] * n, "prefill": [4.0] * n}
+    phases.update(decode=[4.0] * n, **{"return": [ms - 10.0 for ms in latency]})
+    steps = [["prefill", 1, 1, 2048, 0.5, 4.0]] + [
+        ["decode", 1, 256, None, 0.2, 2.0]
+    ] * 2
     return [
-        {"concurrency": k, "latency_ms": list(latency), "duration_s": 0.05}
+        {
+            "concurrency": k,
+            "latency_ms": list(latency),
+            "duration_s": 0.05,
+            "phases_ms": phases,
+            "steps": steps * n,
+        }
         for k in concurrency
     ]
 
@@ -428,3 +442,22 @@ def test_report_flags_an_unenforced_pin():
     }
     text = report.render(context("sid-gr", manifest={**MANIFEST, "source": unpinned}))
     assert "pin not enforced: python differs" in text
+
+
+def test_report_splits_the_latency_and_tables_the_steps():
+    text = report.render(context("sglang"))
+    section = text.split("## Where the time goes")[1].split("## GPU profile")[0]
+    assert (
+        "| Outside server ms | Queue ms | Prefill ms | Decode ms | Return ms | Latency ms |"
+        in section
+    )
+    assert "| 1.000 | 1.000 | 4.000 | 4.000 | 3.000 | 13.000 |" in section
+    # 2 runs x 4 requests: 8 prefill steps of 4 ms, 16 decode steps of 2 ms, in 2 x 50 ms.
+    assert (
+        "| prefill | 8 | 4.000 | 4.000 | 0.500 | 1.00 | 1.0 | 2,048.0 | 32.0% |"
+        in section
+    )
+    assert (
+        "| decode | 16 | 2.000 | 2.000 | 0.200 | 1.00 | 256.0 | – | 32.0% |" in section
+    )
+    assert "a decode step of k requests has k × 256 rows" in section

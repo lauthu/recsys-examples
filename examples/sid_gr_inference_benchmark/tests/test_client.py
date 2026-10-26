@@ -27,6 +27,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port, mode, paths = int(sys.argv[1]), sys.argv[2], json.loads(sys.argv[3])
 served, in_flight, lock = [0], [0, 0], threading.Lock()  # in flight: [now, max]
 seen = set()  # a request ID sent twice fails, as a server could answer it from memory
+records = {"requests": {}, "steps": []}  # handler and step times until /pilot/runtime
+
+
+def step(kind, rid, rows):
+    now = time.perf_counter_ns()
+    if mode == "slow" and kind == "decode":
+        time.sleep(0.01)
+    return {"kind": kind, "requests": [rid], "rows": rows, "tokens": 4,
+            "scheduled_ns": now, "launched_ns": now, "finished_ns": time.perf_counter_ns()}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -47,6 +56,11 @@ class Handler(BaseHTTPRequestHandler):
         catalog = {"source": "/work/catalog.jsonl", "item_count": len(paths)}
         runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1],
                    "dtype": "bfloat16"}
+        if self.path == "/pilot/runtime":
+            with lock:
+                runtime.update(requests=dict(records["requests"]), steps=list(records["steps"]))
+                records["requests"].clear()
+                records["steps"].clear()
         config = {"source": "build_info", "settings": {"beam_width": 4},
                   "environment": {"GR_X": "1"}}
         self.reply({"/ready": {"ready": True}, "/catalog/status": {"catalog": catalog},
@@ -58,6 +72,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply("Start profiling.\\n")
         if self.path.startswith("/pilot/profile/"):
             return self.reply({"capturing": self.path.endswith("start")})
+        started = time.perf_counter_ns()
         if request["rid"] in seen:
             self.send_response(409)
             self.end_headers()
@@ -69,8 +84,14 @@ class Handler(BaseHTTPRequestHandler):
             in_flight[1] = max(in_flight)
         if mode == "slow":
             time.sleep(0.2)
+        decode = request["sampling_params"]["max_new_tokens"] - 1
+        steps = [step("prefill", request["rid"], 1)]
+        steps += [step("decode", request["rid"], 4) for _ in range(decode)]
         with lock:
             in_flight[0] -= 1
+            if mode != "no_steps":
+                records["steps"].extend(steps)
+            records["requests"][request["rid"]] = [started, time.perf_counter_ns()]
         beams = [{"output_ids": p, "meta_info": {"sequence_score": -float(i)}}
                  for i, p in enumerate(paths[: request["sampling_params"]["n"]])]
         if mode == "duplicate":
@@ -192,6 +213,65 @@ def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
     assert sorted(outputs["1"]) == ["request-2", "request-3", "request-4"]
     assert sorted(outputs["2"]) == ["request-7", "request-8", "request-9"]
     assert sorted(outputs["3"]) == ["request-12", "request-13", "request-14"]
+
+
+def test_each_latency_splits_into_phases_from_the_server_times(tmp_path, monkeypatch):
+    result = run_fake(tmp_path, monkeypatch, mode="slow")
+    (level,) = result["levels"]
+    phases = level["phases_ms"]
+    assert list(phases) == ["outside", "queue", "prefill", "decode", "return"]
+    for i, latency in enumerate(level["latency_ms"]):
+        assert sum(phases[name][i] for name in phases) == pytest.approx(latency)
+        assert phases["decode"][i] >= 20  # two decode steps of 10 ms each
+    # The measured requests' steps only: 3 requests x (1 prefill + 2 decode).
+    kinds = [step[0] for step in level["steps"]]
+    assert kinds == ["prefill", "decode", "decode"] * 3
+    assert level["steps"][1][:4] == ["decode", 1, 4, 4]  # kind, requests, rows, tokens
+    assert all(ms >= 10 for *_, ms in level["steps"][1:3])
+    # The records stay out of the runtime snapshot.
+    assert "steps" not in result["runtime"] and "requests" not in result["runtime"]
+
+
+def test_missing_step_times_fail_the_run(tmp_path, monkeypatch):
+    with pytest.raises(RuntimeError, match="recorded 0 prefill and 0 decode steps"):
+        run_fake(tmp_path, monkeypatch, mode="no_steps")
+
+
+def test_client_and_server_times_must_agree():
+    step = {"requests": ["r"], "rows": 1, "tokens": 4}
+    runtime = {
+        "requests": {"r": [100, 900]},
+        "steps": [
+            {
+                **step,
+                "kind": "prefill",
+                "scheduled_ns": 200,
+                "launched_ns": 250,
+                "finished_ns": 400,
+            },
+            {
+                **step,
+                "kind": "decode",
+                "scheduled_ns": 450,
+                "launched_ns": 460,
+                "finished_ns": 800,
+            },
+        ],
+    }
+    measured = [{"request_id": "r"}]
+    phases, steps = client.timeline(measured, [(None, 50, 1000)], runtime, 2)
+    expected = {
+        "outside": 1.5e-4,
+        "queue": 1e-4,
+        "prefill": 2e-4,
+        "decode": 4e-4,
+        "return": 1e-4,
+    }
+    assert phases == {name: [pytest.approx(ms)] for name, ms in expected.items()}
+    assert steps[0] == ["prefill", 1, 1, 4, 5e-5, 2e-4]
+    # A reply before the handler returned cannot happen on one clock.
+    with pytest.raises(RuntimeError, match="times disagree"):
+        client.timeline(measured, [(None, 50, 800)], runtime, 2)
 
 
 def test_level_order_rotates_between_clean_runs():

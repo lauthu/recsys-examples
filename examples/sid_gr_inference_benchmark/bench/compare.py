@@ -11,8 +11,11 @@ from bench import adapters, chart
 from bench.report import (
     RESAMPLES,
     interval,
+    level_records,
     listing,
+    phase_means,
     prompt_text,
+    step_summary,
     summaries,
     table,
     with_interval,
@@ -50,6 +53,13 @@ def parity(reference, candidate):
 def levels(ctx):
     """{concurrency: (pooled stats, requests/s)} of one engine, ascending."""
     return {k: (s["stats"], s["rate"]) for k, s in summaries(ctx).items()}
+
+
+def step_cell(summary):
+    """Mean step ms and, in parentheses, requests per step."""
+    if summary is None:
+        return "–"
+    return f"{summary['mean']:.3f} ({summary['requests']:.2f})"
 
 
 def change_cell(level, base):
@@ -115,13 +125,26 @@ def render(contexts, names, reference):
                     f"{stats['p50']:.3f}",
                     with_interval(stats["p95"], ci["p95"], 3),
                     with_interval(stats["p99"], ci["p99"], 3),
-                    with_interval(level["rate"], ci["rate"], 2),
                     change,
                 ]
             )
-        headers = ["Engine", "Mean ms", "p50 ms", "p95 ms", "p99 ms", "Requests/s"]
-        text = table([*headers, "Mean vs reference"], rows, right=range(1, 7))
+        headers = ["Engine", "Mean ms", "p50 ms", "p95 ms", "p99 ms"]
+        text = table([*headers, "Mean vs reference"], rows, right=range(1, 6))
         latency.append(f"### Concurrency {k}\n\n{text}" if several else text)
+
+    service = []
+    for name, ctx in zip(names, contexts):
+        records = level_records(ctx["clean"])
+        for k in workload.levels:
+            level, means = summaries(ctx)[k], phase_means(records[k])
+            steps = step_summary(records[k])
+            service.append(
+                [name]
+                + ([k] if several else [])
+                + [with_interval(level["rate"], level["ci"]["rate"], 2)]
+                + [f"{means[phase]:.3f}" for phase in ("queue", "prefill", "decode")]
+                + [step_cell(steps.get(kind)) for kind in ("prefill", "decode")]
+            )
 
     gpu, agreement, versions = [], [], []
     for name, ctx in zip(names, contexts):
@@ -182,6 +205,9 @@ Requests/s · p99 ms at each level. In a closed loop, throughput rises with the 
         else f"{workload.levels[0]} in flight"
     )
     runs = first["scenario"].runs
+    service_headers = ["Engine"] + (["Concurrency"] if several else [])
+    service_headers += ["Requests/s", "Queue ms", "Prefill ms", "Decode ms"]
+    service_headers += ["Prefill step ms", "Decode step ms"]
     between = (
         f"With {runs.clean} processes, the intervals show the variation between "
         "processes only roughly;"
@@ -195,11 +221,17 @@ Requests/s · p99 ms at each level. In a closed loop, throughput rises with the 
 
 {scope} · {machine['gpu']} (driver {machine['driver']})
 
-## Latency and throughput
+## Request level
 
 {latency_tables}
 
 Each engine ran the same {runs.requests} requests over HTTP, {in_flight}, in {runs.clean} separate server processes; the reference is `{reference}`, at the same level. Brackets hold 95% intervals from a two-level bootstrap ({RESAMPLES:,} resamples of the server processes and then of the requests within each). Every engine's resamples draw the same requests, so the interval of the change against the reference is paired. {between} p99 rests on the slowest 1% of the pooled requests.
+
+## Service level
+
+{table(service_headers, service, right=range(1, len(service_headers)))}
+
+Requests/s with its 95% interval as above. Queue, prefill and decode are the mean time per request, from the server's own handler and step times: queue runs from the handler's start to the start of the request's first prefill step, prefill is that step, and decode runs from its end to the end of the request's last decode step, including other requests' steps in between. A step's time is the engine's, from choosing its batch to processing its results, with the requests it carried in parentheses. Each engine's report splits the rest of the latency and tables every step kind.
 
 {throughput}## GPU time per request
 

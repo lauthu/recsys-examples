@@ -13,11 +13,12 @@ import json
 import math
 import random
 import shlex
+import statistics
 from collections import defaultdict
 
 import yaml
 from bench import adapters
-from bench.common import interpolate, quantile, summarize
+from bench.common import PHASES, interpolate, quantile, summarize
 from bench.sunburst import phase_key
 from bench.trace import NO_PHASE, NO_SECTION
 
@@ -104,6 +105,92 @@ def summaries(ctx):
 
 def with_interval(value, bounds, digits):
     return f"{value:.{digits}f} [{bounds[0]:.2f}, {bounds[1]:.2f}]"
+
+
+def level_records(clean):
+    """{concurrency: [each clean run's record of that level]}, ascending."""
+    found = defaultdict(list)
+    for result in clean:
+        for level in result["levels"]:
+            found[level["concurrency"]].append(level)
+    return dict(sorted(found.items()))
+
+
+def phase_means(records):
+    """{phase: mean ms per request} over one level's records."""
+    return {
+        name: statistics.fmean(
+            ms for level in records for ms in level["phases_ms"][name]
+        )
+        for name in PHASES
+    }
+
+
+def step_summary(records):
+    """{kind: step statistics} over one level's records. A step record is
+    [kind, requests, rows, prompt tokens, scheduling ms, step ms]; share is the
+    part of the level's wall time its steps took."""
+    wall_ms = 1000 * sum(level["duration_s"] for level in records)
+    found = {}
+    for kind in ("prefill", "decode"):
+        steps = [
+            step for level in records for step in level["steps"] if step[0] == kind
+        ]
+        if not steps:
+            continue
+        mean = {}
+        for i, name in ((1, "requests"), (2, "rows"), (3, "tokens"), (4, "schedule")):
+            values = [step[i] for step in steps if step[i] is not None]
+            mean[name] = statistics.fmean(values) if values else None
+        ms = [step[5] for step in steps]
+        found[kind] = {
+            "steps": len(steps),
+            "mean": statistics.fmean(ms),
+            "p95": quantile(ms, 0.95),
+            **mean,
+            "share": sum(ms) / wall_ms,
+        }
+    return found
+
+
+def phase_rows(ctx):
+    """Mean ms of each phase of a request, and the mean latency, per level."""
+    rows, records = [], level_records(ctx["clean"])
+    for k, level in summaries(ctx).items():
+        means = phase_means(records[k])
+        cells = [f"{means[name]:.3f}" for name in PHASES]
+        rows.append(
+            ([k] if len(records) > 1 else [])
+            + cells
+            + [f"{level['stats']['mean']:.3f}"]
+        )
+    return rows
+
+
+def step_rows(ctx):
+    """One row per level and step kind: count, time, batch size and share."""
+    rows, records = [], level_records(ctx["clean"])
+
+    def mean(value, digits=1):
+        return "–" if value is None else f"{value:,.{digits}f}"
+
+    for k, found in ((k, step_summary(r)) for k, r in records.items()):
+        for kind, s in found.items():
+            rows.append(
+                ([k] if len(records) > 1 else [])
+                + [
+                    kind,
+                    f"{s['steps']:,}",
+                    f"{s['mean']:.3f}",
+                    f"{s['p95']:.3f}",
+                    f"{s['schedule']:.3f}",
+                    mean(s["requests"], 2),
+                    mean(s["rows"]),
+                    mean(s["tokens"]),
+                    f"{100 * s['share']:.1f}%",
+                ]
+            )
+    return rows
 
 
 def interval_rows(ctx):
@@ -489,6 +576,22 @@ def render(ctx):
         f"{between}. p99 rests on the slowest 1% of the {pooled_n:,} pooled requests"
         f"{' per level' if len(levels) > 1 else ''}."
     )
+    several = len(levels) > 1
+    phase_columns = ["Outside server ms", "Queue ms", "Prefill ms", "Decode ms"]
+    phase_columns = (["Concurrency"] if several else []) + phase_columns
+    phase_columns += ["Return ms", "Latency ms"]
+    step_columns = ["Step", "Steps", "Mean ms", "p95 ms", "Scheduling ms"]
+    step_columns = (["Concurrency"] if several else []) + step_columns
+    step_columns += ["Requests each", "Rows each", "Prompt tokens each", "Wall time"]
+    breakdown = f"""## Where the time goes
+
+{table(phase_columns, phase_rows(ctx), right=range(len(phase_columns)))}
+
+Mean per request, pooled over the server processes; the phases add up to the latency. The client's send and reply times and the server's own handler and step times share one clock (`time.perf_counter_ns`). **Outside server** is the latency minus the time the server's request handler took: the client, the connection and HTTP. **Queue** runs from the handler's start to the start of the request's first prefill step. **Prefill** is that step, shared with the requests batched into it. **Decode** runs from the end of the prefill to the end of the request's last decode step, including other requests' steps that ran in between. **Return** runs from there to the handler's return.
+
+{table(step_columns, step_rows(ctx), right=[i for i, c in enumerate(step_columns) if c != "Step"])}
+
+The measured requests' engine steps, pooled over the server processes. A step runs from when the scheduler starts choosing its batch (SGLang's `get_next_batch_to_run`; SID-GR's `_run_prefill` or `_run_decode_batch` call) to when its results are processed; scheduling is the part before the launch. Rows count every beam: a decode step of k requests has k × {workload.beam_width} rows. Wall time is the steps' share of the time from the first send to the last reply of each level; with the overlap scheduler off, steps never overlap."""
     by_length = ""
     if workload.min_context_length is not None:
         rows = length_rows(clean, ctx["lengths"][: runs.requests], workload)
@@ -516,6 +619,8 @@ def render(ctx):
 {latency_table}
 
 The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.{intervals}{by_length}
+
+{breakdown}
 
 ## GPU profile
 

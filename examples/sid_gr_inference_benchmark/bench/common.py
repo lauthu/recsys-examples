@@ -10,6 +10,8 @@ from pathlib import Path
 
 # NVTX ranges: bench/request:<rid>, bench/phase:<rid>:<phase>, bench/section:<rid>:<name>
 MARKER = "bench"
+# Where a request's latency goes, in order (bench.client.timeline).
+PHASES = ("outside", "queue", "prefill", "decode", "return")
 # JIT and model caches; the runner points each at a per-image directory.
 CACHE_ENV = """XDG_CACHE_HOME HF_HOME TORCH_HOME TORCH_EXTENSIONS_DIR TRITON_CACHE_DIR
     TORCHINDUCTOR_CACHE_DIR CUDA_CACHE_PATH FLASHINFER_WORKSPACE_BASE TVM_FFI_CACHE_DIR

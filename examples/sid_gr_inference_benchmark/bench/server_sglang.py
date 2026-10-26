@@ -15,15 +15,19 @@ Same
     and, for beam-search-new with a catalog, beam_search_constraint_dict.
 
 Different, and nothing else
-  - ROUTES: three added GET routes (/pilot/ready, /pilot/runtime, /pilot/config)
-    and, when profiling, wrappers on /generate, /start_profile and
-    /stop_profile. /pilot/config serves the resolved ServerArgs and the
-    environment; the client reads it once, after the measured requests.
+  - ROUTES: three added GET routes (/pilot/ready, /pilot/runtime, /pilot/config),
+    a wrapper on /generate that notes when the handler starts and returns, and,
+    when profiling, wrappers on /start_profile and /stop_profile. /pilot/config
+    serves the resolved ServerArgs and the environment; the client reads it
+    once, after the measured requests.
   - PATCHES: the scheduler-process methods listed there. Hooks follow the rules
     in bench/patching.py: original arguments and results, no GPU sync.
-  - Latency runs keep only the "always" entries, which count forwards and read
-    state (about 0.6 us per forward). "profile" entries exist only in the
-    profiled process and push NVTX ranges only while a capture is active.
+  - Latency runs keep only the "always" entries, which count forwards, read
+    state and note when each engine step is scheduled, launched and finished
+    (time.perf_counter_ns, a few microseconds per step). /pilot/runtime hands
+    the step and request times over and forgets them. "profile" entries exist
+    only in the profiled process and push NVTX ranges only while a capture is
+    active.
 
 server.log lists every applied patch at startup.
 """
@@ -35,6 +39,7 @@ import importlib.metadata
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 from bench import adapters
@@ -64,7 +69,7 @@ def patches():
     )
     coordinator = "sglang.srt.beam_search.coordinator:BeamCoordinator"
     return [
-        # Always: counters and state for /pilot/runtime.
+        # Always: counters, state and step times for /pilot/runtime.
         Patch(
             f"{scheduler}.get_internal_state",
             add_runtime,
@@ -74,8 +79,29 @@ def patches():
             "sglang.srt.model_executor.model_runner:ModelRunner.forward",
             count_forward,
             "counts forwards by phase and graph/eager mode, decode rows (and the "
-            "vedantjh2 fork's trie-head decode path); NVTX section `model` when "
-            "profiling",
+            "vedantjh2 fork's trie-head decode path); notes the running step's "
+            "rows; NVTX section `model` when profiling",
+        ),
+        Patch(
+            f"{scheduler}.get_next_batch_to_run",
+            note_schedule,
+            "notes when the scheduler starts choosing the next batch",
+        ),
+        Patch(
+            f"{scheduler}.run_batch",
+            open_step,
+            "notes a step's kind, requests, prompt tokens and launch time",
+        ),
+        Patch(
+            f"{scheduler}.process_batch_result",
+            close_step,
+            "notes when a step's results are processed",
+        ),
+        Patch(
+            f"{batch}.copy",
+            keep_step,
+            "gives the copy the overlap scheduler processes its batch's step "
+            "(and NVTX phase when profiling)",
         ),
         Patch(
             "sglang.srt.beam_search.beam_group:BeamGroup.finalize",
@@ -117,12 +143,6 @@ def patches():
                 (f"{scheduler}.run_batch", "run", "scheduler_forward"),
                 (f"{scheduler}.process_batch_result", "result", "result_processing"),
             )
-        ),
-        Patch(
-            f"{batch}.copy",
-            keep_phase,
-            "gives the copy the overlap scheduler processes its batch's phase",
-            profile_only=True,
         ),
         *(
             Patch(
@@ -171,7 +191,13 @@ def routes(http_server):
         ("/pilot/ready", ready_route(http_server), False, "added: 200 once Up"),
         ("/pilot/runtime", runtime_route(http_server), False, "added: snapshot"),
         ("/pilot/config", config_route(http_server), False, "added: settings"),
-        ("/generate", request_range, True, "NVTX request range"),
+        (
+            "/generate",
+            request_range,
+            False,
+            "notes when the handler starts and returns; NVTX request range when "
+            "profiling",
+        ),
         ("/start_profile", capture_route(True), True, "notes the capture start"),
         ("/stop_profile", capture_route(False), True, "notes the capture stop"),
     ]
@@ -184,6 +210,14 @@ _capturing = False
 _context = threading.local()  # request ID of the batch running on this thread
 _decode_steps: dict[str, int] = {}
 _batch_phase: dict[int, tuple[str, str]] = {}
+# Engine steps, in the scheduler process: finished ones until /pilot/runtime takes
+# them, launched ones by batch until their results are processed.
+_steps: list[dict] = []
+_open_steps: dict[int, dict] = {}
+_running: dict | None = None  # the step whose forward runs now
+_scheduled_ns = 0  # when the scheduler last started choosing a batch
+# Requests, in the HTTP process: {rid: [handler start, return]} in ns.
+_requests: dict[str, list[int]] = {}
 
 
 @contextlib.contextmanager
@@ -235,6 +269,8 @@ def count_forward(original):
         kind = "decode" if batch.forward_mode.is_decode() else "prefill"
         mode = "graph" if result.can_run_graph else "eager"
         _counts[f"forward.{kind}.{mode}"] += 1
+        if _running is not None:  # rows include every beam; batch.reqs only leaders
+            _running["rows"] = batch.batch_size
         if kind == "decode":
             _counts["forward.decode.rows"] += batch.batch_size
         if TRIE_HEAD and kind == "decode":
@@ -260,6 +296,74 @@ def record_finalize(original):
         return result
 
     return wrapped
+
+
+def note_schedule(original):
+    def wrapped(self, *args, **kwargs):
+        global _scheduled_ns
+        _scheduled_ns = time.perf_counter_ns()
+        return original(self, *args, **kwargs)
+
+    return wrapped
+
+
+def open_step(original):
+    """A step's record from its batch; its forward adds the rows (count_forward)."""
+
+    def wrapped(self, *args, **kwargs):
+        global _running
+        batch = args[0] if args else kwargs["batch"]
+        decode = batch.forward_mode.is_decode()
+        step = {
+            "kind": "decode" if decode else "prefill",
+            "requests": list(dict.fromkeys(str(req.rid) for req in batch.reqs)),
+            "rows": None,
+            "tokens": None if decode else batch.extend_num_tokens,
+            "scheduled_ns": _scheduled_ns,
+            "launched_ns": time.perf_counter_ns(),
+            "finished_ns": None,
+        }
+        _open_steps[id(batch)] = _running = step
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            _running = None
+
+    return wrapped
+
+
+def close_step(original):
+    def wrapped(self, *args, **kwargs):
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            batch = args[0] if args else kwargs["batch"]
+            step = _open_steps.pop(id(batch), None)
+            if step is not None:
+                step["finished_ns"] = time.perf_counter_ns()
+                _steps.append(step)
+
+    return wrapped
+
+
+def keep_step(original):
+    # The overlap scheduler processes a copy of each batch after launching the next.
+    def wrapped(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        if id(self) in _open_steps:
+            _open_steps[id(result)] = _open_steps[id(self)]
+        if id(self) in _batch_phase:
+            _batch_phase[id(result)] = _batch_phase[id(self)]
+        return result
+
+    return wrapped
+
+
+def taken(records):
+    """The records gathered since the last call, which /pilot/runtime hands over."""
+    copy = records.copy()
+    records.clear()
+    return copy
 
 
 # ---- profile-only hooks ------------------------------------------------------
@@ -299,17 +403,6 @@ def batch_phase(batch, advance=False, preparation=None):
         _decode_steps[rid] = step
         _batch_phase[id(batch)] = (rid, label)
     return rid, label
-
-
-def keep_phase(original):
-    # The overlap scheduler processes a copy of each batch after launching the next.
-    def wrapped(self, *args, **kwargs):
-        result = original(self, *args, **kwargs)
-        if id(self) in _batch_phase:
-            _batch_phase[id(result)] = _batch_phase[id(self)]
-        return result
-
-    return wrapped
 
 
 def batch_scope(mode, label):
@@ -358,7 +451,9 @@ def runtime_route(http_server):
 
     async def runtime_snapshot():
         states = await http_server._global_state.tokenizer_manager.get_internal_state()
-        return JSONResponse({"pid": os.getpid(), **states[0]["bench"]})
+        # Request times are this HTTP process's; step times come from the scheduler.
+        snapshot = {"pid": os.getpid(), **states[0]["bench"]}
+        return JSONResponse({**snapshot, "requests": taken(_requests)})
 
     return runtime_snapshot
 
@@ -386,8 +481,14 @@ def config_route(http_server):
 def request_range(original):
     async def wrapped(*args, **kwargs):
         obj = kwargs.get("obj", args[0] if args else None)
-        with nvtx("request", getattr(obj, "rid", None)):
-            return await original(*args, **kwargs)
+        rid = getattr(obj, "rid", None)
+        started = time.perf_counter_ns()
+        try:
+            with nvtx("request", rid):
+                return await original(*args, **kwargs)
+        finally:
+            if rid is not None:
+                _requests[str(rid)] = [started, time.perf_counter_ns()]
 
     return wrapped
 
@@ -480,6 +581,7 @@ def runtime(scheduler):
         "catalog": catalog_status(scheduler),
         "length_penalty": _observed.get("length_penalty"),
         "counters": dict(_counts),
+        "steps": taken(_steps),
         "patches": [patch.target for patch in applied],
     }
 
