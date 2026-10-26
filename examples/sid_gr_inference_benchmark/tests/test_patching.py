@@ -292,18 +292,25 @@ def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
 
 def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
     """Under load the window opens when the scheduler starts choosing a batch, holds
-    the batch's phase and section ranges, and closes after its results; it closes
-    at once when no batch was chosen. Phases are the step kind."""
-    marks = []
+    the batch's phase and section ranges, and ends after its results; it ends at
+    once when no batch was chosen. It is a start/end range, so an engine's own
+    push/pop around get_next_batch_to_run (beam-search-new's) cannot close it.
+    Phases are the step kind."""
+    marks, started = [], []
+
+    def range_start(text):
+        started.append(text)
+        marks.append(f"start {text}")
+        return len(started)
+
     nvtx = types.SimpleNamespace(
         range_push=lambda text: marks.append(text),
         range_pop=lambda: marks.append("pop"),
+        range_start=range_start,
+        range_end=lambda handle: marks.append(f"end {started[handle - 1]}"),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "torch",
-        types.SimpleNamespace(cuda=types.SimpleNamespace(nvtx=nvtx)),
-    )
+    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(nvtx=nvtx))
+    monkeypatch.setitem(sys.modules, "torch", torch)
     for name, value in (("MARKS", "steps"), ("_capturing", True), ("_window", [])):
         monkeypatch.setattr(server_sglang, name, value)
     monkeypatch.setattr(server_sglang, "_batch_phase", {})
@@ -324,15 +331,23 @@ def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
         )
 
     scheduler = Scheduler()
-    scheduler.get_next_batch_to_run(types.SimpleNamespace(batch_to_run=None))
-    for batch in (Batch(False), Batch(True)):
+
+    def choose(batch):  # the engine's own range around choosing, as in beam-search-new
+        nvtx.range_push("engine")
         scheduler.get_next_batch_to_run(types.SimpleNamespace(batch_to_run=batch))
+        nvtx.range_pop()
+
+    choose(None)
+    for batch in (Batch(False), Batch(True)):
+        choose(batch)
         scheduler.run_batch(batch)
         scheduler.process_batch_result(batch, None)
 
     def step(n, kind):
         return [
-            f"bench/step:{n}",
+            "engine",
+            f"start bench/step:{n}",
+            "pop",
             f"bench/phase:{n}:{kind}",
             f"bench/section:{n}:scheduler_forward",
             "pop",
@@ -341,8 +356,9 @@ def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
             f"bench/section:{n}:result",
             "pop",
             "pop",
-            "pop",
+            f"end bench/step:{n}",
         ]
 
-    assert marks == ["bench/step:1", "pop", *step(2, "prefill"), *step(3, "decode")]
+    idle = ["engine", "start bench/step:1", "end bench/step:1", "pop"]
+    assert marks == [*idle, *step(2, "prefill"), *step(3, "decode")]
     assert server_sglang._window == []

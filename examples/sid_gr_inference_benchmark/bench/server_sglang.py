@@ -226,7 +226,7 @@ _capturing = False
 _context = threading.local()  # request ID of the batch running on this thread
 _decode_steps: dict[str, int] = {}
 _batch_phase: dict[int, tuple[str, str]] = {}
-_window: list[int] = []  # the open step window's number, when marking steps
+_window: list[int] = []  # the open step window: [number, NVTX range ID]
 # Engine steps, in the scheduler process: finished ones until /pilot/runtime takes
 # them, launched ones by batch until their results are processed.
 _steps: list[dict] = []
@@ -438,18 +438,21 @@ _windows = iter(range(1, 1 << 62))  # step window numbers
 
 def open_window(original):
     """Marking steps: a window opens when the scheduler starts choosing a batch and,
-    if it chose one, stays open until the batch's results are processed."""
+    if it chose one, stays open until the batch's results are processed. It spans
+    several calls, between which an engine may push and pop ranges of its own
+    (beam-search-new does around get_next_batch_to_run), so it is a start/end
+    range, which no pop can close."""
 
     def wrapped(self, *args, **kwargs):
         if MARKS != "steps" or not _capturing or _window:
             return original(self, *args, **kwargs)
         import torch
 
-        _window.append(next(_windows))
-        torch.cuda.nvtx.range_push(f"bench/step:{_window[0]}")
+        number = next(_windows)
+        _window[:] = [number, torch.cuda.nvtx.range_start(f"bench/step:{number}")]
         plan = original(self, *args, **kwargs)
-        if plan.batch_to_run is None:
-            torch.cuda.nvtx.range_pop()
+        if plan.batch_to_run is None:  # an idle iteration: the trace drops it
+            torch.cuda.nvtx.range_end(_window[1])
             _window.clear()
         return plan
 
@@ -464,7 +467,7 @@ def close_window(original):
             if _window:
                 import torch
 
-                torch.cuda.nvtx.range_pop()
+                torch.cuda.nvtx.range_end(_window[1])
                 _window.clear()
 
     return wrapped

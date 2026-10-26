@@ -32,6 +32,8 @@ def make_trace(
     nvtx = [
         (a, b, f"bench/{unit}:r{i}", None, HTTP) for i, (a, b) in enumerate(windows)
     ]
+    if unit == "step":  # a scheduler iteration that chose no batch: no phase inside
+        nvtx.append((302, 304, "bench/step:idle", None, HTTP))
     nvtx += [
         (110, 150, "bench/phase:r0:prefill", None, THREAD),
         (112, 140, "bench/section:r0:model", None, THREAD),

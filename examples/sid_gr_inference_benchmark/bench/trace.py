@@ -232,6 +232,12 @@ def analyze(path, prefix=MARKER, window="request"):
                 {**row, "label": value.rpartition(":")[2], "rid": value}
             )
     windows = sorted(ranges[window], key=lambda w: w["start"])
+    if window == "step":  # a scheduler iteration that chose no batch runs no phase
+        windows = [
+            w
+            for w in windows
+            if any(w["start"] <= p["start"] < w["end"] for p in ranges["phase"])
+        ]
     if not windows:
         raise ValueError(f"trace has no complete {prefix}/{window}: NVTX ranges")
     if any(b["start"] < a["end"] for a, b in zip(windows, windows[1:])):
