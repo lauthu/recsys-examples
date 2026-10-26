@@ -6,13 +6,13 @@
 A scenario (configs/scenarios/*.yaml) fixes what is measured: the model, the
 workload, the runs and an optional catalog. A solution (configs/solutions/*.yaml)
 fixes how one engine is configured. The command line gives the paths, CPUs and
-GPU of this invocation. Every clean run and each profiled run is a fresh
-container and server process. Each solution's directory receives
-results.json.gz, everything measured and observed, and report.md with its
-charts, rendered from that file alone, and the Nsight Systems traces; with
-several solutions, OUTPUT also gets comparison.md and its chart.
-tools/render_reports.py renders the reports again from the saved results.
-Intermediate files are kept in .work only when a run fails.
+GPU of this invocation. Every round and each GPU profile is a fresh container
+and server process. Each solution's directory receives results.json.gz,
+everything measured and observed, report.md with its charts, rendered from that
+file alone, and the Nsight Systems traces; with several solutions, OUTPUT also
+gets summary.md and its chart. tools/render_reports.py renders the reports
+again from the saved results. Intermediate files are kept in .work only when a
+run fails.
 """
 
 import argparse
@@ -24,14 +24,15 @@ import signal
 import subprocess
 import sys
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from bench import catalog, provenance, results, trace
+from bench import catalog, provenance
 from bench.common import CACHE_ENV, fail, read_json, write_json
 from bench.config import (
     Resources,
+    RunConfig,
     Scenario,
     Solution,
     load_model,
@@ -39,6 +40,7 @@ from bench.config import (
     load_solution,
     make_workload,
 )
+from bench.outputs import results, trace
 
 ROOT = Path(__file__).resolve().parent
 BENCH = ROOT / "bench"
@@ -51,7 +53,7 @@ class Run:
     """One solution to measure: its configs, source checkout, image and output."""
 
     name: str  # the solution file name without .yaml
-    adapter: object  # bench.adapters.Adapter of the solution's engine
+    adapter: object  # bench.engines.adapter.Adapter of the solution's engine
     scenario: Scenario
     solution: Solution
     source: Path
@@ -142,7 +144,8 @@ def docker_command(args, run, cache, image, name, phase):
     for path, target, readonly in mounts:
         option = f"type=bind,src={path},dst={target}"
         argv += ["--mount", option + (",readonly" if readonly else "")]
-    argv += [image, "python3", "-m", "bench.client", "--plan", "/work/plan.json"]
+    argv += [image, "python3", "-m", "bench.client"]
+    argv += ["--config", "/work/run_config.json"]
     return argv + ["--run", phase] + (["--profile"] if phase in PROFILED else [])
 
 
@@ -172,34 +175,19 @@ def parse_catalog(args, scenario, vocab):
     return data, paths, {**info, "name": args.catalog.name}
 
 
-def server_source(adapter):
-    """Where the server reads the catalog in the container."""
-    if adapter.model_view:
-        return f"/model/{adapter.catalog_file}"
-    return f"/work/{adapter.catalog_file or 'catalog.jsonl'}"
-
-
-def make_plan(args, run, vocab, catalog_items):
-    """plan.json: the container reads this, never the YAML files."""
-    scenario, solution, resources = run.scenario, run.solution, args.resources
-    plan = {"engine": run.adapter.name, "workload": asdict(scenario.workload)}
-    plan.update(levels=scenario.workload.levels)
-    plan.update(vocab_size=vocab, dtype=scenario.model.dtype)
-    plan.update(warmups=scenario.runs.warmups, requests=scenario.runs.requests)
-    plan.update(profile_requests=scenario.runs.profile_requests)
-    plan.update(env=solution.env, server_settings=solution.server_settings)
-    plan.update(server_cpus=resources.server_cpus, client_cpus=resources.client_cpus)
-    plan.update(workload_path="/work/workload.json", catalog=None)
-    if catalog_items is not None:
-        jsonl = "/work/catalog.jsonl"
-        source = server_source(run.adapter)
-        plan["catalog"] = dict(path=jsonl, server_path=jsonl, server_source=source)
-        plan["catalog"]["items"] = catalog_items
-    return plan
+def run_config(args, run, vocab, catalog_items):
+    """What the container reads (/work/run_config.json), never the YAML files."""
+    return RunConfig(
+        scenario=run.scenario,
+        solution=run.solution,
+        resources=args.resources,
+        vocab_size=vocab,
+        catalog_items=catalog_items,
+    )
 
 
 def prepare(args, run, model_config, workload_rows):
-    """Write plan.json, the workload and the engine's catalog files."""
+    """Write the run config, the workload and the engine's catalog files."""
     adapter, work = run.adapter, run.work
     vocab = model_config["vocab_size"]
     info = None
@@ -217,19 +205,19 @@ def prepare(args, run, model_config, workload_rows):
                         (directory / item.name).symlink_to(f"/model-source/{item.name}")
             (directory / adapter.catalog_file).write_bytes(native)
     write_json(work / "workload.json", workload_rows)
-    plan = make_plan(args, run, vocab, info["items"] if info else None)
-    write_json(work / "plan.json", plan)
+    config = run_config(args, run, vocab, info["items"] if info else None)
+    config.write(work / "run_config.json")
     return info
 
 
-def added_settings(run, plan):
+def added_settings(run, config):
     """What the benchmark adds to the solution's env and server_settings for this
     scenario and machine; PORT stands for the port, which differs per run."""
-    env = run.adapter.server(plan, "PORT", profile=False)[1]
+    env = run.adapter.server(config, "PORT", profile=False)[1]
     added = {
         "env": {k: v for k, v in sorted(env.items()) if run.solution.env.get(k) != v}
     }
-    settings = run.adapter.server_args(plan, "PORT")
+    settings = run.adapter.server_args(config, "PORT")
     if settings is not None:
         added["server_settings"] = settings
     return added
@@ -282,7 +270,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--reference",
-        help="solution name (file name without .yaml) the comparison measures "
+        help="solution name (file name without .yaml) the summary measures "
         "against (default: sglang if given, else the first solution)",
     )
     parser.add_argument(
@@ -355,7 +343,7 @@ def main(argv=None):
         if args.catalog:
             items = parse_catalog(args, scenario, vocab)[2]["items"]
         for run in runs:
-            added = added_settings(run, make_plan(args, run, vocab, items))
+            added = added_settings(run, run_config(args, run, vocab, items))
             print(f"# {run.name}: added to the solution's settings (PORT is per run)")
             print(yaml.safe_dump(added, sort_keys=False).rstrip())
             cache = args.cache_dir or args.output.parent / ".cache"
@@ -391,16 +379,17 @@ def main(argv=None):
         phases = run_phases(scenario, run)
         measure(args, run, phases, model_config, rows, model, invocation)
     if len(runs) > 1:
-        results.write_comparison(args.output, results.engines(args.output))
+        results.write_summary(args.output, results.engines(args.output))
     print(f"Wrote the reports to {args.output}")
     return 0
 
 
 def run_phases(scenario, run):
-    """The server processes of one solution, in order: the clean runs, the profile
-    one request at a time and, with several levels, the profile under load at
-    the largest, unless the engine overlaps steps (no step can be told apart)."""
-    phases = [f"clean_{i}" for i in range(1, scenario.runs.clean + 1)]
+    """The server processes of one solution, in order: the rounds, the profile
+    one request at a time and, with several concurrency values, the profile
+    under load at the largest, unless the engine overlaps steps (then no step
+    can be told apart)."""
+    phases = [f"round_{i}" for i in range(1, scenario.runs.rounds + 1)]
     phases.append("profile")
     if len(scenario.workload.levels) > 1 and not run.adapter.overlaps_steps(
         run.solution
@@ -482,8 +471,8 @@ def write_outputs(
         **invocation,
         "scenario": run.scenario,
         "solution": run.solution,
-        "clean": [
-            read_json(work / p / "result.json") for p in phases if p.startswith("clean")
+        "rounds": [
+            read_json(work / p / "result.json") for p in phases if p.startswith("round")
         ],
         "profile": profile,
         "trace": trace.analyze(work / "profile/trace.sqlite"),
@@ -496,10 +485,10 @@ def write_outputs(
             "server": cpu_list(resources.server_cpus),
             "client": cpu_list(resources.client_cpus),
         },
-        "added": added_settings(run, read_json(work / "plan.json")),
+        "added": added_settings(run, RunConfig.read(work / "run_config.json")),
         "command": shlex.join(["python3", *sys.argv]),
         "lengths": lengths,
-        # The first clean run's beams per level and request, for the comparison.
+        # The first round's beams per concurrency and request, for the summary.
         "outputs": read_json(work / phases[0] / "outputs.json"),
     }
     results.save(run.output, found)
@@ -512,7 +501,7 @@ def write_outputs(
 
 
 def reference_name(args, names):
-    """The solution the comparison measures against."""
+    """The solution the summary measures against."""
     return args.reference or ("sglang" if "sglang" in names else names[0])
 
 

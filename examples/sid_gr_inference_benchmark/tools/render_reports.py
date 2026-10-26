@@ -6,8 +6,8 @@
     python3 tools/render_reports.py OUTPUT
 
 OUTPUT is what run_benchmark.py wrote: one solution's directory, or the
-directory of several with comparison.md. Rewrites every report.md, the
-comparison and the charts from the results.json.gz files alone, without
+directory of several with summary.md. Rewrites every report.md, the
+summary and the charts from the results.json.gz files alone, without
 Docker or the GPU, as the current templates lay them out.
 """
 
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the benchmark's bench/
-from bench import results  # noqa: E402
+from bench.outputs import results  # noqa: E402
 
 
 def main(argv=None):

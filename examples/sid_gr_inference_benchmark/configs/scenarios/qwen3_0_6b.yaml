@@ -29,10 +29,10 @@ workload:
   seed: 42              # seeds the synthetic token IDs
 
 runs:
-  clean: 3              # separate server processes measured for latency
-  requests: 200         # measured requests per process
+  rounds: 3             # each starts a new server and measures every concurrency
+  requests: 200         # measured requests per concurrency in each round
   warmups: 10           # unmeasured requests before them
-  profile_requests: 3   # requests captured by the profiled process, one at a time
+  profile_requests: 3   # requests each GPU profile captures
 
 # Optional: constrain every beam to a catalog (README, Catalog filtering). The
 # file is passed with --catalog and must have this SHA-256.

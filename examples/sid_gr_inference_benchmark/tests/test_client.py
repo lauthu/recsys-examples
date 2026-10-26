@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import json
 import os
 import socket
@@ -7,17 +8,12 @@ import subprocess
 import sys
 
 import pytest
-from bench import adapters, client
+from bench import client, engines
 from bench.common import read_json, write_json
+from bench.config import RunConfig
+from tests.fixtures import WORKLOAD, run_config
 
 PATHS = [[1000 + a, 2000, 3000] for a in range(4)]
-WORKLOAD = {
-    "context_length": 4,
-    "beam_width": 4,
-    "output_tokens": 3,
-    "concurrency": 1,
-    "seed": 0,
-}
 # Answers like a SID-GR server with the benchmark wrapper; SGLang's native
 # profile endpoints answer with plain text.
 FAKE_SERVER = """
@@ -115,47 +111,31 @@ def run_fake(
     mode="valid",
     concurrency=1,
     dtype="bfloat16",
-    name="clean_1",
+    name="round_1",
     profile=False,
 ):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
     blocks = len(concurrency) if isinstance(concurrency, list) else 1
-    write_json(  # one block of 2 warmups + 3 measured requests per level
+    write_json(  # one block of 2 warmups + 3 measured requests per concurrency
         tmp_path / "workload.json",
         [
             {"request_id": f"request-{i}", "input_ids": [5, 6, 7, 8]}
             for i in range(5 * blocks)
         ],
     )
-    catalog = {
-        "path": str(tmp_path / "catalog.jsonl"),
-        "server_path": "/work/catalog.jsonl",
-        "server_source": "/work/catalog.jsonl",
-        "items": len(PATHS),
-    }
-    plan = {
-        "engine": "sid-gr",
-        "workload": {**WORKLOAD, "concurrency": concurrency},
-        "levels": sorted(
-            concurrency if isinstance(concurrency, list) else [concurrency]
-        ),
-        "warmups": 2,
-        "requests": 3,
-        "profile_requests": 1,
-        "vocab_size": 5000,
-        "dtype": dtype,
-        "env": {},
-        "server_settings": None,
-        "server_cpus": sorted(os.sched_getaffinity(0))[:1],  # a CPU this job has
-        "client_cpus": sorted(os.sched_getaffinity(0)),
-        "workload_path": str(tmp_path / "workload.json"),
-        "catalog": catalog,
-    }
+    cpus = sorted(os.sched_getaffinity(0))  # CPUs this job has
+    config = run_config(
+        workload=dataclasses.replace(WORKLOAD, concurrency=concurrency),
+        dtype=dtype,
+        server_cpus=cpus[:1],
+        client_cpus=cpus[1:],
+        catalog_items=len(PATHS),
+    )
     monkeypatch.setattr(
-        adapters.get("sid-gr"),
+        engines.get("sid-gr"),
         "server",
-        lambda plan, port, profile: (
+        lambda config, port, profile: (
             fake_server(tmp_path, port, mode),
             dict(os.environ),
         ),
@@ -163,11 +143,14 @@ def run_fake(
     monkeypatch.setattr(
         client, "machine", lambda: {"gpu": "G", "driver": "D", "cpu": "C"}
     )
-    client.run(plan, name, profile, work=tmp_path)
+    try:
+        client.run(config, name, profile, work=tmp_path)
+    finally:
+        os.sched_setaffinity(0, cpus)  # the client pinned this process
     return read_json(tmp_path / name / "result.json")
 
 
-def test_clean_run_measures_checks_and_counts(tmp_path, monkeypatch):
+def test_a_round_measures_checks_and_counts(tmp_path, monkeypatch):
     result = run_fake(tmp_path, monkeypatch)
     (level,) = result["levels"]
     assert level["concurrency"] == 1 and result["order"] == [1]
@@ -183,11 +166,24 @@ def test_clean_run_measures_checks_and_counts(tmp_path, monkeypatch):
     assert result["config"]["settings"] == {"beam_width": 4}
     assert result["config"]["environment"] == {"GR_X": "1"}
     assert result["server_command"][:2] == ["taskset", "--cpu-list"]
-    # Every measured request's validated beams are kept for the comparison.
-    outputs = read_json(tmp_path / "clean_1/outputs.json")["1"]
+    # Every measured request's validated beams are kept for the summary.
+    outputs = read_json(tmp_path / "round_1/outputs.json")["1"]
     assert sorted(outputs) == ["request-2", "request-3", "request-4"]
     assert outputs["request-2"][1] == [PATHS[1], -1.0]
     assert "outputs" not in result
+
+
+def test_the_adapter_checks_the_counters_against_the_run_config(tmp_path, monkeypatch):
+    # The server's own configuration, read after the measured requests, must not
+    # take the RunConfig's place.
+    seen = []
+    adapter = engines.get("sid-gr")
+    monkeypatch.setattr(adapter, "check_counters", lambda *args: seen.append(args))
+    result = run_fake(tmp_path, monkeypatch)
+    ((config, counters, requests, runtime),) = seen
+    assert isinstance(config, RunConfig) and config.catalog_items == len(PATHS)
+    assert requests == 3 and counters == result["counters"]
+    assert result["config"]["settings"] == {"beam_width": 4}
 
 
 def test_clients_keep_concurrency_requests_in_flight(tmp_path, monkeypatch):
@@ -195,14 +191,14 @@ def test_clients_keep_concurrency_requests_in_flight(tmp_path, monkeypatch):
     assert result["order"] == [3] and result["runtime"]["max_in_flight"] == 3
     assert len(result["levels"][0]["latency_ms"]) == 3
     # Responses stay with their requests whatever order they finish in.
-    outputs = read_json(tmp_path / "clean_1/outputs.json")["3"]
+    outputs = read_json(tmp_path / "round_1/outputs.json")["3"]
     assert sorted(outputs) == ["request-2", "request-3", "request-4"]
 
 
 def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
     levels = [1, 2, 3]
-    result = run_fake(tmp_path, monkeypatch, concurrency=levels, name="clean_2")
-    # clean_2 starts at the second level, so no level always runs first.
+    result = run_fake(tmp_path, monkeypatch, concurrency=levels, name="round_2")
+    # round_2 starts at the second concurrency, so none always runs first.
     assert result["order"] == [2, 3, 1]
     assert [level["concurrency"] for level in result["levels"]] == [2, 3, 1]
     assert all(len(level["latency_ms"]) == 3 for level in result["levels"])
@@ -210,7 +206,7 @@ def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
     assert result["counters"]["prefill.graph_replays"] == 9
     assert result["catalog_beams"] == 3 * 3 * 4
     # Each level sends its own block of requests; the fake server rejects repeats.
-    outputs = read_json(tmp_path / "clean_2/outputs.json")
+    outputs = read_json(tmp_path / "round_2/outputs.json")
     assert sorted(outputs["1"]) == ["request-2", "request-3", "request-4"]
     assert sorted(outputs["2"]) == ["request-7", "request-8", "request-9"]
     assert sorted(outputs["3"]) == ["request-12", "request-13", "request-14"]
@@ -275,12 +271,12 @@ def test_client_and_server_times_must_agree():
         client.timeline(measured, [(None, 50, 800)], runtime, 2)
 
 
-def test_level_order_rotates_between_clean_runs():
+def test_level_order_rotates_between_rounds():
     levels = [1, 2, 4]
-    assert client.level_order(levels, "clean_1") == [1, 2, 4]
-    assert client.level_order(levels, "clean_2") == [2, 4, 1]
-    assert client.level_order(levels, "clean_3") == [4, 1, 2]
-    assert client.level_order(levels, "clean_4") == [1, 2, 4]
+    assert client.level_order(levels, "round_1") == [1, 2, 4]
+    assert client.level_order(levels, "round_2") == [2, 4, 1]
+    assert client.level_order(levels, "round_3") == [4, 1, 2]
+    assert client.level_order(levels, "round_4") == [1, 2, 4]
     assert client.level_order(levels, "profile") == [1]
 
 
@@ -301,11 +297,11 @@ def test_weights_in_another_dtype_than_the_scenario_fail_the_run(tmp_path, monke
         run_fake(tmp_path, monkeypatch, dtype="float16")
 
 
-def test_the_server_sees_the_plan_settings_not_the_image_ones(monkeypatch):
+def test_the_server_sees_the_run_config_settings_not_the_image_ones(monkeypatch):
     monkeypatch.setenv("SGLANG_FROM_IMAGE", "1")
     monkeypatch.setenv("BENCH_KEPT", "1")
-    plan = {"env": {"SGLANG_X": "2"}, "server_cpus": [4, 5], "workload": WORKLOAD}
-    argv, env = client.launch(adapters.get("sglang"), plan, 8000, profile=False)
+    config = run_config("sglang", env={"SGLANG_X": "2"})
+    argv, env = client.launch(engines.get("sglang"), config, 8000, profile=False)
     assert argv[:3] == ["taskset", "--cpu-list", "4,5"]
     assert "SGLANG_FROM_IMAGE" not in env and env["BENCH_KEPT"] == "1"
     assert env["SGLANG_X"] == "2" and env["OMP_NUM_THREADS"] == "2"
@@ -320,7 +316,7 @@ def test_profile_control_accepts_sglang_plain_text(tmp_path):
         client.wait_ready(server, port, "/ready", timeout=30)
         for engine in ("sid-gr", "vedantjh2-sglang"):
             for start in (True, False):
-                adapters.get(engine).profile(port, start)
+                engines.get(engine).profile(port, start)
     finally:
         server.kill()
         server.wait()
@@ -329,7 +325,7 @@ def test_profile_control_accepts_sglang_plain_text(tmp_path):
 def test_sglang_scores_are_converted_to_cumulative_logprob():
     beam = {"output_ids": [1, 2, 3], "meta_info": {"sequence_score": -0.5}}
     response = {"meta_info": {"id": "r", "beam_results": [beam]}}
-    adapter = adapters.get("vedantjh2-sglang")
+    adapter = engines.get("vedantjh2-sglang")
     assert adapter.beams(response, "r") == [([1, 2, 3], -1.5)]
     with pytest.raises(ValueError, match="does not belong"):
         adapter.beams(response, "other")
@@ -365,15 +361,15 @@ def test_vedantjh2_checks(shared, changes, message):
         **changes,
     }
     env = {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": shared}
-    plan = {"env": env, "catalog": {"items": 256}}
-    adapter = adapters.get("vedantjh2-sglang")
+    config = run_config("vedantjh2-sglang", env=env, catalog_items=256)
+    adapter = engines.get("vedantjh2-sglang")
     if message is None:
-        adapter.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+        adapter.check_counters(config, counters, 4, {"length_penalty": 1.0})
     else:
         with pytest.raises(RuntimeError, match=message):
-            adapter.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+            adapter.check_counters(config, counters, 4, {"length_penalty": 1.0})
     with pytest.raises(RuntimeError, match="length penalty"):
-        adapter.check_counters(plan, counters, 4, {"length_penalty": 0.5})
+        adapter.check_counters(config, counters, 4, {"length_penalty": 0.5})
 
 
 @pytest.mark.parametrize("normalizer, message", [(0, None), (8, "ran although")])
@@ -389,13 +385,13 @@ def test_vedantjh2_codebook_normalization_skips_the_full_normalizer(
         "vedantjh2.shared_attention": 0,
     }
     env = {"SGLANG_BEAM_TRIE_TOPK_LOGPROB": "true"}
-    plan = {"env": env, "catalog": {"items": 256}}
-    check = adapters.get("vedantjh2-sglang").check_counters
+    config = run_config("vedantjh2-sglang", env=env, catalog_items=256)
+    check = engines.get("vedantjh2-sglang").check_counters
     if message is None:
-        check(plan, counters, 4, {"length_penalty": 1.0})
+        check(config, counters, 4, {"length_penalty": 1.0})
     else:
         with pytest.raises(RuntimeError, match=message):
-            check(plan, counters, 4, {"length_penalty": 1.0})
+            check(config, counters, 4, {"length_penalty": 1.0})
 
 
 @pytest.mark.parametrize(
@@ -410,17 +406,20 @@ def test_vedantjh2_without_a_catalog_must_not_run_the_trie_head(name):
         "vedantjh2.device_history": 0,
         "vedantjh2.shared_attention": 0,
     }
-    plan = {"env": {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"}, "catalog": None}
-    adapter = adapters.get("vedantjh2-sglang")
+    env = {"SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"}
+    config = run_config("vedantjh2-sglang", env=env)
+    adapter = engines.get("vedantjh2-sglang")
     if name is None:
-        adapter.check_counters(plan, counters, 4, {"length_penalty": 1.0})
+        adapter.check_counters(config, counters, 4, {"length_penalty": 1.0})
         return
     with pytest.raises(RuntimeError, match="trie output head ran without a catalog"):
-        adapter.check_counters(plan, {**counters, name: 8}, 4, {"length_penalty": 1.0})
+        adapter.check_counters(
+            config, {**counters, name: 8}, 4, {"length_penalty": 1.0}
+        )
 
 
 def test_public_sglang_uses_native_beam_width_and_checks_the_length_penalty():
-    adapter = adapters.get("sglang")
+    adapter = engines.get("sglang")
     row = {"request_id": "r", "input_ids": [1]}
     params = adapter.payload(row, WORKLOAD)["sampling_params"]
     assert params["beam_width"] == 4 and params["n"] == 4
@@ -455,12 +454,12 @@ def test_the_load_profile_keeps_the_largest_level_in_flight(tmp_path, monkeypatc
 
 
 def test_profiled_runs_tell_the_server_what_to_mark(monkeypatch):
-    plan = {"env": {}, "server_cpus": [4, 5], "workload": WORKLOAD}
+    config = run_config("sglang")
     for name, marks in (("profile", "requests"), ("load_profile", "steps")):
-        argv, env = client.launch(adapters.get("sglang"), plan, 8000, marks, name)
+        argv, env = client.launch(engines.get("sglang"), config, 8000, marks, name)
         assert argv[0] == "nsys" and f"/work/{name}/trace" in argv
         assert env["BENCH_PROFILE"] == marks
-    argv, env = client.launch(adapters.get("sglang"), plan, 8000, "")
+    argv, env = client.launch(engines.get("sglang"), config, 8000, "")
     assert argv[0] == "taskset" and env["BENCH_PROFILE"] == "0"
     assert client.level_order([1, 2, 4], "load_profile") == [4]
 

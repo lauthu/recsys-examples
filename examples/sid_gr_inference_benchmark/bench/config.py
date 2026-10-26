@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Typed configuration, checkpoint and workload checks on the host.
+"""The configuration, as typed classes, and the checkpoint and workload checks.
 
 Two kinds of YAML files: a scenario (configs/scenarios/: what is measured,
-shared by every solution in a comparison) and a solution (configs/solutions/:
-how one engine is configured). Each file loads into the frozen dataclasses
-below; unknown or missing keys, wrong types and out-of-range values fail before
-any container starts. The CPUs and GPU of an invocation come from the command
-line (Resources). Engine-specific rules live in the engine's adapter
-(bench/adapters.py).
+shared by every solution in an invocation) and a solution (configs/solutions/:
+how one engine is configured). The CPUs and GPU of an invocation come from the
+command line (Resources). Each loads into the frozen dataclasses below, so
+unknown or missing keys, wrong types and out-of-range values fail before any
+container starts. For each solution, the runner writes the three, with two
+facts it reads from the checkpoint and the catalog, as RunConfig to
+/work/run_config.json: the container reads that file, never the YAML files.
+Engine-specific rules live in the engine's adapter (bench/engines).
 """
 
 import dataclasses
@@ -19,10 +21,9 @@ import typing
 from dataclasses import dataclass
 from typing import Any
 
-import yaml
-from bench import adapters
-from bench.adapters import TRIE_HEAD_FILE
-from bench.common import fail, read_json
+from bench import engines
+from bench.common import fail, read_json, write_json
+from bench.engines.sglang import TRIE_HEAD_FILE
 
 SHA1 = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -101,7 +102,7 @@ class Workload:
         levels = levels if isinstance(levels, list) else [levels]
         check(
             levels and min(levels) >= 1 and len(set(levels)) == len(levels),
-            "workload.concurrency must be >= 1, or a list of distinct such levels",
+            "workload.concurrency must be >= 1, or a list of distinct such values",
         )
         if self.min_context_length is not None:
             check(
@@ -118,13 +119,15 @@ class Workload:
 
 @dataclass(frozen=True)
 class Runs:
-    clean: int  # separate server processes measured for latency
-    requests: int  # measured requests per concurrency level in each clean process
-    warmups: int  # unmeasured requests before them
-    profile_requests: int  # requests captured by the profiled process
+    # Rounds of measurement. Each round starts a new container and server and
+    # measures every concurrency in turn; the results pool the rounds.
+    rounds: int
+    requests: int  # measured requests per concurrency in each round
+    warmups: int  # unmeasured requests before each concurrency's measured ones
+    profile_requests: int  # requests each GPU profile captures
 
     def __post_init__(self):
-        minimums = dict(clean=1, requests=1, warmups=0, profile_requests=1)
+        minimums = dict(rounds=1, requests=1, warmups=0, profile_requests=1)
         at_least(self, "runs", **minimums)
 
 
@@ -202,35 +205,59 @@ class Solution:
     """How one engine is configured; nothing in it depends on the model, the
     workload or the machine."""
 
-    engine: str  # a name in adapters.ADAPTERS
+    engine: str  # a name in bench.engines.ENGINES
     source: Source
     env: dict[str, str]  # server environment, passed verbatim
     # SGLang ServerArgs, passed verbatim; SGLang validates names and values.
     server_settings: dict[str, Any] | None = None
 
     def __post_init__(self):
-        managed = sorted(adapters.get(self.engine).managed_env & self.env.keys())
+        managed = sorted(engines.get(self.engine).managed_env & self.env.keys())
         check(not managed, f"env sets runner-managed variables {managed}")
 
 
+@dataclass(frozen=True)
+class RunConfig:
+    """One solution's run as the container reads it: the scenario, the solution
+    and the resources, with the vocabulary size from the checkpoint and the
+    item count of the catalog, if the scenario pins one."""
+
+    scenario: Scenario
+    solution: Solution
+    resources: Resources
+    vocab_size: int
+    catalog_items: int | None = None
+
+    @property
+    def workload(self):
+        return self.scenario.workload
+
+    def write(self, path):
+        write_json(path, dataclasses.asdict(self))
+
+    @classmethod
+    def read(cls, path):
+        return parse(cls, read_json(path), "run config")
+
+
 # ---- loading -------------------------------------------------------------
-class _Loader(yaml.SafeLoader):
-    """Safe YAML that rejects duplicate keys instead of keeping the last one."""
-
-    def construct_mapping(self, node, deep=False):
-        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
-        duplicates = sorted({str(key) for key in keys if keys.count(key) > 1})
-        if duplicates:
-            raise yaml.constructor.ConstructorError(
-                None, None, f"duplicate keys {duplicates}", node.start_mark
-            )
-        return super().construct_mapping(node, deep)
-
-
 def read_yaml(path):
+    """Safe YAML that rejects duplicate keys instead of keeping the last one."""
+    import yaml  # here, not above: the container reads only JSON, without PyYAML
+
+    class Loader(yaml.SafeLoader):
+        def construct_mapping(self, node, deep=False):
+            keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+            duplicates = sorted({str(key) for key in keys if keys.count(key) > 1})
+            if duplicates:
+                raise yaml.constructor.ConstructorError(
+                    None, None, f"duplicate keys {duplicates}", node.start_mark
+                )
+            return super().construct_mapping(node, deep)
+
     try:
         with open(path, encoding="utf-8") as stream:
-            return yaml.load(stream, Loader=_Loader)
+            return yaml.load(stream, Loader=Loader)
     except yaml.YAMLError as exc:
         fail(f"{path}: {exc}")
 
@@ -297,7 +324,7 @@ def load_scenario(path):
 def load_solution(path, scenario):
     """How one engine is configured; returns (its adapter, Solution)."""
     solution = parse(Solution, read_yaml(path), f"solution {path.name}")
-    adapter = adapters.get(solution.engine)
+    adapter = engines.get(solution.engine)
     sections = {"server_settings"} if solution.server_settings is not None else set()
     check(
         sections == set(adapter.sections),
@@ -322,7 +349,7 @@ def load_model(model, workload):
 
 
 def requests_per_level(runs):
-    """Warmup and measured requests of one concurrency level."""
+    """Warmup and measured requests at one concurrency (a level)."""
     return runs.warmups + max(runs.requests, runs.profile_requests)
 
 

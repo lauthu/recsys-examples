@@ -1,5 +1,5 @@
-{#- One engine's report.md. The view comes from bench/report.py:view(); numbers
-    are formatted only here, by the filters in bench/template.py. -#}
+{#- One engine's report.md. The view comes from bench/outputs/report.py:view();
+    numbers are formatted only here, by the filters in bench/outputs/template.py. -#}
 {% import "common.j2" as common %}
 # {{ engine }} · beam-search benchmark
 
@@ -8,7 +8,7 @@
 ## How it was measured
 
 {{ common.method(workload, runs, resamples) }}
-- **GPU profiles:** from {{ "two more server starts" if load else "one more server start" }} under Nsight Systems; [GPU profile](#gpu-profile) says what {{ "each" if load else "it" }} captured.
+- **GPU profiles:** {{ "two more server processes" if load else "one more server process" }} under Nsight Systems, apart from the rounds; [GPU profile](#gpu-profile) says what {{ "each" if load else "it" }} captured.
 
 ## Results
 
@@ -22,18 +22,18 @@
 | {{ level.k }} | {{ level.rate | num }} ({{ level.ci.rate | span }}) | {{ level.mean | num }} ({{ level.ci.mean | span }}) | {{ level.p50 | num }} | {{ level.p95 | num }} | {{ level.p99 | num }} |
 {% endfor %}
 
-Percentiles interpolate between the {{ results[0].n | num(0) }} requests of each level; p99 rests on the slowest 1% of them, so it varies more than the mean.
+Percentiles interpolate between the {{ results[0].n | num(0) }} requests at each concurrency; p99 rests on the slowest 1% of them, so it varies more than the mean.
 
-<details><summary>Each server start</summary>
+<details><summary>Each round</summary>
 
-| Concurrency | Server start | Requests | Throughput (requests/s) | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Max (ms) |
+| Concurrency | Round | Requests | Throughput (requests/s) | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Max (ms) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-{% for row in starts %}
-| {{ row.k }} | {{ row.start }} | {{ row.n }} | {{ row.rate | num }} | {{ row.mean | num }} | {{ row.p50 | num }} | {{ row.p95 | num }} | {{ row.p99 | num }} | {{ row.max | num }} |
+{% for row in round_rows %}
+| {{ row.k }} | {{ row.round }} | {{ row.n }} | {{ row.rate | num }} | {{ row.mean | num }} | {{ row.p50 | num }} | {{ row.p95 | num }} | {{ row.p99 | num }} | {{ row.max | num }} |
 {% endfor %}
 {% if levels | length > 1 %}
 
-Each server start measures the levels in a different order, so that no level always runs first.
+Each round measures the concurrency values in a different order, so that none always runs first.
 {% endif %}
 
 </details>
@@ -41,13 +41,13 @@ Each server start measures the levels in a different order, so that no level alw
 
 ### Latency by prompt length
 
-| Prompt tokens | Requests per start |{% for k in levels %} Mean at concurrency {{ k }} (ms) |{% endfor +%}
+| Prompt tokens | Requests per round |{% for k in levels %} Mean at concurrency {{ k }} (ms) |{% endfor +%}
 | --- | ---: |{% for k in levels %} ---: |{% endfor +%}
 {% for row in lengths %}
 | {{ row.low | num(0) }}–{{ row.high | num(0) }} | {{ row.requests }} |{% for ms in row.means %} {{ ms | num }} |{% endfor +%}
 {% endfor %}
 
-Every level sends the same prompts; a bin's mean pools its requests over the server starts.
+Every concurrency sends the same prompts; a bin's mean pools its requests over the rounds.
 {% endif %}
 
 ## Where the time goes
@@ -88,7 +88,7 @@ An engine step runs from the scheduler starting to choose its batch to its resul
 {% endfor %}
 {% endfor %}
 
-Pooled over the server starts. A step starts in SGLang's `get_next_batch_to_run` or SID-GR's `_run_prefill` or `_run_decode_batch`; scheduling is its part before the launch. Rows count every beam: a decode step of *k* requests has *k* × {{ workload.beam_width }} rows.
+Pooled over the rounds. A step starts in SGLang's `get_next_batch_to_run` or SID-GR's `_run_prefill` or `_run_decode_batch`; scheduling is its part before the launch. Rows count every beam: a decode step of *k* requests has *k* × {{ workload.beam_width }} rows.
 
 </details>
 
@@ -103,7 +103,7 @@ Pooled over the server starts. A step starts in SGLang's `get_next_batch_to_run`
 
 How {{ "each capture was" if load else "the capture was" }} taken:
 
-- **A separate server start** under Nsight Systems, after the measured ones; tracing slows the server, so no result above comes from {{ "these" if load else "it" }}.
+- **A separate server process** under Nsight Systems, after the rounds; tracing slows the server, so no result above comes from {{ "these" if load else "it" }}.
 - **Only the captured requests** are traced: the client sends {{ "warmup request" | plural(runs.warmups) }} at the capture's concurrency, has the server call `cudaProfilerStart`, sends the captured requests and has the server call `cudaProfilerStop`; Nsight Systems records only in between (`--capture-range=cudaProfilerApi`).
 - **One request at a time:** the server marks each request, with its phases and sections, as NVTX ranges, so the times are per request{% if profile.lengths %} (prompts of {{ profile.lengths | listing }} tokens){% endif %}.
 {% if load %}
@@ -251,7 +251,7 @@ Added by the benchmark for this scenario and machine (`PORT` is chosen per run).
 
 <details><summary>Full server configuration (observed)</summary>
 
-Read from the server once, after the first measured start's requests: its settings ({{ configuration.source }}) and its process environment. Text values of names with the word TOKEN, SECRET, PASSWORD or KEY are redacted.
+Read from the server once, after the first round's measured requests: its settings ({{ configuration.source }}) and its process environment. Text values of names with the word TOKEN, SECRET, PASSWORD or KEY are redacted.
 
 Set by the solution or the benchmark, but running with another value (`PORT` differs per run by design):
 {% if configuration.changed %}
@@ -278,7 +278,7 @@ Environment:
 ```
 {% for run in configuration.profiled %}
 
-The {{ "capture of one request at a time" if run.name == "profile" else "capture under load" }} ran in a server start that differed from the first measured one (port and container hostname aside) in:
+The {{ "capture of one request at a time" if run.name == "profile" else "capture under load" }} ran in a server process that differed from the first round's (port and container hostname aside) in:
 
 {% for name, before, after in run.differences %}
 - {{ name | code }}: {{ before | code }} → {{ after | code }}
@@ -292,7 +292,7 @@ The {{ "capture of one request at a time" if run.name == "profile" else "capture
 
 <details><summary>Changes to the engine's own HTTP server (observed)</summary>
 
-The launcher runs the engine's own server and patches only these methods, as reported by the server; each hook calls the original unchanged. `PATCHES` in `bench/server_*.py` says what each one adds. The measured starts patched:
+The launcher runs the engine's own server and patches only these methods, as reported by the server; each hook calls the original unchanged. `PATCHES` in `bench/engines/*_server.py` says what each one adds. The rounds patched:
 
 {% for patch in setup.patches %}
 - {{ patch | code }}

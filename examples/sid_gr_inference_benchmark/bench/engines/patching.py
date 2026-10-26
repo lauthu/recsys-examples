@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Declared patches: how the launchers (server_*.py) change an engine's server.
+"""Declared patches: how the launchers (*_server.py) change an engine's server.
 
 Each launcher lists every method it patches in one PATCHES table, so the full
 difference from the engine's native server is in one place. Every hook follows

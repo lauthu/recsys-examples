@@ -9,8 +9,16 @@ import types
 from pathlib import Path
 
 import pytest
-from bench import adapters, server_sglang, server_sid_gr
-from bench.patching import Patch, apply, configuration, plain, redacted, selected
+from bench import engines
+from bench.engines import sglang_server, sid_gr_server
+from bench.engines.patching import (
+    Patch,
+    apply,
+    configuration,
+    plain,
+    redacted,
+    selected,
+)
 
 NATIVE = ("sglang", "vedantjh2-sglang")  # both use the native beam_width API
 
@@ -55,7 +63,7 @@ def test_selection_by_feature_and_run_kind():
     profiling = Patch("m:g", None, "", profile_only=True)
     trie = Patch("m:h", None, "", needs="trie_head")
     table = [always, profiling, trie]
-    public, vedantjh2 = (adapters.get(name).features for name in NATIVE)
+    public, vedantjh2 = (engines.get(name).features for name in NATIVE)
     assert selected(table, public, profile=False) == [always]
     assert selected(table, vedantjh2, profile=True) == table
 
@@ -65,18 +73,18 @@ def test_a_missing_target_stops_the_server(fake_engine):
         apply([Patch("fake_engine:Server.gone", lambda f: f, "")], frozenset(), False)
 
 
-@pytest.mark.parametrize("launcher", [server_sglang, server_sid_gr])
+@pytest.mark.parametrize("launcher", [sglang_server, sid_gr_server])
 def test_launcher_tables_are_well_formed(launcher):
     for patch in launcher.patches():
         module, _, attribute = patch.target.partition(":")
         assert module and attribute and callable(patch.hook) and patch.adds
-        known = set().union(*(a.features for a in adapters.ADAPTERS.values()))
+        known = set().union(*(engines.get(n).features for n in engines.ENGINES))
         assert patch.needs is None or patch.needs in known
 
 
 def test_latency_runs_patch_only_counters_step_times_and_routes():
     def always(launcher, engine):
-        features = adapters.get(engine).features
+        features = engines.get(engine).features
         return [
             p.target.rsplit(":", 1)[1]
             for p in selected(launcher.patches(), features, False)
@@ -90,14 +98,14 @@ def test_latency_runs_patch_only_counters_step_times_and_routes():
         "Scheduler.process_batch_result",
         "ScheduleBatch.copy",
     ]
-    assert always(server_sglang, "sglang-beam-search-new") == steps
-    assert always(server_sglang, "sglang") == [*steps, "BeamGroup.finalize"]
-    assert always(server_sglang, "vedantjh2-sglang") == [
+    assert always(sglang_server, "sglang-beam-search-new") == steps
+    assert always(sglang_server, "sglang") == [*steps, "BeamGroup.finalize"]
+    assert always(sglang_server, "vedantjh2-sglang") == [
         *steps,
         "BeamGroup.finalize",
         "shared_context_attention",
     ]
-    assert always(server_sid_gr, "sid-gr") == [
+    assert always(sid_gr_server, "sid-gr") == [
         "GRHTTPServingAdapter._dispatch",
         "GRHTTPServingAdapter._handle_sglang_generate",
         "GRContinuousServingExecutor._run_prefill",
@@ -106,7 +114,7 @@ def test_latency_runs_patch_only_counters_step_times_and_routes():
 
 
 def test_the_sid_gr_launcher_loads_nothing_else_from_bench():
-    code = "import sys, bench.server_sid_gr; print(sorted(m for m in sys.modules if m.startswith('bench')))"
+    code = "import sys, bench.engines.sid_gr_server; print(sorted(m for m in sys.modules if m.startswith('bench')))"
     root = Path(__file__).resolve().parents[1]
     done = subprocess.run(
         [sys.executable, "-c", code],
@@ -117,8 +125,9 @@ def test_the_sid_gr_launcher_loads_nothing_else_from_bench():
     )
     assert done.stdout.split() == [
         "['bench',",
-        "'bench.patching',",
-        "'bench.server_sid_gr']",
+        "'bench.engines',",
+        "'bench.engines.patching',",
+        "'bench.engines.sid_gr_server']",
     ]
 
 
@@ -199,24 +208,24 @@ def test_overlap_scheduler_copies_keep_their_batch_phase(monkeypatch):
         pushed.append((kind, label))
         return contextlib.nullcontext()
 
-    monkeypatch.setattr(server_sglang, "nvtx", nvtx)
-    monkeypatch.setattr(server_sglang, "_batch_phase", {})
-    monkeypatch.setattr(server_sglang, "_decode_steps", {})
+    monkeypatch.setattr(sglang_server, "nvtx", nvtx)
+    monkeypatch.setattr(sglang_server, "_batch_phase", {})
+    monkeypatch.setattr(sglang_server, "_decode_steps", {})
 
     class Batch:
         def __init__(self, decode):
             self.reqs = [types.SimpleNamespace(rid="r1")]
             self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
 
-        copy = server_sglang.keep_step(
+        copy = sglang_server.keep_step(
             lambda self: Batch(self.forward_mode.is_decode())
         )
 
     class Scheduler:
-        run_batch = server_sglang.batch_scope("run", "scheduler_forward")(
+        run_batch = sglang_server.batch_scope("run", "scheduler_forward")(
             lambda self, batch: None
         )
-        process_batch_result = server_sglang.batch_scope("result", "result")(
+        process_batch_result = sglang_server.batch_scope("result", "result")(
             lambda self, batch, result: None
         )
 
@@ -243,7 +252,7 @@ def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
     """Each step is recorded once, with its kind, requests and rows, whether its
     results are processed right away or, with overlap, from a copy one step late."""
     for name, value in (("_steps", []), ("_open_steps", {}), ("_running", None)):
-        monkeypatch.setattr(server_sglang, name, value)
+        monkeypatch.setattr(sglang_server, name, value)
 
     class Batch:
         def __init__(self, decode, rids):
@@ -251,19 +260,19 @@ def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
             self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
             self.extend_num_tokens = 8
 
-        copy = server_sglang.keep_step(
+        copy = sglang_server.keep_step(
             lambda self: Batch(
                 self.forward_mode.is_decode(), [r.rid for r in self.reqs]
             )
         )
 
     def forward(self, batch):  # the forward notes its rows on the running step
-        server_sglang._running["rows"] = 4 * len(batch.reqs)
+        sglang_server._running["rows"] = 4 * len(batch.reqs)
 
     class Scheduler:
-        get_next_batch_to_run = server_sglang.note_schedule(lambda self: None)
-        run_batch = server_sglang.open_step(forward)
-        process_batch_result = server_sglang.close_step(lambda self, b, r: None)
+        get_next_batch_to_run = sglang_server.note_schedule(lambda self: None)
+        run_batch = sglang_server.open_step(forward)
+        process_batch_result = sglang_server.close_step(lambda self, b, r: None)
 
     scheduler = Scheduler()
     prefill, running = Batch(False, ["r1", "r1"]), Batch(True, ["r1", "r2"])
@@ -278,7 +287,7 @@ def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
     scheduler.get_next_batch_to_run()
     scheduler.run_batch(prefill)  # without overlap: the batch itself
     scheduler.process_batch_result(prefill, None)
-    steps = server_sglang.taken(server_sglang._steps)
+    steps = sglang_server.taken(sglang_server._steps)
     assert [(s["kind"], s["requests"], s["rows"], s["tokens"]) for s in steps] == [
         ("prefill", ["r1"], 8, 8),
         ("decode", ["r1", "r2"], 8, None),
@@ -287,7 +296,7 @@ def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
     ]
     for s in steps:
         assert s["scheduled_ns"] <= s["launched_ns"] <= s["finished_ns"]
-    assert server_sglang._steps == []  # taken records are forgotten
+    assert sglang_server._steps == []  # taken records are forgotten
 
 
 def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
@@ -312,9 +321,9 @@ def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
     torch = types.SimpleNamespace(cuda=types.SimpleNamespace(nvtx=nvtx))
     monkeypatch.setitem(sys.modules, "torch", torch)
     for name, value in (("MARKS", "steps"), ("_capturing", True), ("_window", [])):
-        monkeypatch.setattr(server_sglang, name, value)
-    monkeypatch.setattr(server_sglang, "_batch_phase", {})
-    monkeypatch.setattr(server_sglang, "_windows", iter(range(1, 100)))
+        monkeypatch.setattr(sglang_server, name, value)
+    monkeypatch.setattr(sglang_server, "_batch_phase", {})
+    monkeypatch.setattr(sglang_server, "_windows", iter(range(1, 100)))
 
     class Batch:
         def __init__(self, decode):
@@ -322,12 +331,12 @@ def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
             self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
 
     class Scheduler:  # stacked as the profiled process installs them
-        get_next_batch_to_run = server_sglang.open_window(lambda self, plan: plan)
-        run_batch = server_sglang.batch_scope("run", "scheduler_forward")(
+        get_next_batch_to_run = sglang_server.open_window(lambda self, chosen: chosen)
+        run_batch = sglang_server.batch_scope("run", "scheduler_forward")(
             lambda self, batch: None
         )
-        process_batch_result = server_sglang.close_window(
-            server_sglang.batch_scope("result", "result")(lambda self, b, r: None)
+        process_batch_result = sglang_server.close_window(
+            sglang_server.batch_scope("result", "result")(lambda self, b, r: None)
         )
 
     scheduler = Scheduler()
@@ -361,4 +370,4 @@ def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
 
     idle = ["engine", "start bench/step:1", "end bench/step:1", "pop"]
     assert marks == [*idle, *step(2, "prefill"), *step(3, "decode")]
-    assert server_sglang._window == []
+    assert sglang_server._window == []

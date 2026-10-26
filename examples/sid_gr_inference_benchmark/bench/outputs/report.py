@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""report.md and its charts, from one run's saved results (bench/results.py).
+"""report.md and its charts, from one run's saved results (results.py).
 
 view() reduces the results to plain numbers and names; templates/report.md.j2
-holds every word and table of the report, and bench/chart.py and
-bench/sunburst.py draw its charts, so the same results always render the same
+holds every word and table of the report, and chart.py and sunburst.py
+draw its charts, so the same results always render the same
 files. Every number is measured or observed at runtime; solution settings are
 copied verbatim from the configuration rather than interpreted. The results
 carry the Scenario and Solution from bench.config, the settings the benchmark
@@ -21,10 +21,11 @@ import re
 import statistics
 from collections import defaultdict
 
-from bench import adapters, chart, sunburst, template
+from bench import engines
 from bench.common import PHASES, interpolate, quantile, summarize
-from bench.sunburst import phase_key
-from bench.trace import NO_PHASE, NO_SECTION
+from bench.outputs import chart, sunburst, template
+from bench.outputs.sunburst import phase_key
+from bench.outputs.trace import NO_PHASE, NO_SECTION
 
 RESAMPLES = 2000  # bootstrap resamples per engine and concurrency level
 # Where a request's time goes, from its PHASES: "HTTP and response" joins the
@@ -39,10 +40,10 @@ def short(name, limit=90):
     return name if len(name) <= limit else name[: limit - 1] + "…"
 
 
-def level_runs(clean):
-    """{concurrency: [(run, latencies, duration)]}, ascending, over the clean runs."""
+def level_runs(rounds):
+    """{concurrency: [(run, latencies, duration)]}, ascending, over the rounds."""
     levels = defaultdict(list)
-    for result in clean:
+    for result in rounds:
         for level in result["levels"]:
             entry = (result["run"], level["latency_ms"], level["duration_s"])
             levels[level["concurrency"]].append(entry)
@@ -88,7 +89,7 @@ def interval(values):
 def summary(k, runs):
     """One level's pooled statistics and requests/s with 95% intervals, and the
     resampled means; runs is ((run, latencies, duration), ...) as tuples, so the
-    same measurements are bootstrapped once, for the report and the comparison."""
+    same measurements are bootstrapped once, for the report and the summary."""
     stats, rate = pooled(runs)
     values = bootstrap(runs, seed=f"bootstrap/{k}")
     ci = {name: interval(v) for name, v in values.items()}
@@ -96,17 +97,17 @@ def summary(k, runs):
 
 
 def summaries(results):
-    """{concurrency: summary} of one engine, pooled over its clean runs."""
+    """{concurrency: summary} of one engine, pooled over its rounds."""
     return {
         k: summary(k, tuple((run, tuple(ms), seconds) for run, ms, seconds in runs))
-        for k, runs in level_runs(results["clean"]).items()
+        for k, runs in level_runs(results["rounds"]).items()
     }
 
 
-def level_records(clean):
-    """{concurrency: [each clean run's record of that level]}, ascending."""
+def level_records(rounds):
+    """{concurrency: [each round's record of it]}, ascending."""
     found = defaultdict(list)
-    for result in clean:
+    for result in rounds:
         for level in result["levels"]:
             found[level["concurrency"]].append(level)
     return dict(sorted(found.items()))
@@ -162,7 +163,7 @@ def step_summary(records):
 def level_view(results):
     """Per concurrency level: the pooled latency statistics and throughput with
     their 95% intervals, where the time went and the engine's steps."""
-    records, rows = level_records(results["clean"]), []
+    records, rows = level_records(results["rounds"]), []
     for k, found in summaries(results).items():
         steps = step_summary(records[k])
         rows.append(
@@ -179,15 +180,15 @@ def level_view(results):
     return rows
 
 
-def start_rows(clean):
-    """Each server start's statistics, per level."""
+def round_rows(rounds):
+    """Each round's statistics at each concurrency."""
     rows = []
-    for k, runs in level_runs(clean).items():
+    for k, runs in level_runs(rounds).items():
         for run, latencies, duration in runs:
             stats = summarize(latencies)
-            start = int(run.rsplit("_", 1)[1])
+            number = int(run.rsplit("_", 1)[1])
             rows.append(
-                {"k": k, "start": start, "rate": stats["n"] / duration, **stats}
+                {"k": k, "round": number, "rate": stats["n"] / duration, **stats}
             )
     return rows
 
@@ -201,12 +202,12 @@ def length_bins(workload):
 
 
 def length_rows(results):
-    """Mean latency per prompt-length bin and level, pooled over the clean runs;
+    """Mean latency per prompt-length bin and concurrency, pooled over the rounds;
     every level sends the same prompts in order. None with one prompt length."""
     workload, runs = results["scenario"].workload, results["scenario"].runs
     if workload.min_context_length is None:
         return None
-    lengths, levels = results["lengths"][: runs.requests], level_runs(results["clean"])
+    lengths, levels = results["lengths"][: runs.requests], level_runs(results["rounds"])
     rows = []
     for low, high in length_bins(workload):
         inside = [i for i, n in enumerate(lengths) if low <= n < high]
@@ -394,7 +395,7 @@ def changed_by_engine(results, observed):
     return rows
 
 
-def profile_differences(clean, profile, added):
+def profile_differences(first, profile, added):
     """[(name, before, after)] for the settings and environment variables in
     which a profiled process differed, except the port and the container's
     hostname, which differ in every run."""
@@ -403,7 +404,7 @@ def profile_differences(clean, profile, added):
         ("settings", "settings", added.get("server_settings", {})),
         ("env", "environment", {**added["env"], "HOSTNAME": "PORT"}),
     ):
-        before, after = clean["config"][key], profile["config"][key]
+        before, after = first["config"][key], profile["config"][key]
         per_run = {name for name, value in wanted.items() if value == "PORT"}
         for name in sorted((before.keys() | after.keys()) - per_run):
             old, new = before.get(name, UNSET), after.get(name, UNSET)
@@ -415,8 +416,8 @@ def profile_differences(clean, profile, added):
 def configuration_view(results):
     """The server's own report of its settings and environment, and how the
     profiled processes differed; None if the server gave none."""
-    clean = results["clean"][0]
-    observed = clean.get("config")
+    first = results["rounds"][0]
+    observed = first.get("config")
     if not observed:
         return None
     runs = [("profile", results["profile"])]
@@ -425,7 +426,7 @@ def configuration_view(results):
     profiled = [
         {
             "name": name,
-            "differences": profile_differences(clean, result, results["added"]),
+            "differences": profile_differences(first, result, results["added"]),
         }
         for name, result in runs
         if result.get("config")
@@ -441,12 +442,16 @@ def configuration_view(results):
 
 def setup_view(results):
     """Hardware, software and workload; runtime values are read from the server."""
-    solution, clean, catalog = results["solution"], results["clean"], results["catalog"]
-    adapter = adapters.get(solution.engine)
-    machine, runtime, manifest = clean[0], clean[0]["runtime"], results["manifest"]
+    solution, rounds, catalog = (
+        results["solution"],
+        results["rounds"],
+        results["catalog"],
+    )
+    adapter = engines.get(solution.engine)
+    machine, runtime, manifest = rounds[0], rounds[0]["runtime"], results["manifest"]
     checked = None
     if catalog:
-        checked = sum(r["catalog_beams"] for r in clean + [results["profile"]])
+        checked = sum(r["catalog_beams"] for r in rounds + [results["profile"]])
     profile_patches = results["profile"]["runtime"].get("patches", [])
     patches = runtime.get("patches", [])
     settings = {"env": solution.env}
@@ -461,7 +466,7 @@ def setup_view(results):
         "image": manifest["image"]["id"],
         "packages": [f"{name} {v}" for name, v in runtime["packages"].items() if v],
         "attention": runtime["attention"],
-        "graphs": adapter.graph_usage(clean),
+        "graphs": adapter.graph_usage(rounds),
         "overlap": runtime.get("overlap"),  # SGLang's scheduler; SID-GR has none
         "model": manifest["model"],
         "checkpoint_dtype": results["checkpoint_dtype"],
@@ -481,19 +486,19 @@ def view(results):
     scenario, solution = results["scenario"], results["solution"]
     workload = scenario.workload
     return {
-        "engine": adapters.get(solution.engine).title,
+        "engine": engines.get(solution.engine).title,
         "model": results["model"],
-        "dtype": results["clean"][0]["runtime"]["dtype"],
-        "gpu": results["clean"][0]["gpu"],
+        "dtype": results["rounds"][0]["runtime"]["dtype"],
+        "gpu": results["rounds"][0]["gpu"],
         "workload": workload,
         "levels": workload.levels,
         "runs": scenario.runs,
         "catalog": results["catalog"],
         "resamples": RESAMPLES,
         "results": level_view(results),
-        "starts": start_rows(results["clean"]),
+        "round_rows": round_rows(results["rounds"]),
         "lengths": length_rows(results),
-        "overlap": results["clean"][0]["runtime"].get("overlap"),
+        "overlap": results["rounds"][0]["runtime"].get("overlap"),
         "profile": profile_view(results),
         "load": load_view(results),
         "no_phase": NO_PHASE,

@@ -1,8 +1,8 @@
-{#- comparison.md across the engines of one invocation. The view comes from
-    bench/compare.py:view(); numbers are formatted only here, by the filters in
-    bench/template.py. -#}
+{#- summary.md across the engines of one invocation. The view comes from
+    bench/outputs/summary.py:view(); numbers are formatted only here, by the
+    filters in bench/outputs/template.py. -#}
 {% import "common.j2" as common %}
-# Beam-search engine comparison
+# Beam-search benchmark summary
 
 {{ common.scope(model, dtype, workload, catalog, gpu) }}
 
@@ -69,7 +69,7 @@ An engine step runs from the scheduler starting to choose its batch to its resul
 | {{ row.name }} | {{ row.single | num }} | {{ row.idle_share | pct }} |{% if levels | length > 1 %} {{ row.loaded | num }} |{% endif +%}
 {% endfor %}
 
-From each engine's GPU profile, a separate server start under Nsight Systems; under load, the steps' kernel time over the requests they served.{% if levels | length > 1 and none in gpu_rows | map(attribute="loaded") %} "–": not captured, since the overlap scheduler leaves the steps indistinguishable in a trace.{% endif +%}
+From each engine's GPU profiles, separate server processes under Nsight Systems; under load, the steps' kernel time over the requests they served.{% if levels | length > 1 and none in gpu_rows | map(attribute="loaded") %} "–": not captured, since the overlap scheduler leaves the steps indistinguishable in a trace.{% endif +%}
 
 ## Output agreement with {{ reference }}
 
@@ -79,7 +79,7 @@ From each engine's GPU profile, a separate server start under Nsight Systems; un
 | {{ row.name }} |{{ " %s |" | format(row.k) if levels | length > 1 }} {{ row.top1 | pct }} | {{ row.overlap | pct }} ({{ row.overlap_min | pct }}) | {{ row.rank | pct }} | {{ "%.4g" | format(row.score_delta) }} |
 {% endfor %}
 
-Over the measured requests of each engine's first server start{{ ", at each level" if levels | length > 1 }}. Top-1 match: identical best beam. Beam overlap: the share of the reference's beams that the engine also returned, in any order, as the mean over requests and, in parentheses, the lowest request. Rank match: the share of ranks with identical tokens. Max score Δ: the largest difference in cumulative log-probability among shared beams; with a catalog, engines normalize over different token sets, so it can be nonzero when the beams agree.
+Over the measured requests of each engine's first round{{ ", at each concurrency" if levels | length > 1 }}. Top-1 match: identical best beam. Beam overlap: the share of the reference's beams that the engine also returned, in any order, as the mean over requests and, in parentheses, the lowest request. Rank match: the share of ranks with identical tokens. Max score Δ: the largest difference in cumulative log-probability among shared beams; with a catalog, engines normalize over different token sets, so it can be nonzero when the beams agree.
 
 ## Versions
 

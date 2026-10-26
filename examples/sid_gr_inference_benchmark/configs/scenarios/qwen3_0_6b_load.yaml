@@ -2,10 +2,10 @@
 # command line gives the CPUs and GPU. Loaded into bench.config.Scenario;
 # unknown keys and wrong types fail.
 #
-# Load: qwen3_0_6b.yaml with prompt lengths from 256 to 2,048 tokens and four
-# concurrency levels, each measured in every clean server process (README,
-# Concurrency levels and prompt lengths). SID-GR runs prompts shorter than
-# context_length without CUDA graphs.
+# Load: qwen3_0_6b.yaml with prompt lengths from 256 to 2,048 tokens at four
+# concurrency values, each measured in every round (README, Concurrency and
+# prompt lengths). SID-GR runs prompts shorter than context_length without
+# CUDA graphs.
 
 model:
   id: Qwen/Qwen3-0.6B
@@ -31,14 +31,14 @@ workload:
   min_context_length: 256  # lengths drawn uniformly from 256 to 2,048 tokens
   beam_width: 256
   output_tokens: 3      # one from prefill, two decode steps
-  concurrency: [1, 2, 4, 8]  # requests in flight, each level in turn: closed loops
+  concurrency: [1, 2, 4, 8]  # requests in flight, each in turn: closed loops
   seed: 42              # seeds the synthetic token IDs
 
 runs:
-  clean: 3              # separate server processes measured for latency
-  requests: 200         # measured requests per process and level
-  warmups: 10           # unmeasured requests before each level's
-  profile_requests: 3   # requests captured by the profiled process, one at a time
+  rounds: 3             # each starts a new server and measures every concurrency
+  requests: 200         # measured requests per concurrency in each round
+  warmups: 10           # unmeasured requests before them
+  profile_requests: 3   # requests each GPU profile captures
 
 # Optional: constrain every beam to a catalog (README, Catalog filtering). The
 # file is passed with --catalog and must have this SHA-256.

@@ -1,22 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""How the benchmark talks to each engine: one adapter class per engine.
-
-An adapter is plain logic and holds no settings. It reads the solution (how
-the engine is configured) and the scenario (what is measured) on the host, and
-plan.json, which the runner writes from both plus the CPUs and GPU of the run,
-in the container. The runner, the client, the launchers and the report ask the
-adapter instead of branching on the engine name. To add an engine, subclass
-`Adapter`, fill in the attributes and methods below and list it in `ADAPTERS`;
-nothing else changes.
-Standard library only: this module is imported on the host and in the container.
-
-Host side   solution checks, catalog and model preparation, mounts; these
-            methods get the typed Solution and Scenario from bench.config.
-Container   these methods get plan.json.
-Server side launch command, readiness and profiler endpoints, request payload.
-Response    beam parsing, per-run observed checks, setup rows for the report.
-"""
+"""SGLang and its forks: public SGLang, beam-search-new and vedantjh2-sglang.
+All three run SGLang's own HTTP server in the launcher sglang_server.py,
+configured by the solution's server_settings plus what server_args() sets."""
 
 import array
 import json
@@ -25,219 +11,16 @@ import pickle
 import struct
 import sys
 
-from bench.common import CACHE_ENV, call, fail
+from bench.common import call, fail
+from bench.engines.adapter import Adapter, sum_counters
 
 TRIE_HEAD_FILE = "trie_output_head.safetensors"
-SID_GR_SCRIPT = "/source/examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
 SHARED = "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION"
 TOPK = "SGLANG_BEAM_TRIE_TOPK_LOGPROB"  # "true": normalize over the codebook only
 # Image recipe of the SGLang dev branches, which images/build.sh builds from source.
 FROM_SOURCE = (
     "docker/Dockerfile of the source, target framework_final (images/build.sh)"
 )
-# Settings the container only sees through the plan, never from the image.
-AMBIENT = ("GR_", "SGLANG_", "MODEL_")
-
-
-class Adapter:
-    name: str  # the engine name a solution gives as `engine`
-    title: str
-    source_label: str  # what --source must be, for error messages
-    entry: str  # file that must exist under --source
-    # How the image is built: a Dockerfile under images/, or, for a dev branch
-    # built from source by images/build.sh, the engine's own recipe.
-    recipe: str
-    mount = "/source"  # where --source appears in the container
-    fingerprint: tuple[str, ...] = (
-        "examples/sid-gr-inference",
-        "corelib/gr_decode_atten",
-    )
-    # Optional solution sections this engine requires; it rejects the others.
-    sections: tuple[str, ...] = ()
-    # Environment the runner or the adapter sets; a solution must not.
-    managed_env = frozenset(
-        CACHE_ENV
-        + "HOME PYTHONPATH CUDA_VISIBLE_DEVICES BENCH_PROFILE BENCH_ENGINE".split()
-    )
-    # The engine's code paths that launcher patches target (patching.Patch.needs).
-    features: frozenset[str] = frozenset()
-    ready = "/pilot/ready"
-    # With a catalog, the engine serves a generated copy of the checkpoint.
-    model_view = False
-    catalog_supported = True
-    # The catalog's native storage format: generated file name, or None to read JSONL.
-    catalog_file: str | None = None
-
-    # ---- host side -------------------------------------------------------
-    def validate(self, solution, scenario):
-        """Engine-specific checks of a Solution against the Scenario; raise ValueError."""
-
-    def convert_catalog(self, paths, model, vocab_size):
-        """Bytes of the engine's native catalog file (only if catalog_file is set);
-        `model` is the scenario's Model."""
-        raise NotImplementedError
-
-    # ---- server side -----------------------------------------------------
-    def server(self, plan, port, profile):
-        """Return (argv, env) that start the server. env holds what the benchmark
-        sets; the client adds it to the container's environment without AMBIENT."""
-        raise NotImplementedError
-
-    def server_args(self, plan, port):
-        """SGLang ServerArgs this adapter sets over the solution's server_settings;
-        None for an engine configured only through its environment."""
-        return None
-
-    def environment(self, plan, profile):
-        # CPU thread pools match the server CPUs unless the solution says otherwise.
-        threads = str(len(plan["server_cpus"]))
-        env = {"OMP_NUM_THREADS": threads, "MKL_NUM_THREADS": threads}
-        # What the launcher marks: "requests" or "steps"; "0" when not profiled.
-        env.update(plan["env"], BENCH_PROFILE=profile or "0")
-        return env
-
-    def overlaps_steps(self, solution):
-        """Whether the engine launches a step before the previous one's results
-        are processed (SGLang's overlap scheduler); then steps cannot be told
-        apart in a trace."""
-        return False
-
-    def profile(self, port, start):
-        """Start or stop the cudaProfilerApi capture range in the server process."""
-        raise NotImplementedError
-
-    def payload(self, row, workload):
-        raise NotImplementedError
-
-    def beams(self, response, rid):
-        """[(token_ids, cumulative logprob)] in the server's order."""
-        raise NotImplementedError
-
-    def catalog_status(self, port, runtime):
-        raise NotImplementedError
-
-    def check_source(self, runtime):
-        """Raise if the server is not running the mounted source."""
-
-    def check_counters(self, plan, counters, requests, runtime):
-        """Raise if the measured requests did not take the requested code path."""
-
-    # ---- report ----------------------------------------------------------
-    def graph_usage(self, clean):
-        raise NotImplementedError
-
-    def setup_rows(self, solution, catalog):
-        """Extra (label, text) rows for the report's setup table."""
-        return []
-
-
-class SidGrAdapter(Adapter):
-    name = "sid-gr"
-    recipe = "images/Dockerfile.sid-gr"
-    title = "SID-GR"
-    source_label = "a recsys-examples checkout"
-    entry = "examples/sid-gr-inference/scripts/serve_qwen3_gr_http.sh"
-    ready = "/ready"
-    # Set from the plan below; the model and the catalog come only from the runner.
-    managed_env = Adapter.managed_env | frozenset(
-        """PYTHON_BIN MODEL_DIR GR_MODEL_DIR GR_DECODE_ATTEN_ROOT GR_HTTP_HOST
-        GR_HTTP_PORT GR_CONTEXT_LEN GR_BEAM_WIDTH GR_DECODE_STEPS GR_MAX_BATCH_SIZE
-        GR_BEAM_KV_POOL_CAPACITY GR_CONTEXT_KV_POOL_CAPACITY
-        GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS GR_CATALOG_JSONL GR_ALLOW_CATALOG_RELOAD""".split()
-    )
-
-    def validate(self, solution, scenario):
-        if scenario.model.dtype != "bfloat16":
-            fail(
-                "sid-gr builds its model in bfloat16 and has no dtype setting; "
-                f"the scenario asks for model.dtype {scenario.model.dtype}"
-            )
-
-    def server(self, plan, port, profile):
-        workload = plan["workload"]
-        # Every request in flight shares one batch; one deployment serves every level.
-        batch = max(plan["levels"])
-        env = self.environment(plan, profile)
-        env.update(
-            {
-                "PYTHON_BIN": "/benchmark-tools/bench/server_sid_gr.py",
-                "MODEL_DIR": "/model",
-                "GR_DECODE_ATTEN_ROOT": "/source/corelib/gr_decode_atten",
-                "GR_HTTP_HOST": "127.0.0.1",
-                "GR_HTTP_PORT": str(port),
-                "GR_CONTEXT_LEN": str(workload["context_length"]),
-                "GR_BEAM_WIDTH": str(workload["beam_width"]),
-                "GR_DECODE_STEPS": str(workload["output_tokens"] - 1),
-                "GR_MAX_BATCH_SIZE": str(batch),
-                "GR_BEAM_KV_POOL_CAPACITY": str(batch),
-                "GR_CONTEXT_KV_POOL_CAPACITY": str(batch),
-                "GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS": ",".join(
-                    str(size) for size in range(1, batch + 1)
-                ),
-            }
-        )
-        if plan["catalog"]:
-            env["GR_CATALOG_JSONL"] = plan["catalog"]["server_path"]
-        return ["bash", SID_GR_SCRIPT], env
-
-    def profile(self, port, start):
-        call(port, "POST", f"/pilot/profile/{'start' if start else 'stop'}")
-
-    def payload(self, row, workload):
-        params = {
-            "n": workload["beam_width"],
-            "max_new_tokens": workload["output_tokens"],
-            "ignore_eos": True,
-        }
-        return {
-            "input_ids": row["input_ids"],
-            "rid": row["request_id"],
-            "stream": False,
-            "sampling_params": params,
-        }
-
-    def beams(self, response, rid):
-        meta = response["meta_info"]
-        if meta.get("request_id") != rid:
-            fail(f"response does not belong to {rid}")
-        return [
-            (b["output_ids"], float(b["meta_info"]["sequence_score"]))
-            for b in meta["beam_results"]
-        ]
-
-    def catalog_status(self, port, runtime):
-        status = call(port, "GET", "/catalog/status")["catalog"] or {}
-        return {
-            "active": bool(status),
-            "source": status.get("source"),
-            "items": status.get("item_count"),
-        }
-
-    def check_counters(self, plan, counters, requests, runtime):
-        # SID-GR keys its CUDA graphs by prompt length and captures them only at
-        # startup; a capture during measured requests would land in their latency.
-        captures = counters.get("prefill.graph_captures")
-        if captures:
-            raise RuntimeError(
-                f"SID-GR captured {captures} prefill CUDA graphs during measured "
-                "requests"
-            )
-
-    def graph_usage(self, clean):
-        counts = _sum_counters(clean)
-        requests = sum(measured_requests(result) for result in clean)
-        enabled = clean[0]["runtime"]["cuda_graphs"]
-        parts = [
-            (
-                f"{phase}: {counts[f'{phase}.graph_replays'] / requests:.2f} replays/request"
-                if enabled[phase]
-                else f"{phase}: disabled"
-            )
-            for phase in ("prefill", "decode")
-        ]
-        if enabled["decode"]:
-            parts[-1] += f", {counts['decode.eager_fallbacks']} eager fallbacks"
-        return "; ".join(parts)
 
 
 class SGLangAdapter(Adapter):
@@ -264,34 +47,35 @@ class SGLangAdapter(Adapter):
     def overlaps_steps(self, solution):
         return not solution.server_settings.get("disable_overlap_schedule", False)
 
-    def server(self, plan, port, profile):
-        env = self.environment(plan, profile)
+    def server(self, config, port, profile):
+        env = self.environment(config, profile)
         env.update(PYTHONPATH="/sglang/python:/benchmark-tools", BENCH_ENGINE=self.name)
         env["SGLANG_PROFILE_V2"] = "0"  # the cudaProfilerApi control path
-        argv = [sys.executable, "-m", "bench.server_sglang"]
-        return argv + ["--plan", "/work/plan.json", "--port", str(port)], env
+        argv = [sys.executable, "-m", "bench.engines.sglang_server"]
+        return argv + ["--config", "/work/run_config.json", "--port", str(port)], env
 
-    def server_args(self, plan, port):
+    def server_args(self, config, port):
         """Where the model and the port are, and what follows from the scenario.
 
-        One deployment serves every concurrency level, so it is sized for the
-        largest, top. CUDA graph sizes: k requests in flight decode k * beam_width
-        rows; prefill sizes come from prefill_tokens. Request slots: every beam
-        holds one, and beam-search-new also keeps the request's own; with too few,
+        One deployment serves every concurrency, so it is sized for the largest,
+        top. CUDA graph sizes: k requests in flight decode k * beam_width rows;
+        prefill sizes come from prefill_tokens. Request slots: every beam holds
+        one, and beam-search-new also keeps the request's own; with too few,
         requests queue or the server fails.
         """
-        workload, top = plan["workload"], max(plan["levels"])
+        workload = config.workload
+        top = max(workload.levels)
         return {
             "model_path": "/model",
             "host": "127.0.0.1",
             "port": port,
-            "dtype": plan["dtype"],
-            "random_seed": workload["seed"],
+            "dtype": config.scenario.model.dtype,
+            "random_seed": workload.seed,
             "cuda_graph_bs_decode": [
-                workload["beam_width"] * k for k in range(1, top + 1)
+                workload.beam_width * k for k in range(1, top + 1)
             ],
             "cuda_graph_bs_prefill": prefill_tokens(workload, top),
-            "max_running_requests": top * (workload["beam_width"] + 1),
+            "max_running_requests": top * (workload.beam_width + 1),
         }
 
     def profile(self, port, start):
@@ -307,8 +91,8 @@ class SGLangAdapter(Adapter):
 
     def payload(self, row, workload):
         params = {
-            "n": workload["beam_width"],
-            "max_new_tokens": workload["output_tokens"],
+            "n": workload.beam_width,
+            "max_new_tokens": workload.output_tokens,
             "ignore_eos": True,
             **self.sampling(workload),
         }
@@ -342,8 +126,8 @@ class SGLangAdapter(Adapter):
         if not runtime["sglang"].startswith("/sglang/"):
             raise RuntimeError(f"imported {runtime['sglang']}, not the mounted SGLang")
 
-    def graph_usage(self, clean):
-        counts = _sum_counters(clean)
+    def graph_usage(self, rounds):
+        counts = sum_counters(rounds)
         parts = []
         for phase in ("prefill", "decode"):
             graph, eager = (
@@ -383,10 +167,10 @@ class BeamSearchNewAdapter(SGLangAdapter):
                 "true: the branch runs beam search without the overlap scheduler"
             )
 
-    def server_args(self, plan, port):
-        args = super().server_args(plan, port)
-        if plan["catalog"]:
-            args["beam_search_constraint_dict"] = plan["catalog"]["server_source"]
+    def server_args(self, config, port):
+        args = super().server_args(config, port)
+        if config.catalog_items is not None:
+            args["beam_search_constraint_dict"] = self.catalog_source
         return args
 
     def convert_catalog(self, paths, model, vocab_size):
@@ -424,9 +208,9 @@ class NativeSGLangAdapter(SGLangAdapter):
     features = frozenset({"native_beam"})  # BeamCoordinator and BeamGroup
 
     def sampling(self, workload):
-        return {"beam_width": workload["beam_width"]}
+        return {"beam_width": workload.beam_width}
 
-    def check_counters(self, plan, counters, requests, runtime):
+    def check_counters(self, config, counters, requests, runtime):
         # Scores are the mean log-probability times the length only at penalty 1.
         if runtime["length_penalty"] != 1.0:
             raise RuntimeError(
@@ -488,20 +272,20 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
     def codebook_normalized(self, env):
         return env.get(TOPK, "false") == "true"
 
-    def check_counters(self, plan, counters, requests, runtime):
+    def check_counters(self, config, counters, requests, runtime):
         """Every measured request must take the path that was requested: the
         trie output head exactly when there is a catalog, with the requested
         normalization."""
         decode = counters["forward.decode.graph"] + counters["forward.decode.eager"]
-        shared = self.shared(plan["env"])
-        codebook = self.codebook_normalized(plan["env"])
+        shared = self.shared(config.solution.env)
+        codebook = self.codebook_normalized(config.solution.env)
         problems = []
         try:
-            super().check_counters(plan, counters, requests, runtime)
+            super().check_counters(config, counters, requests, runtime)
         except RuntimeError as exc:
             problems.append(str(exc))
         trie = ("compact_decode", "exact_normalizer", "device_history")
-        if not plan["catalog"]:
+        if config.catalog_items is None:
             if any(counters[f"vedantjh2.{name}"] for name in trie):
                 problems.append("the trie output head ran without a catalog")
         else:
@@ -624,7 +408,7 @@ def prefill_tokens(workload, top):
     by less than 1.5x; SGLang replays a prefill graph only below 2x padding and
     runs the batch eagerly otherwise.
     """
-    longest, shortest = workload["context_length"], workload.get("min_context_length")
+    longest, shortest = workload.context_length, workload.min_context_length
     if shortest is None:
         return [longest * k for k in range(1, top + 1)]
     sizes, size = [], shortest
@@ -632,39 +416,3 @@ def prefill_tokens(workload, top):
         sizes.append(size)
         size = math.ceil(size * 1.5)
     return sizes + [top * longest]
-
-
-def measured_requests(result):
-    """Measured requests of one run's result.json, over every concurrency level."""
-    return sum(len(level["latency_ms"]) for level in result["levels"])
-
-
-def _sum_counters(clean):
-    totals = {}
-    for result in clean:
-        for key, value in result["counters"].items():
-            totals[key] = totals.get(key, 0) + value
-    return _Counts(totals)
-
-
-class _Counts(dict):
-    def __missing__(self, key):
-        return 0
-
-
-ADAPTERS = {
-    adapter.name: adapter
-    for adapter in (
-        SidGrAdapter(),
-        PublicSGLangAdapter(),
-        BeamSearchNewAdapter(),
-        Vedantjh2SGLangAdapter(),
-    )
-}
-
-
-def get(engine):
-    """The adapter of an engine name, as a solution gives it in `engine`."""
-    if engine not in ADAPTERS:
-        fail(f"engine must be one of {', '.join(ADAPTERS)}")
-    return ADAPTERS[engine]

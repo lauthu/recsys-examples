@@ -12,9 +12,9 @@ from pathlib import Path
 
 import jinja2
 import pytest
-from bench import report, results, sunburst, template
 from bench.common import quantile, summarize
 from bench.config import Model, Runs, Scenario, Solution, Source, Workload
+from bench.outputs import report, results, sunburst, template
 
 ROOT = Path(__file__).resolve().parents[1]
 SVG = "{http://www.w3.org/2000/svg}"
@@ -65,7 +65,7 @@ def test_statistics():
 
 
 def test_bootstrap_is_seeded_and_covers_the_estimate():
-    runs = [("clean_1", [10.0, 12.0, 14.0, 16.0], 0.05)] * 2
+    runs = [("round_1", [10.0, 12.0, 14.0, 16.0], 0.05)] * 2
     values = report.bootstrap(runs, seed="s", resamples=500)
     assert values == report.bootstrap(runs, seed="s", resamples=500)
     low, high = report.interval(values["mean"])
@@ -76,7 +76,7 @@ def test_bootstrap_is_seeded_and_covers_the_estimate():
 def test_bootstrap_includes_the_variation_between_processes():
     # Each process answers every request in the same time, but the two differ:
     # resampling only the requests would give a zero-width interval.
-    runs = [("clean_1", [10.0] * 50, 1.0), ("clean_2", [20.0] * 50, 2.0)]
+    runs = [("round_1", [10.0] * 50, 1.0), ("round_2", [20.0] * 50, 2.0)]
     values = report.bootstrap(runs, seed="s")
     assert report.interval(values["mean"]) == (10.0, 20.0)
     assert report.interval(values["p99"]) == (10.0, 20.0)
@@ -203,12 +203,12 @@ SCENARIO = Scenario(
     workload=Workload(
         context_length=2048, beam_width=256, output_tokens=3, concurrency=1, seed=42
     ),
-    runs=Runs(clean=2, requests=4, warmups=1, profile_requests=2),
+    runs=Runs(rounds=2, requests=4, warmups=1, profile_requests=2),
 )
 
 
 def saved(engine, **overrides):
-    """One engine's saved results (bench/results.py), measured at concurrency 1."""
+    """One engine's saved results (bench/outputs/results.py), at concurrency 1."""
     runtime = {
         "packages": {"torch": "2.9.1"},
         "attention": {"prefill": "A x28", "decode": "B"},
@@ -216,9 +216,9 @@ def saved(engine, **overrides):
         "cuda_graphs": {"prefill": True, "decode": False},
         "patches": ["m:Runner.forward"],
     }
-    clean = [
+    rounds = [
         {
-            "run": f"clean_{i}",
+            "run": f"round_{i}",
             "order": [1],
             "levels": levels(1),
             "gpu": "GPU",
@@ -251,9 +251,9 @@ def saved(engine, **overrides):
         "reference": engine,
         "scenario": SCENARIO,
         "solution": solution,
-        "clean": clean,
+        "rounds": rounds,
         "profile": {
-            **clean[0],
+            **rounds[0],
             "catalog_beams": 4,
             "runtime": {**runtime, "patches": ["m:Runner.forward", "m:Batch.run"]},
             "config": PROFILED,
@@ -286,7 +286,7 @@ def at(found, *concurrency, **changes):
         **changes,
     )
     found["scenario"] = dataclasses.replace(found["scenario"], workload=workload)
-    for result in found["clean"]:
+    for result in found["rounds"]:
         result["levels"] = levels(*concurrency)
     return found
 
@@ -347,15 +347,19 @@ def test_report_opens_with_how_it_was_measured():
     method = section(text, "## How it was measured")
     assert "At concurrency *k*, *k* clients each send a request" in method
     assert "Measured at concurrency 1." in method
-    assert "8 per concurrency level: 4 in each of 2 separate server starts." in method
-    assert "Each level begins with 1 unmeasured warmup request." in method
+    rounds = "- **Rounds:** 2. Each round starts a new container and server; the"
+    assert rounds + " results pool the rounds." in method
+    requests = "8 measured per concurrency: 4 in each round, after 1 unmeasured warmup"
+    assert requests + " request at that concurrency." in method
     assert "(2,000 resamples)." in method
-    assert "from one more server start under Nsight Systems" in method
+    assert (
+        "one more server process under Nsight Systems, apart from the rounds" in method
+    )
 
 
 def test_report_tables_throughput_and_latency_with_intervals():
     found = saved("sglang")
-    for result, latency in zip(found["clean"], ([10.0] * 4, [20.0] * 4)):
+    for result, latency in zip(found["rounds"], ([10.0] * 4, [20.0] * 4)):
         result["levels"] = levels(1, latency=latency)
     part = section(text_of(found), "## Results")
     header = "| Concurrency | Throughput (requests/s) | Mean latency (ms) | p50 (ms) |"
@@ -371,12 +375,12 @@ def test_report_charts_throughput_and_latency_by_concurrency():
     files = report.render(at(saved("sglang"), 1, 2))
     text = files["report.md"]
     assert "Measured at concurrency 1 and 2." in text
-    assert "each of which measures every level in turn" in text
+    assert "measures every concurrency in turn, starting at a different one" in text
     assert "![Throughput and latency by concurrency](load.svg)" in text
     assert re.search(
         r"\| 2 \| 80\.0 \(80\.0–80\.0\) \| 13\.0 \([\d.]+–[\d.]+\) \|", text
     )
-    assert "measures the levels in a different order" in text
+    assert "Each round measures the concurrency values in a different order" in text
     root = ET.fromstring(files["load.svg"].split("\n", 1)[1])
     assert len(root.findall(f".//{SVG}polyline")) == 4  # throughput; mean, p95, p99
     assert (
@@ -474,7 +478,7 @@ def test_vedantjh2_report_states_observed_paths_and_catalog():
 
 def test_report_states_the_observed_overlap_scheduler():
     found = saved("sglang")
-    for result in found["clean"]:
+    for result in found["rounds"]:
         result["runtime"] = {**result["runtime"], "overlap": True}
     text = text_of(found)
     assert "| Overlap scheduler (observed) | on |" in text
@@ -488,7 +492,7 @@ def test_report_shows_latency_by_prompt_length():
     assert "Qwen3-0.6B, bfloat16 · prompts of 100 to 500 tokens · 256 beams" in text
     assert "lengths drawn uniformly from 100 to 500 tokens |" in text
     part = section(text, "### Latency by prompt length")
-    assert "| Prompt tokens | Requests per start | Mean at concurrency 1 (ms) |" in part
+    assert "| Prompt tokens | Requests per round | Mean at concurrency 1 (ms) |" in part
     assert "| 100–199 | 1 | 10.0 |" in part and "| 400–500 | 1 | 16.0 |" in part
     # The profiled requests are the first measured ones.
     assert "so the times are per request (prompts of 100 and 200 tokens)" in text
@@ -521,7 +525,7 @@ def test_report_holds_the_full_configuration_the_server_reported():
     assert "Settings (ServerArgs.resolved_dict()):" in part
     assert "(`PORT` differs per run by design):\nnone.\n" in part
     assert "policy: fcfs" in part and "HF_TOKEN: redacted" in part
-    assert "The capture of one request at a time ran in a server start" in part
+    assert "The capture of one request at a time ran in a server process" in part
     assert '- `env.BENCH_PROFILE`: `"0"` → `"1"`' in part
     assert '- `env.CUDA_INJECTION64_PATH`: `unset` → `"/nsys/inject.so"`' in part
     assert "settings.port" not in part and "HOSTNAME" not in part
@@ -529,18 +533,18 @@ def test_report_holds_the_full_configuration_the_server_reported():
 
 def test_report_lists_settings_the_engine_changed():
     changed = {**CONFIG, "settings": {**SETTINGS, "page_size": 4}}
-    clean = [{**run, "config": changed} for run in saved("sglang")["clean"]]
-    text = text_of(saved("sglang", clean=clean))
+    rounds = [{**run, "config": changed} for run in saved("sglang")["rounds"]]
+    text = text_of(saved("sglang", rounds=rounds))
     assert "| `server_settings.page_size` | `1` | `4` |" in text
     del changed["settings"]["dtype"]
-    text = text_of(saved("sglang", clean=clean))
+    text = text_of(saved("sglang", rounds=rounds))
     assert '| `server_settings.dtype` | `"bfloat16"` | `unset` |' in text
 
 
 def test_report_lists_the_observed_server_patches():
     text = text_of(saved("sglang"))
     assert "Changes to the engine's own HTTP server (observed)" in text
-    patched = "The measured starts patched:\n\n- `m:Runner.forward`\n\n"
+    patched = "The rounds patched:\n\n- `m:Runner.forward`\n\n"
     assert patched + "The captures also patched:\n\n- `m:Batch.run`\n" in text
 
 
@@ -572,7 +576,7 @@ def test_old_results_fail_with_their_format(tmp_path):
     original = results.FORMAT
     try:
         results.FORMAT = original + 1
-        with pytest.raises(ValueError, match="has format 1, not 2"):
+        with pytest.raises(ValueError, match="has format 2, not 3"):
             results.load(tmp_path)
     finally:
         results.FORMAT = original
@@ -581,7 +585,7 @@ def test_old_results_fail_with_their_format(tmp_path):
 def test_rendering_is_deterministic_across_processes(tmp_path):
     """The same results render the same bytes, whatever the hash seed."""
     results.save(tmp_path, under_load(saved("sglang")))
-    script = "import sys; from pathlib import Path; from bench import results; "
+    script = "import sys; from pathlib import Path; from bench.outputs import results; "
     script += "results.render(Path(sys.argv[1]))"
     rendered = []
     for seed in ("1", "2"):
@@ -600,7 +604,7 @@ def test_rendering_is_deterministic_across_processes(tmp_path):
     assert set(rendered[0]) == names
 
 
-def test_the_render_tool_renders_every_engine_and_the_comparison(tmp_path):
+def test_the_render_tool_renders_every_engine_and_the_summary(tmp_path):
     names = ["sglang", "vedantjh2"]
     for name, engine in zip(names, ("sglang", "vedantjh2-sglang")):
         (tmp_path / name).mkdir()
@@ -611,10 +615,8 @@ def test_the_render_tool_renders_every_engine_and_the_comparison(tmp_path):
     assert done.returncode == 0, done.stderr
     assert (tmp_path / "sglang/report.md").is_file()
     assert (tmp_path / "vedantjh2/sunburst.svg").is_file()
-    comparison = (tmp_path / "comparison.md").read_text()
-    assert (
-        "[sglang](sglang/report.md) and [vedantjh2](vedantjh2/report.md)" in comparison
-    )
+    summary = (tmp_path / "summary.md").read_text()
+    assert "[sglang](sglang/report.md) and [vedantjh2](vedantjh2/report.md)" in summary
     missing = subprocess.run(
         tool + [str(tmp_path / "sglang/none")], capture_output=True, text=True
     )

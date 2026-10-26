@@ -5,7 +5,7 @@
 
 scripts/serve_qwen3_gr_http.sh execs $PYTHON_BIN; the runner points it here:
 
-    server_sid_gr.py .../tools/serve_qwen3_gr_http.py [args]
+    sid_gr_server.py .../tools/serve_qwen3_gr_http.py [args]
 
 Compared with the native server (serve_qwen3_gr_http.sh with plain python3):
 
@@ -16,7 +16,7 @@ Same
 
 Different, and nothing else
   - PATCHES: the methods listed there. Hooks follow the rules in
-    bench/patching.py: original arguments and results, no GPU sync.
+    bench/engines/patching.py: original arguments and results, no GPU sync.
   - "always" entries add four routes and leave every other route to the
     original dispatcher (about 85 ns per request), and note when each request's
     handler starts and returns and when each prefill and decode step starts and
@@ -44,9 +44,10 @@ import time
 from collections import Counter
 from pathlib import Path
 
-# Only bench.patching: more modules in this process put a ~220 ms stall into one
-# round of measured requests at concurrency 4 (seen when it imported bench.adapters).
-from bench.patching import (  # PYTHONPATH has /benchmark-tools
+# Only the patch machinery: more modules in this process put a ~220 ms stall
+# into one round of measured requests at concurrency 4 (seen when it imported
+# the adapters).
+from bench.engines.patching import (  # PYTHONPATH has /benchmark-tools
     Patch,
     apply,
     configuration,
@@ -367,10 +368,10 @@ def main():
     entrypoint = Path(sys.argv[1]).resolve()
     if entrypoint.name != "serve_qwen3_gr_http.py":
         raise SystemExit(
-            "usage: server_sid_gr.py .../tools/serve_qwen3_gr_http.py [args]"
+            "usage: sid_gr_server.py .../tools/serve_qwen3_gr_http.py [args]"
         )
-    # Running this file puts bench/ first on sys.path; drop it so bench/trace.py
-    # or bench/config.py cannot shadow a module SID-GR imports.
+    # Running this file puts bench/engines/ first on sys.path; drop it so a
+    # module there, such as sglang.py, cannot shadow one SID-GR imports.
     here = Path(__file__).resolve().parent
     sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != here]
     sys.path[:0] = [str(entrypoint.parent), str(entrypoint.parent.parent / "src")]

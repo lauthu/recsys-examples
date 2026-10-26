@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Renders the Markdown templates in bench/templates. The templates hold every
+"""Renders the Markdown templates in templates/. The templates hold every
 word and table of the reports; the views they render are plain numbers and
 names, formatted only by the filters below. A missing value fails the render
 instead of printing a blank."""

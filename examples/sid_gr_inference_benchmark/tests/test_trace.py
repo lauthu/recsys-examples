@@ -3,7 +3,7 @@
 import sqlite3
 
 import pytest
-from bench import trace
+from bench.outputs import trace
 
 PID, THREAD, HTTP = 7, (7 << 24) | 1, (7 << 24) | 2
 

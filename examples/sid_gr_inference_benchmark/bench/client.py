@@ -2,19 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Benchmark one server process inside the container; standard library only.
 
-    python3 -m bench.client --plan /work/plan.json --run clean_1 [--profile]
+    python3 -m bench.client --config /work/run_config.json --run round_1 [--profile]
 
-Starts the server and, for each concurrency level in turn (level_order), sends
-warmup and then measured requests from a closed loop of that many clients (a new
+Starts the server and, for each concurrency in turn (level_order), sends warmup
+and then measured requests from a closed loop of that many clients (a new
 loopback connection per request); checks every returned beam, splits each
 request's latency into phases from the server's handler and step times
 (timeline) and writes /work/<run>/result.json, with the server's full settings
-and environment read once after the last level's measured requests. With
+and environment read once after the last concurrency's measured requests. With
 --profile the server runs under Nsight Systems, the capture covers only the
 measured requests and the report is exported to SQLite after the server exits:
 the run "profile" sends requests one at a time and the server marks each
-request; the run "load_profile" keeps the largest level's requests in flight
-and the server marks each engine step.
+request; the run "load_profile" keeps the largest concurrency's requests in
+flight and the server marks each engine step.
 """
 
 import argparse
@@ -28,8 +28,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from bench import adapters, catalog
+from bench import catalog, engines
 from bench.common import PHASES, call, read_json, write_json
+from bench.config import RunConfig, requests_per_level
+from bench.engines.adapter import AMBIENT
 
 # What the server marks in each profiled run: BENCH_PROFILE for its launcher.
 PROFILES = {"profile": "requests", "load_profile": "steps"}
@@ -51,15 +53,14 @@ def export(name):
     ).split()
 
 
-def launch(adapter, plan, port, profile, name="profile"):
+def launch(adapter, config, port, profile, name="profile"):
     """Return (argv, env) for the server, pinned to the server CPUs. The image's
-    engine settings (AMBIENT) are dropped: the server sees only the plan's.
+    engine settings (AMBIENT) are dropped: the server sees only the RunConfig's.
     profile is what the server marks ("requests" or "steps"), or empty."""
-    argv, env = adapter.server(plan, port, profile)
-    inherited = {
-        k: v for k, v in os.environ.items() if not k.startswith(adapters.AMBIENT)
-    }
-    argv = ["taskset", "--cpu-list", ",".join(map(str, plan["server_cpus"])), *argv]
+    argv, env = adapter.server(config, port, profile)
+    inherited = {k: v for k, v in os.environ.items() if not k.startswith(AMBIENT)}
+    cpus = ",".join(map(str, config.resources.server_cpus))
+    argv = ["taskset", "--cpu-list", cpus, *argv]
     return (nsys(name) + argv if profile else argv), {**inherited, **env}
 
 
@@ -157,10 +158,10 @@ def timeline(measured, timed, runtime, output_tokens):
 
 
 def check(result, workload, vocab_size):
-    if len(result) != workload["beam_width"]:
-        raise ValueError(f"{len(result)} beams, expected {workload['beam_width']}")
+    if len(result) != workload.beam_width:
+        raise ValueError(f"{len(result)} beams, expected {workload.beam_width}")
     for tokens, score in result:
-        if len(tokens) != workload["output_tokens"] or any(
+        if len(tokens) != workload.output_tokens or any(
             type(t) is not int or not 0 <= t < vocab_size for t in tokens
         ):
             raise ValueError(f"invalid beam tokens {tokens}")
@@ -201,44 +202,43 @@ def machine():
     return {"gpu": name, "gpu_uuid": uuid, "driver": driver, "cpu": cpu}
 
 
-def validate(adapter, plan, row, response, paths):
+def validate(adapter, config, row, response, paths):
     """Check one response; with a catalog, every beam must be a catalog item."""
     result = adapter.beams(response, row["request_id"])
-    check(result, plan["workload"], plan["vocab_size"])
+    check(result, config.workload, config.vocab_size)
     if paths is not None and catalog.outside(result, paths):
         raise ValueError(f"{row['request_id']}: returned beams outside the catalog")
     return result
 
 
-def check_server(adapter, plan, port, runtime):
+def check_server(adapter, config, port, runtime):
     """The server must run the mounted source, hold its weights in the scenario's
     dtype and hold the managed catalog."""
     adapter.check_source(runtime)
-    if runtime["dtype"] != plan["dtype"]:
+    dtype = config.scenario.model.dtype
+    if runtime["dtype"] != dtype:
         raise RuntimeError(
-            f"the server holds {runtime['dtype']} weights, not the scenario's "
-            f"{plan['dtype']}"
+            f"the server holds {runtime['dtype']} weights, not the scenario's {dtype}"
         )
-    if plan["catalog"]:
+    if config.catalog_items is not None:
         status = adapter.catalog_status(port, runtime)
-        expected = plan["catalog"]
         catalog.check_status(
-            status, source=expected["server_source"], items=expected["items"]
+            status, source=adapter.catalog_source, items=config.catalog_items
         )
 
 
-def level_blocks(rows, plan):
-    """{concurrency: its requests}: workload.json holds one block per level, in
-    level order (bench.config.make_workload)."""
-    size = plan["warmups"] + max(plan["requests"], plan["profile_requests"])
-    return {k: rows[i * size : (i + 1) * size] for i, k in enumerate(plan["levels"])}
+def level_blocks(rows, config):
+    """{concurrency: its requests}: workload.json holds one block per
+    concurrency, in order (bench.config.make_workload)."""
+    size, levels = requests_per_level(config.scenario.runs), config.workload.levels
+    return {k: rows[i * size : (i + 1) * size] for i, k in enumerate(levels)}
 
 
 def level_order(levels, name):
-    """Concurrency levels in the order run `name` measures them. clean_i rotates
-    them by i - 1, so no level always runs first. The run "profile" sends one
+    """The concurrency values in the order run `name` measures them. round_i
+    rotates them by i - 1, so none always runs first. The run "profile" sends one
     request at a time, because its trace attributes GPU time per request;
-    "load_profile" measures the largest level, attributing GPU time per step."""
+    "load_profile" measures the largest, attributing GPU time per step."""
     if name == "profile":
         return [1]
     if name == "load_profile":
@@ -247,23 +247,26 @@ def level_order(levels, name):
     return levels[shift:] + levels[:shift]
 
 
-def run(plan, name, profile, work=Path("/work")):
+def run(config, name, profile, work=Path("/work")):
     directory = work / name
     directory.mkdir(parents=True, exist_ok=True)
-    adapter, workload = adapters.get(plan["engine"]), plan["workload"]
-    warmups = plan["warmups"]
-    blocks = level_blocks(read_json(plan["workload_path"]), plan)
+    adapter, workload = engines.get(config.solution.engine), config.workload
+    runs = config.scenario.runs
+    warmups = runs.warmups
+    blocks = level_blocks(read_json(work / "workload.json"), config)
     mode = PROFILES[name] if profile else ""
-    count = plan["profile_requests"] if profile else plan["requests"]
+    count = runs.profile_requests if profile else runs.requests
     if mode == "steps":  # each client sends profile_requests, as far as the block goes
-        top = max(plan["levels"])
-        count = min(top * count, max(plan["requests"], plan["profile_requests"]))
+        top = max(workload.levels)
+        count = min(top * count, max(runs.requests, runs.profile_requests))
     paths = None
-    if plan["catalog"]:
-        data = Path(plan["catalog"]["path"]).read_bytes()
-        shape = {key: workload[key] for key in ("output_tokens", "beam_width")}
-        paths, _ = catalog.parse(data, **shape, vocab_size=plan["vocab_size"])
-    order = level_order(plan["levels"], name)
+    if config.catalog_items is not None:
+        data = (work / "catalog.jsonl").read_bytes()
+        shape = dict(
+            output_tokens=workload.output_tokens, beam_width=workload.beam_width
+        )
+        paths, _ = catalog.parse(data, **shape, vocab_size=config.vocab_size)
+    order = level_order(workload.levels, name)
     result = {"run": name, "profile": profile, "order": order, "levels": []}
     result.update(machine())
     if profile:
@@ -273,28 +276,27 @@ def run(plan, name, profile, work=Path("/work")):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    argv, env = launch(adapter, plan, port, mode, name)
+    argv, env = launch(adapter, config, port, mode, name)
     pid = None
     with (directory / "server.log").open("w") as log:
         options = {"stdout": log, "stderr": subprocess.STDOUT, "env": env}
         process = subprocess.Popen(argv, start_new_session=True, **options)
     try:
         wait_ready(process, port, adapter.ready)
-        os.sched_setaffinity(0, plan["client_cpus"])  # client threads inherit it
+        os.sched_setaffinity(0, config.resources.client_cpus)  # threads inherit it
         counters, outputs = {}, {}
         for concurrency in order:
-            # Each level sends its own requests; the run "profile", the first level's.
-            rows = (
-                blocks[plan["levels"][0]] if mode == "requests" else blocks[concurrency]
-            )
+            # Each concurrency sends its own requests; the run "profile", the first's.
+            first_block = blocks[workload.levels[0]]
+            rows = first_block if mode == "requests" else blocks[concurrency]
             measured = rows[warmups : warmups + count]
             warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
             for row, (response, *_) in zip(rows[:warmups], warm):
-                validate(adapter, plan, row, response, paths)
+                validate(adapter, config, row, response, paths)
             # Also takes the warmups' request and step times, which are dropped.
             before = call(port, "GET", "/pilot/runtime")
             pid = before["pid"]
-            check_server(adapter, plan, port, before)
+            check_server(adapter, config, port, before)
             if profile:
                 adapter.profile(port, start=True)
             first = time.perf_counter()
@@ -310,11 +312,11 @@ def run(plan, name, profile, work=Path("/work")):
                     counters[key] = counters.get(key, 0) + delta
             # Output checks run after timing so they never delay the next request.
             outputs[str(concurrency)] = {
-                row["request_id"]: validate(adapter, plan, row, response, paths)
+                row["request_id"]: validate(adapter, config, row, response, paths)
                 for row, (response, *_) in zip(measured, timed)
             }
             latency = [(replied - sent) / 1e6 for _, sent, replied in timed]
-            phases, steps = timeline(measured, timed, after, workload["output_tokens"])
+            phases, steps = timeline(measured, timed, after, workload.output_tokens)
             del after["requests"], after["steps"]  # kept per level, not in runtime
             result["levels"].append(
                 {
@@ -326,29 +328,29 @@ def run(plan, name, profile, work=Path("/work")):
                 }
             )
         # Once, after timing: the server's full settings and its environment.
-        config = call(port, "GET", "/pilot/config")
-        adapter.check_counters(plan, counters, count * len(order), after)
+        server_config = call(port, "GET", "/pilot/config")
+        adapter.check_counters(config, counters, count * len(order), after)
         result.update(runtime=after, counters=counters, catalog_beams=None)
-        result.update(config=config, server_command=argv)
+        result.update(config=server_config, server_command=argv)
         if paths is not None:
-            beams = count * len(order) * workload["beam_width"]
+            beams = count * len(order) * workload.beam_width
             result["catalog_beams"] = beams
     finally:
         stop(process, pid, profile)
     if profile:
         subprocess.run(export(name), check=True)
     write_json(directory / "result.json", result)
-    if not profile:  # the comparison reads these; compact because they are large
+    if not profile:  # the summary reads these; compact because they are large
         write_json(directory / "outputs.json", outputs, indent=None)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--run", required=True)
     parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
-    run(read_json(args.plan), args.run, args.profile)
+    run(RunConfig.read(args.config), args.run, args.profile)
 
 
 if __name__ == "__main__":

@@ -11,9 +11,12 @@ from argparse import Namespace
 import pytest
 import run_benchmark as runner
 import yaml
-from bench import adapters
 from bench import config as configs
+from bench import engines
 from bench.common import read_json
+from bench.config import Workload
+from bench.engines.sglang import TRIE_HEAD_FILE, prefill_tokens
+from tests.fixtures import run_config
 
 CONFIGS = ("sid_gr", "sglang", "sglang_beam_search_new", "vedantjh2_sglang")
 SID, PUBLIC, LEGACY, VEDANTJH2 = CONFIGS
@@ -100,12 +103,12 @@ INVALID_SCENARIO = [
     ({"workload.beam_width": 1.5}, "workload.beam_width must be int, not float"),
     ({"workload.concurrency": 0}, "workload.concurrency must be >= 1"),
     ({"workload.concurrency": []}, "workload.concurrency must be >= 1"),
-    ({"workload.concurrency": [2, 2]}, "a list of distinct such levels"),
+    ({"workload.concurrency": [2, 2]}, "a list of distinct such values"),
     ({"workload.concurrency": True}, "workload.concurrency must be int or list"),
     ({"workload.concurrency": [1, "2"]}, r"workload.concurrency\[1\] must be int"),
     ({"workload.min_context_length": 0}, "between 1 and context_length"),
     ({"workload.min_context_length": 4096}, "between 1 and context_length"),
-    ({"runs.clean": "3"}, "runs.clean must be int, not str"),
+    ({"runs.rounds": "3"}, "runs.rounds must be int, not str"),
     ({"model.revision": "main"}, "40-character Hub commit"),
     ({"model.dtype": "half"}, "model.dtype must be one of bfloat16, float16"),
     ({"catalog": {"sha256": "abc"}}, "catalog.sha256 must be a 64-character"),
@@ -130,7 +133,7 @@ def test_a_scenario_with_a_missing_section_fails(tmp_path):
 
 def test_yaml_duplicate_keys_and_syntax_errors_fail(tmp_path):
     file = tmp_path / "config.yaml"
-    file.write_text(path("qwen3_0_6b").read_text() + "\nruns:\n  clean: 1\n")
+    file.write_text(path("qwen3_0_6b").read_text() + "\nruns:\n  rounds: 1\n")
     with pytest.raises(ValueError, match=r"duplicate keys \['runs'\]"):
         configs.load_scenario(file)
     file.write_text("workload: [1,\n")
@@ -180,13 +183,12 @@ def test_native_beam_search_may_use_the_overlap_scheduler(tmp_path, name):
 
 
 def test_adapters_size_batches_for_the_requests_in_flight():
-    workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
-    workload.update(concurrency=3, seed=7)
-    plan = {"workload": workload, "env": {}, "catalog": None, "server_cpus": [4, 5]}
-    plan["levels"] = [3]
-    plan["dtype"] = "bfloat16"
+    workload = Workload(
+        context_length=2048, beam_width=256, output_tokens=3, concurrency=3, seed=7
+    )
+    config = run_config("sglang", workload=workload)
     # Every beam holds a request slot; beam-search-new also keeps the request's.
-    assert adapters.get("sglang").server_args(plan, 8000) == {
+    assert engines.get("sglang").server_args(config, 8000) == {
         "model_path": "/model",
         "host": "127.0.0.1",
         "port": 8000,
@@ -196,45 +198,55 @@ def test_adapters_size_batches_for_the_requests_in_flight():
         "cuda_graph_bs_prefill": [2048, 4096, 6144],
         "max_running_requests": 3 * 257,
     }
-    env = adapters.get("sid-gr").server(plan, 8000, profile=False)[1]
+    env = engines.get("sid-gr").server(config, 8000, profile=False)[1]
     assert env["GR_MAX_BATCH_SIZE"] == env["GR_BEAM_KV_POOL_CAPACITY"] == "3"
     assert env["GR_CONTEXT_KV_POOL_CAPACITY"] == "3"
     assert env["GR_DECODE_CUDA_GRAPH_BATCH_BUCKETS"] == "1,2,3"
     assert env["OMP_NUM_THREADS"] == env["MKL_NUM_THREADS"] == "2"  # server CPUs
-    plan["env"] = {"OMP_NUM_THREADS": "1"}  # a solution may choose its own
-    env = adapters.get("sglang").server(plan, 8000, profile=False)[1]
+    # A solution may choose its own thread counts.
+    config = run_config("sglang", workload=workload, env={"OMP_NUM_THREADS": "1"})
+    env = engines.get("sglang").server(config, 8000, profile=False)[1]
     assert env["OMP_NUM_THREADS"] == "1" and env["MKL_NUM_THREADS"] == "2"
 
 
-def test_one_deployment_serves_every_concurrency_level():
-    workload = {"context_length": 2048, "beam_width": 256, "output_tokens": 3}
-    workload.update(concurrency=[1, 3], seed=7)
-    plan = {"workload": workload, "levels": [1, 3], "env": {}, "catalog": None}
-    plan.update(server_cpus=[4, 5], dtype="bfloat16")
-    settings = adapters.get("vedantjh2-sglang").server_args(plan, 8000)
+def test_one_deployment_serves_every_concurrency():
+    workload = Workload(
+        context_length=2048,
+        beam_width=256,
+        output_tokens=3,
+        concurrency=[1, 3],
+        seed=7,
+    )
+    config = run_config("vedantjh2-sglang", workload=workload)
+    settings = engines.get("vedantjh2-sglang").server_args(config, 8000)
     assert settings["cuda_graph_bs_decode"] == [256, 512, 768]
     assert settings["max_running_requests"] == 3 * 257
-    env = adapters.get("sid-gr").server(plan, 8000, profile=False)[1]
+    config = run_config("sid-gr", workload=workload)
+    env = engines.get("sid-gr").server(config, 8000, profile=False)[1]
     assert env["GR_MAX_BATCH_SIZE"] == "3" and env["GR_CONTEXT_LEN"] == "2048"
 
 
 def test_variable_lengths_get_prefill_graphs_within_one_and_a_half_times():
-    workload = {"context_length": 2048, "min_context_length": 256}
-    sizes = adapters.prefill_tokens(workload, 2)
+    fixed = Workload(
+        context_length=2048, beam_width=4, output_tokens=3, concurrency=2, seed=0
+    )
+    variable = dataclasses.replace(fixed, min_context_length=256)
+    sizes = prefill_tokens(variable, 2)
     assert sizes == [256, 384, 576, 864, 1296, 1944, 2916, 4096]
     assert all(b <= 1.5 * a for a, b in zip(sizes, sizes[1:]))
-    assert adapters.prefill_tokens({"context_length": 2048}, 2) == [2048, 4096]
+    assert prefill_tokens(fixed, 2) == [2048, 4096]
 
 
 def test_sglang_adapters_set_only_the_settings_solutions_may_not():
-    workload = {"context_length": 8, "beam_width": 2, "output_tokens": 3}
-    plan = {"workload": {**workload, "concurrency": 1, "seed": 0}, "dtype": "float16"}
-    plan["catalog"] = {"server_source": "/work/catalog.pkl"}
-    plan["levels"] = [1]
-    for adapter in adapters.ADAPTERS.values():
-        settings = adapter.server_args(plan, 8000)
+    workload = Workload(
+        context_length=8, beam_width=2, output_tokens=3, concurrency=1, seed=0
+    )
+    config = run_config(workload=workload, dtype="float16", catalog_items=4)
+    for name in engines.ENGINES:
+        adapter = engines.get(name)
+        settings = adapter.server_args(config, 8000)
         assert settings is None or settings.keys() <= adapter.managed_settings
-    legacy = adapters.get("sglang-beam-search-new").server_args(plan, 8000)
+    legacy = engines.get("sglang-beam-search-new").server_args(config, 8000)
     assert legacy["beam_search_constraint_dict"] == "/work/catalog.pkl"
 
 
@@ -337,7 +349,7 @@ def arguments(tmp_path, catalog=None):
     (model / "config.json").write_text(
         json.dumps({"torch_dtype": "bfloat16", "vocab_size": 5000})
     )
-    for name in ("model.safetensors", adapters.TRIE_HEAD_FILE):
+    for name in ("model.safetensors", TRIE_HEAD_FILE):
         (model / name).write_text("")
     resources = configs.Resources(list(range(10)), [10], "0")
     return Namespace(model=model, catalog=catalog, resources=resources)
@@ -376,7 +388,8 @@ def test_docker_command_isolates_labels_and_mounts(tmp_path):
     assert f"src={tmp_path}/.work/model,dst=/model,readonly" in joined
     assert f"src={tmp_path}/src,dst=/sglang,readonly" in joined
     assert f"src={runner.BENCH},dst=/benchmark-tools/bench,readonly" in joined
-    assert argv[-5:] == ["--plan", "/work/plan.json", "--run", "profile", "--profile"]
+    expected = ["--config", "/work/run_config.json", "--run", "profile", "--profile"]
+    assert argv[-5:] == expected
 
 
 def write_catalog(tmp_path):
@@ -404,25 +417,21 @@ def prepare(tmp_path, name):
     return run, info
 
 
-def test_prepare_writes_plan_and_vedantjh2_model_view(tmp_path):
+def test_prepare_writes_the_run_config_and_vedantjh2_model_view(tmp_path):
     run, info = prepare(tmp_path, VEDANTJH2)
     assert info["items"] == 256 and info["name"] == "items.jsonl"
-    plan = read_json(run.work / "plan.json")
-    assert plan["catalog"]["server_source"] == "/model/trie_output_head.safetensors"
-    assert plan["requests"] == 200 and len(read_json(run.work / "workload.json")) == 210
-    # The container gets plain JSON generated from the typed configs.
-    assert plan["workload"] == {
-        **raw("qwen3_0_6b")["workload"],
-        "min_context_length": None,
-    }
-    assert plan["levels"] == [1]
-    assert plan["server_settings"] == raw(VEDANTJH2)["server_settings"]
-    assert plan["server_cpus"] == list(range(10)) and plan["client_cpus"] == [10]
-    assert plan["dtype"] == "bfloat16"
+    # The container reads the same typed configuration, as JSON.
+    config = configs.RunConfig.read(run.work / "run_config.json")
+    assert config.scenario == run.scenario and config.solution == run.solution
+    assert config.resources.server_cpus == list(range(10))
+    assert config.resources.client_cpus == [10]
+    assert config.vocab_size == 5000 and config.catalog_items == 256
+    assert len(read_json(run.work / "workload.json")) == 210
+    assert run.adapter.catalog_source == "/model/trie_output_head.safetensors"
     view = run.work / "model"
     assert (view / "config.json").readlink().as_posix() == "/model-source/config.json"
     # The trie output head is generated, not linked to the original checkpoint.
-    assert not (view / adapters.TRIE_HEAD_FILE).is_symlink()
+    assert not (view / TRIE_HEAD_FILE).is_symlink()
 
 
 def test_prepare_converts_the_catalog_to_each_engines_native_form(tmp_path):
@@ -433,7 +442,7 @@ def test_prepare_converts_the_catalog_to_each_engines_native_form(tmp_path):
         directory = tmp_path / name
         directory.mkdir()
         run, _ = prepare(directory, name)
-        assert read_json(run.work / "plan.json")["catalog"]["server_source"] == source
+        assert run.adapter.catalog_source == source
         assert (run.work / native).is_file()
 
 
@@ -441,10 +450,11 @@ def test_vedantjh2_without_a_catalog_serves_the_checkpoint_as_is(tmp_path):
     run = make_run(tmp_path, VEDANTJH2, tmp_path)
     run.work.mkdir(parents=True)
     runner.prepare(arguments(tmp_path), run, {"vocab_size": 5000}, [])
-    assert read_json(run.work / "plan.json")["catalog"] is None
+    config = configs.RunConfig.read(run.work / "run_config.json")
+    assert config.catalog_items is None
     assert not (run.work / "model").exists()
     argv = runner.docker_command(
-        arguments(tmp_path), run, tmp_path / "c", "img", "bench-x", "clean_1"
+        arguments(tmp_path), run, tmp_path / "c", "img", "bench-x", "round_1"
     )
     joined = " ".join(argv)
     assert f"src={tmp_path}/model,dst=/model,readonly" in joined
@@ -452,7 +462,7 @@ def test_vedantjh2_without_a_catalog_serves_the_checkpoint_as_is(tmp_path):
 
 
 def fake_sources(tmp_path):
-    for adapter in adapters.ADAPTERS.values():
+    for adapter in map(engines.get, engines.ENGINES):
         entry = tmp_path / adapter.mount.strip("/") / adapter.entry
         entry.parent.mkdir(parents=True, exist_ok=True)
         entry.write_text("")
@@ -473,7 +483,7 @@ def command(tmp_path, *engine_names):
 
 def test_dry_run_prints_every_phase_and_writes_nothing(tmp_path, capsys):
     assert runner.main(command(tmp_path, SID)) == 0
-    # three clean runs, one profile
+    # three rounds, one profile
     assert capsys.readouterr().out.count("docker run") == 4
     assert not (tmp_path / "out").exists()
 
@@ -501,7 +511,7 @@ def test_dry_run_prints_what_the_benchmark_adds(tmp_path, capsys):
     # Only variables the benchmark manages, and the thread defaults: nothing from
     # this shell and nothing the solution already sets.
     for name, engine in ((SID, "sid-gr"), (LEGACY, "sglang-beam-search-new")):
-        allowed = adapters.get(engine).managed_env | {
+        allowed = engines.get(engine).managed_env | {
             "OMP_NUM_THREADS",
             "MKL_NUM_THREADS",
         }
@@ -581,13 +591,13 @@ def test_every_engine_has_an_image_recipe_and_a_build_case():
     build = (runner.ROOT / "images/build.sh").read_text()
     cases = re.findall(r"^  ([\w| -]+)\)$", build, re.M)
     built = {name.strip() for case in cases for name in case.split("|")}
-    assert built == set(adapters.ADAPTERS)
-    for adapter in adapters.ADAPTERS.values():
+    assert built == set(engines.ENGINES)
+    for adapter in map(engines.get, engines.ENGINES):
         if adapter.recipe.startswith("images/"):
             assert (runner.ROOT / adapter.recipe).is_file(), adapter.name
 
 
-def test_comparison_is_against_public_sglang_by_default():
+def test_summary_is_against_public_sglang_by_default():
     assert runner.reference_name(Namespace(reference=None), [SID, PUBLIC]) == PUBLIC
     assert runner.reference_name(Namespace(reference=None), [SID, LEGACY]) == SID
     assert runner.reference_name(Namespace(reference=SID), [SID, PUBLIC]) == SID
@@ -614,7 +624,7 @@ def test_a_load_profile_follows_with_several_levels_unless_steps_overlap():
 
     def run(name, **settings):
         return SimpleNamespace(
-            adapter=adapters.get(name),
+            adapter=engines.get(name),
             solution=SimpleNamespace(server_settings=settings),
         )
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """results.json.gz: everything one engine's run measured and observed, saved
-before any report is written. report.md, comparison.md and their charts are
+before any report is written. report.md, summary.md and their charts are
 rendered from these files alone, so the same results always give the same
 reports, and the reports can be rendered again without the GPU, after a
 template change for example:
@@ -13,11 +13,11 @@ import dataclasses
 import gzip
 import json
 
-from bench import compare, report
 from bench.config import Scenario, Solution, parse
+from bench.outputs import report, summary
 
 NAME = "results.json.gz"
-FORMAT = 1  # raised when saved fields change, so old results fail loudly
+FORMAT = 2  # raised when saved fields change, so old results fail loudly
 
 
 def save(directory, results):
@@ -64,20 +64,20 @@ def engines(output):
     return {path.parent.name: load(path.parent) for path in paths}
 
 
-def write_comparison(output, found):
-    """Render comparison.md and its chart in output from the engines' results
+def write_summary(output, found):
+    """Render summary.md and its chart in output from the engines' results
     (engines()), in their command-line order."""
     first = next(iter(found.values()))
     names, reference = first["solutions"], first["reference"]
     missing = sorted(set(names) - found.keys())
     if missing:
         raise ValueError(f"{output} has no results of {missing}")
-    write(output, compare.render([found[name] for name in names], names, reference))
+    write(output, summary.render([found[name] for name in names], names, reference))
 
 
 def render(output):
     """Render every report under output: one engine's in output itself, or each
-    engine's in its directory and the comparison across them."""
+    engine's in its directory and the summary across them."""
     if (output / NAME).is_file():
         write_report(output)
         return
@@ -86,4 +86,4 @@ def render(output):
         raise ValueError(f"no {NAME} in {output} or its directories")
     for name, results in found.items():
         write(output / name, report.render(results))
-    write_comparison(output, found)
+    write_summary(output, found)

@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""comparison.md and its chart, across the engines measured in one invocation,
-from their saved results; templates/comparison.md.j2 holds its words and tables.
+"""summary.md and its chart, across the engines measured in one invocation,
+from their saved results; templates/summary.md.j2 holds its words and tables.
 
 All engines receive identical requests at every concurrency level, so beams are
 compared request by request with a reference engine (public SGLang by default),
-at the same level, using the first clean run of each.
+at the same concurrency, using the first round of each.
 """
 
-from bench import adapters, chart, template
-from bench.report import (
+from bench import engines
+from bench.outputs import chart, template
+from bench.outputs.report import (
     PARTS,
     RESAMPLES,
     interval,
@@ -64,7 +65,7 @@ def level_view(everything, names, reference):
         base, rows = summaries(ref)[k], []
         for name, results in zip(names, everything):
             found = summaries(results)[k]
-            records = level_records(results["clean"])[k]
+            records = level_records(results["rounds"])[k]
             steps = step_summary(records)
             rows.append(
                 {
@@ -103,7 +104,7 @@ def gpu_rows(everything, names):
 
 
 def view(everything, names, reference):
-    """Everything comparison.md shows, as plain numbers and names; everything
+    """Everything summary.md shows, as plain numbers and names; everything
     holds each engine's saved results, in command-line order."""
     first = everything[0]
     workload = first["scenario"].workload
@@ -115,14 +116,14 @@ def view(everything, names, reference):
             agreement.append({"name": name, "k": k, **found})
     return {
         "engines": [
-            {"name": name, "title": adapters.get(results["solution"].engine).title}
+            {"name": name, "title": engines.get(results["solution"].engine).title}
             for name, results in zip(names, everything)
         ],
         "reference": reference,
         "model": first["model"],
-        "dtype": first["clean"][0]["runtime"]["dtype"],
-        "gpu": first["clean"][0]["gpu"],
-        "driver": first["clean"][0]["driver"],
+        "dtype": first["rounds"][0]["runtime"]["dtype"],
+        "gpu": first["rounds"][0]["gpu"],
+        "driver": first["rounds"][0]["driver"],
         "workload": workload,
         "levels": workload.levels,
         "runs": first["scenario"].runs,
@@ -134,7 +135,7 @@ def view(everything, names, reference):
         "versions": [
             {
                 "name": name,
-                "title": adapters.get(results["solution"].engine).title,
+                "title": engines.get(results["solution"].engine).title,
                 "source": results["manifest"]["source"],
                 "image": results["manifest"]["image"]["id"],
             }
@@ -179,13 +180,11 @@ def load_chart(found):
 
 
 def render(everything, names, reference):
-    """{file name: text} of comparison.md and its chart."""
+    """{file name: text} of summary.md and its chart."""
     found = view(everything, names, reference)
     files = {}
     svg = load_chart(found)
     if svg:
         files["load.svg"] = svg
-    text = template.render(
-        "comparison.md.j2", **found, charts=files.keys(), parts=PARTS
-    )
-    return {"comparison.md": text, **files}
+    text = template.render("summary.md.j2", **found, charts=files.keys(), parts=PARTS)
+    return {"summary.md": text, **files}

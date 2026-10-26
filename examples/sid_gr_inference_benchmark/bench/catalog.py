@@ -8,7 +8,7 @@ Token IDs are model token IDs. It is part of what is measured: every solution
 in a run is constrained to exactly these token paths, and every returned beam is
 checked against them. Each engine's native storage format is solution-specific
 and lives with the engine's adapter (`Adapter.convert_catalog` in
-bench/adapters.py). `synthesize` writes a seeded synthetic catalog
+bench/engines). `synthesize` writes a seeded synthetic catalog
 (tools/make_catalog.py).
 """
 

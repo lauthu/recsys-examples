@@ -16,7 +16,7 @@ import math
 import re
 from html import escape
 
-from bench.trace import NO_PHASE
+from bench.outputs.trace import NO_PHASE
 
 PHASE_COLORS = ("#465da5", "#97558e", "#b87838", "#549250", "#3f8f9b", "#a5544a")
 # Related families share a hue: attention teal, top-k/sort/softmax orange,

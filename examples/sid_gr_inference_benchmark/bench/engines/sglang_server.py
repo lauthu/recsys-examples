@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Start SGLang's own HTTP server with the benchmark's declared patches.
 
-    BENCH_ENGINE=<engine> python3 -m bench.server_sglang --plan /work/plan.json --port PORT
+    BENCH_ENGINE=<engine> python3 -m bench.engines.sglang_server --config /work/run_config.json --port PORT
 
 Compared with the image's native server (`python3 -m sglang.launch_server`):
 
@@ -21,7 +21,7 @@ Different, and nothing else
     serves the resolved ServerArgs and the environment; the client reads it
     once, after the measured requests.
   - PATCHES: the scheduler-process methods listed there. Hooks follow the rules
-    in bench/patching.py: original arguments and results, no GPU sync.
+    in bench/engines/patching.py: original arguments and results, no GPU sync.
   - Latency runs keep only the "always" entries, which count forwards, read
     state and note when each engine step is scheduled, launched and finished
     (time.perf_counter_ns, a few microseconds per step). /pilot/runtime hands
@@ -36,14 +36,14 @@ import argparse
 import contextlib
 import functools
 import importlib.metadata
-import json
 import os
 import threading
 import time
 from pathlib import Path
 
-from bench import adapters
-from bench.patching import Patch, apply, configuration
+from bench import engines
+from bench.config import RunConfig
+from bench.engines.patching import Patch, apply, configuration
 
 ENGINE = os.environ.get("BENCH_ENGINE")
 # What the profiled process marks: each request ("requests") or, under load, each
@@ -51,7 +51,7 @@ ENGINE = os.environ.get("BENCH_ENGINE")
 MARKS = os.environ.get("BENCH_PROFILE", "0")
 PROFILE = MARKS != "0"
 # The engine's code paths (Adapter.features) decide which patches apply.
-FEATURES = adapters.get(ENGINE).features if ENGINE else frozenset()
+FEATURES = engines.get(ENGINE).features if ENGINE else frozenset()
 TRIE_HEAD = "trie_head" in FEATURES
 PACKAGES = (
     "sglang-kernel torch triton flashinfer-python nvidia-cutlass-dsl transformers"
@@ -450,11 +450,11 @@ def open_window(original):
 
         number = next(_windows)
         _window[:] = [number, torch.cuda.nvtx.range_start(f"bench/step:{number}")]
-        plan = original(self, *args, **kwargs)
-        if plan.batch_to_run is None:  # an idle iteration: the trace drops it
+        chosen = original(self, *args, **kwargs)
+        if chosen.batch_to_run is None:  # an idle iteration: the trace drops it
             torch.cuda.nvtx.range_end(_window[1])
             _window.clear()
-        return plan
+        return chosen
 
     return wrapped
 
@@ -668,17 +668,20 @@ def run_scheduler_process(*args, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
-    plan = json.loads(args.plan.read_text())
+    config = RunConfig.read(args.config)
 
     from sglang.srt.entrypoints import http_server
     from sglang.srt.server_args import ServerArgs
     from sglang.srt.utils import kill_process_tree
 
-    adapter = adapters.get(plan["engine"])
-    settings = {**plan["server_settings"], **adapter.server_args(plan, args.port)}
+    adapter = engines.get(config.solution.engine)
+    settings = {
+        **config.solution.server_settings,
+        **adapter.server_args(config, args.port),
+    }
     server_args = ServerArgs(**settings)
     if server_args.tp_size != 1:
         raise ValueError("NVTX phases need tp_size=1")

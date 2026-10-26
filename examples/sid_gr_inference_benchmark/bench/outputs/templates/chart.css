@@ -1,4 +1,4 @@
-/* Styles of the charts that bench/chart.py draws. Each SVG carries a copy, since
+/* Styles of the charts that bench/outputs/chart.py draws. Each SVG carries a copy, since
    Markdown viewers show SVGs as images, which load no external stylesheets.
    Colors follow the viewer's color scheme. Series colors are categorical slots,
    .l0 to .l7 for lines and .d0 to .d7 for dots and fills, in fixed order,

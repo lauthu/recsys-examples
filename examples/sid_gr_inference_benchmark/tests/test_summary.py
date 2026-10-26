@@ -3,7 +3,7 @@
 import re
 import xml.etree.ElementTree as ET
 
-from bench import chart, compare
+from bench.outputs import chart, summary
 from tests.test_report import LOAD_TRACE, SVG, at, levels, saved, section
 
 A, B, C, D = ([n, 2, 3] for n in (1, 2, 3, 4))
@@ -15,7 +15,7 @@ def beams(*paths):
 
 def test_identical_outputs_agree_completely():
     outputs = {"r": beams(A, B, C)}
-    assert compare.parity(outputs, outputs) == {
+    assert summary.parity(outputs, outputs) == {
         "top1": 1.0,
         "overlap": 1.0,
         "overlap_min": 1.0,
@@ -30,7 +30,7 @@ def test_parity_separates_order_membership_and_score():
         "r": [(B, -0.5), (A, -1.0), (C, -2.0), ([9, 9, 9], -3.0)],  # swap and replace
         "s": beams(A, B, C, D),
     }
-    found = compare.parity(reference, candidate)
+    found = summary.parity(reference, candidate)
     assert found["top1"] == 0.5  # request r starts with B
     assert found["overlap"] == (0.75 + 1.0) / 2  # three of four beams shared
     assert found["overlap_min"] == 0.75  # the worst request, r
@@ -44,17 +44,17 @@ def with_outputs(engine, paths, mean_ms, concurrency=(1,)):
     per_level = (
         mean_ms if isinstance(mean_ms, dict) else dict.fromkeys(concurrency, mean_ms)
     )
-    for run in found["clean"]:
+    for run in found["rounds"]:
         run["levels"] = [levels(k, latency=[per_level[k]] * 4)[0] for k in concurrency]
     found["outputs"] = {str(k): {"r": beams(*paths)} for k in concurrency}
     return found
 
 
 def text_of(everything, names, reference):
-    return compare.render(everything, names, reference)["comparison.md"]
+    return summary.render(everything, names, reference)["summary.md"]
 
 
-def test_comparison_tables_each_engine_against_the_reference():
+def test_summary_tables_each_engine_against_the_reference():
     reference = with_outputs("sid-gr", [A, B], 10.0)
     other = with_outputs("sglang-beam-search-new", [B, A], 15.0)
     names = ["sid_gr", "sglang_beam_search_new"]
@@ -80,7 +80,7 @@ def test_the_change_against_the_reference_is_paired_by_request():
     # paired change is +100% in every resample.
     reference = with_outputs("sglang", [A, B], 10.0)
     candidate = with_outputs("vedantjh2-sglang", [A, B], 10.0)
-    for ref_run, run, offset in zip(reference["clean"], candidate["clean"], (0, 5)):
+    for ref_run, run, offset in zip(reference["rounds"], candidate["rounds"], (0, 5)):
         latency = [10.0 + offset + i for i in range(20)]
         ref_run["levels"] = levels(1, latency=latency)
         run["levels"] = levels(1, latency=[2 * ms for ms in latency])
@@ -102,11 +102,11 @@ def test_the_reference_can_be_any_engine():
     assert "| sid_gr | SID-GR | example/engine `cccccccccccc` |" in text
 
 
-def test_comparison_with_several_levels_tables_and_charts_each():
+def test_summary_with_several_levels_tables_and_charts_each():
     first = with_outputs("sglang", [A, B], {1: 10.0, 4: 20.0}, concurrency=(1, 4))
     second = with_outputs("vedantjh2-sglang", [B, A], 20.0, concurrency=(1, 4))
-    files = compare.render([first, second], ["sglang", "vedantjh2"], "sglang")
-    text = files["comparison.md"]
+    files = summary.render([first, second], ["sglang", "vedantjh2"], "sglang")
+    text = files["summary.md"]
     assert "### Concurrency 1" in text and "### Concurrency 4" in text
     # Against the reference at the same level: +100% at 1, +0% at 4.
     assert text.count("| +100.0% (+100.0% to +100.0%) |") == 1
@@ -119,12 +119,12 @@ def test_comparison_with_several_levels_tables_and_charts_each():
 
 
 def test_one_level_has_no_chart():
-    files = compare.render([with_outputs("sglang", [A, B], 10.0)], ["sglang"], "sglang")
-    assert set(files) == {"comparison.md"}
-    assert "load.svg" not in files["comparison.md"]
+    files = summary.render([with_outputs("sglang", [A, B], 10.0)], ["sglang"], "sglang")
+    assert set(files) == {"summary.md"}
+    assert "load.svg" not in files["summary.md"]
 
 
-def test_comparison_splits_the_latency_and_tables_the_steps():
+def test_summary_splits_the_latency_and_tables_the_steps():
     first = with_outputs("sglang", [A, B], {1: 10.0, 4: 20.0}, concurrency=(1, 4))
     second = with_outputs("vedantjh2-sglang", [B, A], 20.0, concurrency=(1, 4))
     text = text_of([first, second], ["sglang", "vedantjh2"], "sglang")

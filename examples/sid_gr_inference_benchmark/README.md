@@ -1,8 +1,8 @@
 # SID-GR inference benchmark
 
-Measures beam-search latency and throughput of HTTP inference servers under a
-closed-loop load and shows where each engine's GPU time goes. Every engine gets
-the same seeded requests, the same checks and the same report.
+Measures the beam-search latency and throughput of HTTP inference servers and
+shows where each engine's time goes. Every engine gets the same seeded
+requests, the same checks and the same report.
 
 | `engine` | Server | Beam-search API |
 | --- | --- | --- |
@@ -11,323 +11,269 @@ the same seeded requests, the same checks and the same report.
 | `sglang-beam-search-new` | SGLang [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891) | `use_beam_search` |
 | `vedantjh2-sglang` | SGLang [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788) | native `beam_width`; with a catalog, a trie output head |
 
-## Outputs
+## Quick start
 
-Each engine's directory receives:
-
-- `results.json.gz`: everything the run measured and observed: each request's latency and phases, the engine's steps, the beams returned, the trace summaries, the server's configuration and the manifest. The reports are rendered from it alone.
-- `report.md`: how the run was measured; throughput and latency (mean, p50, p95, p99) at each concurrency level with 95% confidence intervals, per server start and, when prompt lengths vary, by prompt length; where each request's time goes (queue, prefill, decode, HTTP and response) and the engine's prefill and decode steps; the GPU profiles, opening with how each was captured; the setup observed at runtime and the server's full configuration as it reported it: every setting, the process environment, any value the solution or the benchmark set that the server runs with differently, and how the profiled processes differed from the measured ones.
-- `load.svg`, with several concurrency levels: throughput and latency against concurrency.
-- `breakdown.svg`: where a request's time goes at each level.
-- `sunburst.svg`: server time per request, phase › section › kernel family, with the time no kernel runs (memcpy/memset only, or no GPU activity, in grey) in the phase and section it falls in. Open it in a browser to hover for details and click a slice to zoom in (the center or Esc zooms out).
-- `profile.nsys-rep`: the Nsight Systems trace of the requests profiled one at a time.
-- `load_profile.nsys-rep`, with several concurrency levels: the trace of the profile under load at the largest level, which the report summarizes per engine step (see What is measured).
-
-When several engines run in one invocation, `comparison.md` in the output
-directory puts them side by side: throughput and latency at each concurrency
-level with 95% confidence intervals, and the change in mean latency against the
-reference engine with its paired interval; where the time goes and the engine
-steps; kernel time per request; output agreement with the reference; and the
-versions. With several levels, its `load.svg` draws throughput, mean and p99
-latency against concurrency, one line per engine. Charts follow the viewer's
-light or dark color scheme; open one in a browser to hover for its numbers,
-which the tables also hold.
-
-```text
-OUTPUT/comparison.md             (several engines only)
-OUTPUT/load.svg                  (several engines and concurrency levels)
-OUTPUT/<engine>/results.json.gz  (one engine: these files go directly in OUTPUT)
-OUTPUT/<engine>/report.md
-OUTPUT/<engine>/load.svg         (several levels only)
-OUTPUT/<engine>/breakdown.svg
-OUTPUT/<engine>/sunburst.svg
-OUTPUT/<engine>/profile.nsys-rep
-OUTPUT/<engine>/load_profile.nsys-rep (several levels only)
-```
-
-The reports depend on `results.json.gz` alone, so the same results always
-render the same files. `bench/report.py` and `bench/compare.py` reduce the
-results to numbers; the templates in `bench/templates` (`report.md.j2`,
-`comparison.md.j2`) hold every word and table; `bench/chart.py` and
-`bench/sunburst.py` draw the charts, styled by `bench/templates/chart.css`. To
-render the reports again without Docker or the GPU, after changing a template
-for example:
-
-```bash
-python3 tools/render_reports.py OUTPUT
-```
-
-## Layout
-
-```text
-run_benchmark.py       host CLI: validates, starts containers, writes the outputs
-configs/
-  scenarios/<model>.yaml    what is measured: model pin and dtype, workload, run counts, optional catalog pin
-  solutions/<name>.yaml     how one engine is configured: source pin, environment, server settings
-images/                Dockerfiles and build.sh; dev branches are built from source
-bench/
-  adapters.py          one adapter per engine: how the benchmark talks to it; logic, no settings
-  config.py            typed Scenario, Solution and Resources classes, YAML loading, checkpoint and workload checks
-  provenance.py        source, model and image pins and identities
-  client.py            runs inside the container: server, requests, checks
-  server_*.py          launch the engine's own HTTP server; PATCHES lists every change
-  patching.py          the Patch table entry and how patches are applied and logged
-  catalog.py           the shared item catalog: parsing and beam membership checks
-  trace.py             Nsight Systems trace summaries
-  results.py           results.json.gz: saving, loading and rendering the reports from it
-  report.py compare.py the numbers of report.md and comparison.md
-  template.py          renders templates/: the reports' words and tables, the charts' styles
-  chart.py sunburst.py the charts
-tools/make_catalog.py  seeded synthetic catalogs (see Catalog filtering)
-tools/render_reports.py  renders the reports again from saved results
-tests/                 CPU-only tests
-```
-
-## Run
-
-Requirements: Linux, Python 3.10+ with PyYAML and Jinja2, Docker with the NVIDIA runtime, the
-checkpoint the scenario pins, each engine's source at its pinned commit and a local image
-built from [images/](images/README.md). The source is mounted read-only and the
-server must import it from the mount, so an image only has to supply the
-dependencies. A dev branch's image is built from its pinned commit and tagged
-with repository, branch and commit.
+Requirements: Linux; Python 3.10+ with PyYAML and Jinja2; Docker with the NVIDIA
+runtime; the checkpoint the scenario pins; each engine's source at its pinned
+commit; and a local image per engine, built from [images/](images/README.md).
 
 ```bash
 cd examples/sid_gr_inference_benchmark
+images/build.sh sglang                       # once per engine
 
-# Build the images once (see images/README.md)
-images/build.sh sglang
-images/build.sh sid-gr ../..
-images/build.sh sglang-beam-search-new /path/to/beam_new
-
-# One solution: public SGLang
 python3 run_benchmark.py --scenario configs/scenarios/qwen3_0_6b.yaml \
   --model /path/to/Qwen3-0.6B --output logs/sglang \
   --server-cpus 0-9 --client-cpus 10 --gpu 0 \
   --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang
-
-# Compare solutions; public SGLang is the reference unless --reference says otherwise
-python3 run_benchmark.py --scenario configs/scenarios/qwen3_0_6b.yaml \
-  --model /path/to/Qwen3-0.6B --output logs/compare \
-  --server-cpus 0-9 --client-cpus 10 --gpu 0 \
-  --solution configs/solutions/sglang.yaml /path/to/sglang sid-gr-bench:sglang \
-  --solution configs/solutions/sid_gr.yaml ../.. \
-    nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d \
-  --solution configs/solutions/sglang_beam_search_new.yaml /path/to/beam_new \
-    cswuyg-sglang:feature-beam_search_update_0801-df191d672f19
 ```
 
-For Qwen3-1.7B, pass `--scenario configs/scenarios/qwen3_1_7b.yaml`; for another
-model, copy a scenario and change its `model` pin. For throughput under load,
-give `workload.concurrency` a list of levels, and for variable prompt lengths set
-`workload.min_context_length`, as in `configs/scenarios/qwen3_0_6b_load.yaml`
-(see Concurrency levels and prompt lengths); the runner sizes each engine's
-batches and request slots from the scenario, so the solution files stay the same.
-The CPUs and the GPU come from the command line, so a scenario runs unchanged on
-another machine.
+- Repeat `--solution CONFIG SOURCE IMAGE` to compare engines in one invocation;
+  they run one after another on the same GPU.
+- `--reference NAME`: the engine the others are compared with (default: public
+  SGLang if it runs, else the first solution).
+- `--dry-run`: check the inputs and print what the benchmark adds to each
+  solution and the `docker run` commands, without running them.
+- `--allow-dirty`: run a source that differs from its pin; the report says so.
+- `python3 tools/render_reports.py OUTPUT`: render the reports again from the
+  saved results, without Docker or the GPU (after a template change, for example).
 
-`--dry-run` validates the configuration and prints, for each solution, what the
-benchmark adds to its `env` and `server_settings`, and the `docker run`
-commands; it does not hash the checkpoint or check the source pins. The output
-directory must be new or empty. JIT caches go to `.cache/<image>` next to the
-output directory (or `--cache-dir`) and are reused by later runs with the same
-image. If a run fails, `.work` keeps the container and server logs.
-Results are comparable only when every engine runs on the same machine, which
-the runner does one after another.
+## Outputs
 
-## What is measured
+```text
+OUTPUT/summary.md                      several engines: all of them side by side
+OUTPUT/load.svg                        several engines, several concurrency values
+OUTPUT/<engine>/report.md              one engine (with one engine, its files are in OUTPUT)
+OUTPUT/<engine>/results.json.gz
+OUTPUT/<engine>/load.svg               several concurrency values
+OUTPUT/<engine>/breakdown.svg
+OUTPUT/<engine>/sunburst.svg
+OUTPUT/<engine>/profile.nsys-rep
+OUTPUT/<engine>/load_profile.nsys-rep  several concurrency values
+```
 
-- **Workload:** seeded random token IDs without the model's special tokens, so every engine gets the same requests for the same model and seed; with `workload.min_context_length`, each prompt's length is drawn uniformly from `min_context_length` to `context_length`, seeded the same way.
-- **Latency and throughput:** `runs.clean` separate server processes, each measuring every level of `workload.concurrency` in turn: at each level, `runs.warmups` unmeasured and then `runs.requests` measured requests, each over a new loopback connection, from as many clients as the level: each sends its next request when its last one returns (closed loop; 1 means one at a time). The client times each request from JSON encoding to the parsed response; a level's requests/s is its measured requests over the time from their first send to their last reply.
-- **Confidence intervals:** 95% percentile intervals from a two-level bootstrap of each level's pooled requests (2,000 resamples): each resample draws the server processes with replacement, then the requests within each drawn process, so the intervals include the variation between processes as well as between requests. The draws depend only on the run and request counts, so every engine of an invocation gets the same draws and the change against the reference is paired request by request. A few processes show the variation between processes only roughly, and p99 rests on the slowest 1% of the requests: more processes narrow the first, more requests the second.
-- **Correctness:** every returned request must have `beam_width` distinct beams of `output_tokens` valid token IDs with finite scores in descending order. Scores are cumulative log-probabilities; SGLang's mean log-probability is multiplied by the beam length.
-- **Request phases and engine steps:** the launcher notes, on the clock the client uses (`time.perf_counter_ns`), when the server's request handler starts and returns and when each engine step is scheduled, launched and finished, with the requests, rows and prompt tokens it carried (SGLang: `get_next_batch_to_run` to `process_batch_result`; SID-GR: `_run_prefill` and `_run_decode_batch`). `/pilot/runtime` hands these over after each level. The client splits every measured request's latency into outside the server (client, connection and HTTP), queue (handler start to its first prefill step), prefill, decode (prefill end to its last decode step's end, including other requests' steps in between, or to the handler's return when a step sends its results before its own bookkeeping ends) and return (to the handler's return), and the reports show outside the server and return together as HTTP and response; a request without one prefill step and `output_tokens - 1` decode steps, or with times that disagree, fails the run. The hooks only read the clock: they never synchronize the GPU.
-- **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups, one at a time at any concurrency, so GPU time can be attributed to each request. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time, and the report counts the kernel and CUDA graph launch calls per request. Memory-only and no-GPU time go to the innermost phase and section range covering them, so the sunburst shows where the GPU waits, for example on eager kernel launches. With SGLang's overlap scheduler (`disable_overlap_schedule: false`) the server launches the next step before it processes the current step's results, so phases interleave in time; kernels still take the phase of their launch call. With several concurrency levels, one more server process runs under `nsys` at the largest level k: each of k clients sends `runs.profile_requests` requests, so requests share steps, and the server marks each engine step (`bench/step:<n>`, from choosing its batch to processing its results) instead of each request, with the step kind (`prefill`, `decode`) as its phase. The report gives per step kind the wall and kernel time per step, the kernel time per request amortized over the batch, the GPU time with no activity inside steps and between them, the sections, and the longest stretches with no GPU activity and where they fell. An engine that launches a step before the previous one's results are processed (SGLang's overlap scheduler) gets no profile under load: its steps cannot be told apart.
-- **Runtime facts:** attention backends, the weights' dtype (the run fails unless it is the scenario's `model.dtype`), package versions, CUDA graph use and, for SGLang, decode rows per forward (the beams of every request batched together) and whether the overlap scheduler ran are read from the running server, not inferred from settings. After the measured requests, the client also reads the server's full configuration once (`GET /pilot/config`): SGLang's resolved `ServerArgs`, SID-GR's `build_info`, and the server's environment, with the text values of names containing the word TOKEN, SECRET, PASSWORD or KEY redacted.
-- **Output agreement** (`comparison.md`): beams of the first clean run, request by request, against the reference engine (public SGLang by default, as in the SID-GR accuracy benchmark). Agreement with SGLang shows consistency, not correctness: reduced precision can flip near-tied beams.
-  It reports top-1 match, share of shared beams (mean and worst request), rank match and the largest score difference.
+- `report.md`: how the engine was measured; throughput and latency at each
+  concurrency; where a request's time goes; the engine's steps; the GPU
+  profiles and how they were captured; the setup; and how to reproduce it.
+- `summary.md`: the engines side by side, with the change in mean latency
+  against the reference, kernel time per request, output agreement and versions.
+- `results.json.gz`: everything measured and observed. The reports are rendered
+  from it alone, so the same results always give the same reports.
+- `load.svg`, `breakdown.svg`: throughput and latency against concurrency, and
+  where a request's time goes. `sunburst.svg`: GPU time per request by phase,
+  section and kernel family; open it in a browser to zoom.
+- `*.nsys-rep`: the Nsight Systems traces of the GPU profiles.
 
-The runner refuses to start while another benchmark container is running, and it
-fails if the source, benchmark code or model files change during the runs.
+## How it measures
 
-## Reproducibility
+1. **Rounds.** The runner measures each engine in `runs.rounds` rounds. Each
+   round starts a new container and server and measures every concurrency in
+   turn, starting at a different one each time. The results pool all rounds,
+   so they include the variation between server starts.
+2. **Load.** At concurrency *k*, *k* clients each send a request and, as soon
+   as its reply arrives, their next one (a closed loop). Each concurrency sends
+   `runs.warmups` unmeasured requests, then `runs.requests` measured ones; no
+   request is sent twice.
+3. **Latency and throughput.** Latency is the client's time from sending a
+   request to parsing its reply, over a new loopback HTTP connection.
+   Throughput is measured requests per second, from the first send to the last
+   reply in each round.
+4. **Statistics.** Mean, p50, p95 and p99, with 95% confidence intervals from a
+   bootstrap that resamples the rounds and then the requests within each
+   (2,000 resamples). Every engine gets the same draws, so its change against
+   the reference is paired request by request.
+5. **Where the time goes.** The launcher notes when the server's request handler
+   starts and returns and when each engine step runs, on the client's clock.
+   Each request's latency splits into queue, prefill, decode and HTTP and
+   response, and the steps give batch sizes and the share of time the engine
+   was busy.
+6. **GPU profiles.** One more server process runs under Nsight Systems and
+   captures `runs.profile_requests` requests one at a time, so GPU time is
+   attributed to each request's phases and sections. With several concurrency
+   values, another one captures the largest under load, per engine step (not
+   with SGLang's overlap scheduler, whose steps a trace cannot tell apart).
+   Captures hold only the measured requests (`cudaProfilerApi`); tracing slows
+   the server, so no latency comes from them.
+7. **Checks.** Every reply must hold `beam_width` distinct beams of
+   `output_tokens` valid tokens with finite scores in descending order; with a
+   catalog, every beam must be a catalog item. The server must run the mounted
+   source, hold its weights in the scenario's dtype and take the requested code
+   paths. Any failed check fails the run.
+8. **Output agreement** (`summary.md`): each engine's beams in its first round
+   against the reference's, request by request. Agreement shows consistency,
+   not correctness: reduced precision can flip near-tied beams.
 
-A run is pinned by configuration, and the runner refuses to start when a pin does not hold:
+## What the benchmark patches
 
-| Pin | Where | Checked |
-| --- | --- | --- |
-| Engine source | `source.url` and `source.commit` in `configs/solutions/<name>.yaml` | The checkout contains the commit, and every path the engine reads (`python/` for SGLang, `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) is identical at HEAD and at the commit and has no uncommitted changes. A commit that leaves those paths alone passes. |
-| Checkpoint | `model.id`, `model.revision` and `model.sha256` in the scenario | SHA-256 of `config.json` and every `.safetensors` and index file must match; extra or missing files fail. |
-| Catalog | `catalog.sha256` in the scenario | SHA-256 of the `--catalog` file must match. |
-| Image | Recipe in [images/](images/README.md); dev branches built from source and tagged with repository, branch and commit | Recorded, not enforced: a local build gets a new ID each time. |
+The benchmark runs each engine's own HTTP server from the mounted source, with
+only the hooks its launcher lists in `PATCHES`
+([sglang_server.py](bench/engines/sglang_server.py),
+[sid_gr_server.py](bench/engines/sid_gr_server.py)). A hook calls the original
+with the same arguments and returns its result; it only counts calls, notes
+times or pushes NVTX ranges, and never synchronizes the GPU. A missing target
+stops the server, and `server.log` lists every patch applied.
 
-To change a pin, edit its commit or hash in the config; nothing is hard-coded.
-`--allow-dirty` runs although a source differs from its pin, for development; the
-report then states that the pin was not enforced.
-
-Each `report.md` ends with a Reproduce section and a JSON manifest: benchmark
-code commit, engine source URL, pinned and checked-out commits, image ID, tags,
-repository digests and base labels, recipe, model revision and file hashes,
-SHA-256 of the scenario and solution files, the Nsight Systems version and the command. Attention
-backends, CUDA graph use and package versions are read from the running server,
-not inferred. `comparison.md` lists each engine's source commit, image and
-whether its pins were enforced.
+| What | For | SGLang | SID-GR |
+| --- | --- | --- | --- |
+| Routes | readiness, runtime facts, configuration, profiler | adds `/pilot/ready`, `/pilot/runtime`, `/pilot/config` | adds `/pilot/runtime`, `/pilot/config`, `/pilot/profile/start` and `stop` |
+| Runtime facts | packages, attention backends, weights' dtype, overlap scheduler | `Scheduler.get_internal_state` | read in `/pilot/runtime` |
+| Request times | queue, prefill, decode, response | `/generate` | `_handle_sglang_generate` |
+| Step times | batch sizes, engine busy | `get_next_batch_to_run`, `run_batch`, `process_batch_result`, `ScheduleBatch.copy` | `_run_prefill`, `_run_decode_batch` |
+| Counters | CUDA graph use, code paths taken | `ModelRunner.forward`, `BeamGroup.finalize`, `shared_context_attention` | read from SID-GR's own status |
+| NVTX ranges, GPU profiles only | phases, sections, steps | input preparation, forward, beam selection, beam KV, results | prefill, decode steps, SID-GR's profile sections |
 
 ## Configuration
 
 Each value lives in one place:
 
-- the scenario says what is measured, the same for every solution: model, dtype, workload, runs and catalog;
-- a solution says how one engine is configured: its source pin and settings;
-- the command line says where this invocation runs: paths, CPUs and GPU;
-- the engine's adapter in [bench/adapters.py](bench/adapters.py) is logic without settings: it computes what follows from the scenario and the run, such as CUDA graph sizes, request slots, ports and paths, and a solution must not set those.
+| Input | Says | Where |
+| --- | --- | --- |
+| Scenario | what is measured, the same for every engine: model, workload, rounds, optional catalog | `configs/scenarios/*.yaml` |
+| Solution | how one engine is configured: source pin, environment, server settings | `configs/solutions/*.yaml` |
+| Command line | where it runs: checkpoint, catalog file, CPUs, GPU | `run_benchmark.py` options |
 
-So any solution runs with any scenario, on any machine. Both kinds of YAML file
-load into frozen dataclasses in [bench/config.py](bench/config.py) (`Scenario`,
-`Solution` and their parts). Unknown or missing keys, wrong types and
-out-of-range values fail before any container starts; YAML duplicate keys fail
-too. Types are exact: `true` is a bool and `1` an int, so `env` values must be
-quoted. The container never reads YAML: the runner writes a `plan.json` from the
-typed objects.
+The engine's adapter derives the rest from these, such as CUDA graph sizes,
+request slots, ports and paths, so a solution must not set them and any
+solution runs with any scenario on any machine. All three load into typed
+classes ([bench/config.py](bench/config.py)): unknown keys, wrong types and
+out-of-range values fail before any container starts. For each solution, the
+runner writes them as one `RunConfig`, `/work/run_config.json`, which is all
+the container reads.
 
-A scenario, `configs/scenarios/<model>.yaml`, is shared by every solution in a run:
-
-| Key | Meaning |
-| --- | --- |
-| `model` | `id`, Hub `revision` and `sha256` per checkpoint file; see Reproducibility. `dtype` (`bfloat16`, `float16` or `float32`): the weights and activations while serving, whatever the checkpoint holds; SID-GR serves only `bfloat16`. Optional `sid_codebooks` (`token_start`, `codebook_size`): where semantic-ID tokens sit in the vocabulary, for engines that decode a catalog through an SID trie output head (vedantjh2-sglang) |
-| `workload` | `context_length` (prompt tokens, the longest with `min_context_length`), `beam_width`, `output_tokens`, `concurrency` (requests in flight: a number, or a list of levels measured in turn), `seed` and optional `min_context_length` (prompt lengths drawn uniformly from it to `context_length`) |
-| `runs` | `clean` processes × `requests` per level, `warmups` per process and level, `profile_requests` |
-| `catalog` | Optional `sha256` of the catalog JSONL that constrains every beam; see Catalog filtering |
-
-A solution, `configs/solutions/<name>.yaml`, configures one engine:
-
-| Key | Meaning |
-| --- | --- |
-| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang`; it picks the engine's adapter |
-| `source` | `url` and the full 40-character `commit` of the engine source; optional `branch` the commit was taken from, which names a from-source image |
-| `env` | String environment variables for the server, passed verbatim; `OMP_NUM_THREADS` and `MKL_NUM_THREADS` default to the number of server CPUs |
-| `server_settings` | SGLang `ServerArgs`, a mapping passed verbatim: SGLang owns these names and types, and `ServerArgs` rejects unknown ones when the server starts. The runner sets `model_path`, `host` and `port`, and from the scenario `dtype`, `random_seed` (the workload seed), the CUDA graph sizes, the request slots and beam-search-new's catalog: with k requests batched, decode runs k × `beam_width` rows and prefill k × `context_length` tokens, for k up to the largest concurrency level (variable lengths: see below); every beam holds a request slot and beam-search-new also keeps the request's own, so `max_running_requests` is the largest level × (`beam_width` + 1) |
-
-Values a run depends on, such as `tp_size: 1`, `page_size: 1` or beam-search-new's
-`enable_beam_search: true`, stay in the solution file with a comment saying why;
-the adapter or the engine rejects or overrides other values. For SID-GR the runner derives the
-request shape (`GR_CONTEXT_LEN`, `GR_BEAM_WIDTH`, `GR_DECODE_STEPS`), the batch
-size, pool capacities and decode graph buckets from the scenario (the largest
-concurrency level; `GR_CONTEXT_LEN` is the longest prompt), and the paths and
-port; `env` must not set them. The report copies `env` and `server_settings`
-verbatim and lists what the benchmark added. To vary an engine setting, copy its
-file; the file name names the solution's directory in the output.
-
-The command line places the run:
-
-| Option | Meaning |
-| --- | --- |
-| `--server-cpus`, `--client-cpus` | Disjoint CPU lists such as `0-9` and `10`; the container is limited to both |
-| `--gpu` | One device index or GPU UUID |
-| `--model`, `--catalog` | The checkpoint and catalog files the scenario pins |
-| `--solution CONFIG SOURCE IMAGE` | A solution, its engine checkout and a local image; repeat to compare |
-
-## Concurrency levels and prompt lengths
+### Scenario
 
 ```yaml
+model:                        # Hub id, revision and file SHA-256s; dtype while serving
 workload:
-  context_length: 2048        # the longest prompt
-  min_context_length: 256     # optional: lengths drawn uniformly from 256 to 2048
-  concurrency: [1, 2, 4, 8]   # or one number
+  context_length: 2048        # prompt tokens; the longest with min_context_length
+  min_context_length: 256     # optional: lengths drawn uniformly up to context_length
+  beam_width: 256
+  output_tokens: 3            # one from prefill, the rest from decode steps
+  concurrency: [1, 2, 4, 8]   # requests in flight: one value, or several in turn
+  seed: 42                    # seeds the token IDs and lengths
+runs:
+  rounds: 3                   # each starts a new server and measures every concurrency
+  requests: 200               # measured requests per concurrency in each round
+  warmups: 10                 # unmeasured requests before them
+  profile_requests: 3         # requests each GPU profile captures
+catalog:                      # optional: see Catalog filtering
+  sha256: <SHA-256 of the catalog JSONL>
 ```
 
-- **One deployment per engine.** Each engine's server is configured once for
-  the largest level (CUDA graph sizes, request slots, SID-GR's batch and pools),
-  and every clean server process measures all levels in turn, so only the load
-  changes between levels. `clean_i` starts at the i-th level and wraps around,
-  so no level always runs first. Each level sends its own warmup and measured
-  requests, with new IDs and tokens but the same seeded lengths, so no server
-  sees a request twice and none can answer one level from another; every engine
-  gets the same requests at a level. The runtime counters the checks use cover
-  measured requests only. The profiled process sends the first level's requests,
-  one at a time.
-- **Prefill CUDA graphs with variable lengths.** SGLang replays a prefill graph
-  only when padding a batch up to a captured size at most doubles it, and runs
-  the batch eagerly otherwise. With `min_context_length`, the adapter captures
-  sizes in 1.5x steps from `min_context_length` up to the largest level ×
-  `context_length`, so a batch pads by less than 1.5x. SID-GR keys its prefill
-  and decode graphs by prompt length and captures them only at startup, for
-  `context_length`: other lengths run without CUDA graphs, which the report's
-  CUDA graph row shows, and a run fails if a graph is captured during measured
-  requests.
-- **Reports.** Each report tables every level and, with variable lengths, the
-  mean latency per quarter of the length range at each level; the comparison
-  holds one latency table per level, agreement with the reference at the same
-  level, and `load.svg`.
+- One deployment per engine serves every concurrency, sized for the largest:
+  CUDA graph sizes, request slots, and SID-GR's batch and pools.
+- With `min_context_length`, SGLang captures prefill graphs in 1.5× steps,
+  since it replays a graph only below 2× padding. SID-GR captures graphs only
+  for `context_length`, at startup, so other lengths run without them, as the
+  report's CUDA graph row shows.
+- `model.sid_codebooks` (`token_start`, `codebook_size`): where semantic-ID
+  tokens sit in the vocabulary, for vedantjh2-sglang's trie output head.
+
+### Solution
+
+| Key | Meaning |
+| --- | --- |
+| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang` |
+| `source` | `url` and full `commit` of the engine source; optional `branch`, which names a from-source image |
+| `env` | environment variables for the server, as strings; `OMP_NUM_THREADS` and `MKL_NUM_THREADS` default to the number of server CPUs |
+| `server_settings` | SGLang engines: `ServerArgs`, passed verbatim. The runner sets the model path, host, port, dtype, seed, CUDA graph sizes, request slots and beam-search-new's catalog |
+
+Values a run depends on, such as `tp_size: 1` or `page_size: 1`, stay in the
+solution with a comment saying why. To vary a setting, copy the file: its name
+names the engine's output directory.
 
 ## Catalog filtering
 
-A scenario with `catalog.sha256` constrains every beam to a catalog item; pass the
-file with `--catalog items.jsonl`:
+A scenario with `catalog.sha256` constrains every beam to a catalog item; pass
+the file with `--catalog items.jsonl`:
 
 ```jsonl
 {"item_id": "item-a", "token_ids": [1000, 2000, 3000]}
 {"item_id": "item-b", "token_ids": [1001, 2000, 3001], "metadata": {"genre": "drama"}}
 ```
 
-Token IDs are model token IDs. Item IDs and token paths must be unique, every
-path has exactly `output_tokens` tokens, and the catalog needs at least
-`beam_width` distinct first tokens so every beam survives each step. Each engine
-gets the same paths in its native form: SID-GR loads the JSONL, SGLang
-beam-search-new a generated token-trie pickle, and vedantjh2-sglang a generated
-`trie_output_head.safetensors` placed next to links to the original checkpoint.
-vedantjh2-sglang reads the layout from the scenario's `model.sid_codebooks`:
-the token at depth `d` must lie in
-`[token_start + d * codebook_size, token_start + (d + 1) * codebook_size)`, and
-its trie output head takes exactly three codebooks, so `output_tokens` must be 3.
-Without a catalog it serves the checkpoint as is, at any `output_tokens`, and
-the run fails if its trie output head runs anyway.
-
-[tools/make_catalog.py](tools/make_catalog.py) writes a seeded synthetic catalog,
-for models without semantic-ID tokens: `--items` distinct paths whose token at
-depth `d` lies in the codebook range above, drawn per depth from a Zipf
-distribution (`--skew`) over a shuffled codebook, so fan-out is uneven and most
-prefixes do not exist. It checks the file as a run would and prints the
-`model.sid_codebooks` and `catalog.sha256` keys for the scenario; the same
-arguments always give the same file:
+- Token IDs are model token IDs. Item IDs and paths are unique, every path has
+  `output_tokens` tokens, and there are at least `beam_width` distinct first
+  tokens, so every beam survives each step.
+- Each engine gets the same paths in its native form: SID-GR the JSONL,
+  beam-search-new a token-trie pickle, vedantjh2-sglang a
+  `trie_output_head.safetensors` next to links to the checkpoint. Public SGLang
+  has no catalog support.
+- vedantjh2-sglang's trie output head takes exactly three codebooks from
+  `model.sid_codebooks`, so `output_tokens` must be 3; without a catalog it
+  serves the checkpoint as is.
+- Engines normalize scores differently: SID-GR over the allowed tokens,
+  beam-search-new over the vocabulary, vedantjh2-sglang over the vocabulary or,
+  with `SGLANG_BEAM_TRIE_TOPK_LOGPROB: "true"`, the active codebook. Scores
+  therefore differ even when the beams match.
+- [tools/make_catalog.py](tools/make_catalog.py) writes a seeded synthetic
+  catalog in the `model.sid_codebooks` layout, with Zipf fan-out, and prints
+  the scenario keys for it:
 
 ```bash
 python3 tools/make_catalog.py --items 1000000 --codebook-size 1024 --output catalog-1m.jsonl
 ```
 
-The run fails unless the server reports the catalog as loaded and every returned
-beam is a catalog item. Public SGLang has no catalog support, so a catalog scenario rejects it. SID-GR normalizes scores over the allowed tokens.
-beam-search-new normalizes over the full vocabulary, and so does
-vedantjh2-sglang unless its solution sets `SGLANG_BEAM_TRIE_TOPK_LOGPROB: "true"`,
-which normalizes over the active codebook; the run checks the chosen one on
-every decode step. Scores therefore differ across engines even when the beams
-match.
+## Reproducibility
+
+The runner refuses to start when a pin does not hold:
+
+| Pin | Where | Checked |
+| --- | --- | --- |
+| Engine source | `source.url` and `source.commit` in the solution | The checkout contains the commit, and the paths the engine reads (`python/` for SGLang; `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) match it with no uncommitted changes |
+| Checkpoint | `model.id`, `model.revision` and `model.sha256` in the scenario | SHA-256 of `config.json` and every weight and index file |
+| Catalog | `catalog.sha256` in the scenario | SHA-256 of the `--catalog` file |
+| Image | a recipe in [images/](images/README.md); dev branches built from source and tagged with repository, branch and commit | Recorded, not enforced: a local build gets a new ID each time |
+
+It also refuses to start while another benchmark container runs, and fails if
+the source, benchmark code or model files change during the runs. Each report
+ends with what reproduces it: commits, image identity, file hashes, the Nsight
+Systems version and the command.
+
+## Layout
+
+```text
+run_benchmark.py                  the CLI: checks the inputs, runs the rounds and profiles, writes the outputs
+configs/                          scenarios/ (what is measured) and solutions/ (how each engine is configured)
+images/                           image recipes and build.sh
+bench/
+  config.py                       Scenario, Solution, Resources and RunConfig; loading and checks
+  provenance.py                   source, checkpoint and image pins
+  client.py                       in the container: starts the server, sends and times requests, checks beams
+  catalog.py                      the catalog: parsing, membership checks, synthesis
+  common.py                       helpers shared by the host and the container
+  engines/                        one adapter and one launcher per engine family
+    adapter.py                    Adapter: what each engine implements
+    sglang.py sid_gr.py           the adapters: configure, start, call and check the engine
+    sglang_server.py sid_gr_server.py   the launchers: the engine's own server plus PATCHES
+    patching.py                   how launchers declare, apply and log patches
+  outputs/                        everything written after the runs
+    results.py                    results.json.gz: save, load, render
+    trace.py                      Nsight Systems trace summaries
+    report.py summary.py          the numbers of report.md and summary.md
+    chart.py sunburst.py          the charts
+    template.py templates/        the reports' words and tables, the charts' styles
+tools/                            make_catalog.py, render_reports.py
+tests/                            CPU-only tests
+```
 
 ## Adding an engine
 
-An engine needs an adapter, one subclass of `Adapter` in
-[bench/adapters.py](bench/adapters.py) listed in `ADAPTERS`, plus a solution file
-with its `source` pin and settings and an `images/` recipe. The adapter is logic
-and holds no settings; it declares
+1. An adapter: a subclass of `Adapter` (bench/engines/adapter.py), listed in
+   `ENGINES` in bench/engines/\_\_init\_\_.py. It holds no settings and declares
+   the source checkout and image recipe, the solution checks, the server
+   command and the settings it sets itself, the profiler calls, the request
+   payload, how to read beams and scores, catalog support, and the runtime
+   facts to check and report.
+2. A launcher that runs the engine's own HTTP server with `PATCHES` for request
+   and step times, the `/pilot/*` routes, and, for the GPU profiles, NVTX
+   ranges `bench/request:<rid>`, `bench/phase:<rid>:<phase>` and
+   `bench/section:<rid>:<name>`. Without phase and section ranges, kernel time
+   is still reported, as `unknown`.
+3. A solution file with its source pin and settings, and an image recipe in
+   images/.
 
-- the source file the checkout must contain, where it is mounted, the paths pinned by `source.commit`, the image recipe, and the solution keys and checks;
-- the server command, readiness endpoint and profiler start/stop calls, and the environment variables and `ServerArgs` it sets itself, which solutions may not;
-- the engine's code paths that its launcher's patches target (`features`);
-- the request payload and how to read beams and scores from the response, as cumulative log-probabilities;
-- whether it supports a catalog and, if it stores one natively, how to convert the shared catalog (`convert_catalog`);
-- the runtime facts to check and report (graph use, the code path taken).
-
-The engine needs an HTTP server with a beam-search request, a way to start and
-stop `cudaProfilerApi` captures, and NVTX ranges named `bench/request:<rid>`,
-`bench/phase:<rid>:<phase>` and `bench/section:<rid>:<name>` around the request,
-its phases and its sections, and the request handler and engine step times
-that `/pilot/runtime` hands over (see What is measured). A launcher such as
-[server_sglang.py](bench/server_sglang.py) runs the engine's own server and adds
-these as `Patch` entries in its `PATCHES` table; each report lists the patches
-the server applied.
-Without phase and section ranges the profile still reports kernel time, but
-attributes it to `unknown`. Engines without an HTTP server, such as vLLM-GR,
-TensorRT-LLM and FlashRec, first need a thin server around their beam API.
+Engines without an HTTP server, such as vLLM-GR, TensorRT-LLM and FlashRec,
+first need a thin server around their beam-search API.
 
 ## Tests
 
@@ -335,4 +281,5 @@ TensorRT-LLM and FlashRec, first need a thin server around their beam API.
 python3 -m pytest tests
 ```
 
-The tests use temporary files and a fake HTTP server; they need no GPU, Docker or model.
+The tests use temporary files and a fake HTTP server; they need no GPU, Docker
+or model.

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Static SVG charts for report.md and comparison.md, styled by
+"""Static SVG charts for report.md and summary.md, styled by
 templates/chart.css; opened directly in a browser, every mark shows its numbers
 on hover. The reports' tables hold the same numbers.
 
