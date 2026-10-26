@@ -8,7 +8,15 @@ at the same level, using the first clean run of each.
 """
 
 from bench import adapters, chart
-from bench.report import level_runs, listing, pooled, prompt_text, table
+from bench.report import (
+    RESAMPLES,
+    interval,
+    listing,
+    prompt_text,
+    summaries,
+    table,
+    with_interval,
+)
 
 CHART = "throughput.svg"  # p99 latency against requests/s, with several levels
 
@@ -41,7 +49,16 @@ def parity(reference, candidate):
 
 def levels(ctx):
     """{concurrency: (pooled stats, requests/s)} of one engine, ascending."""
-    return {k: pooled(runs) for k, runs in level_runs(ctx["clean"]).items()}
+    return {k: (s["stats"], s["rate"]) for k, s in summaries(ctx).items()}
+
+
+def change_cell(level, base):
+    """Mean against the reference's at the same level, with the 95% interval of
+    the paired bootstrap: both engines' resamples draw the same requests."""
+    ratio = level["stats"]["mean"] / base["stats"]["mean"] - 1
+    ratios = [a / b - 1 for a, b in zip(level["means"], base["means"])]
+    low, high = interval(ratios)
+    return f"{100 * ratio:+.1f}% [{100 * low:+.1f}%, {100 * high:+.1f}%]"
 
 
 def curves(contexts, names):
@@ -84,28 +101,26 @@ def render(contexts, names, reference):
 
     latency = []
     for k in workload.levels:
-        base = measured[reference][k][0]["mean"]
+        base = summaries(ref)[k]
         rows = []
         for name, ctx in zip(names, contexts):
-            stats, rate = measured[name][k]
-            change = (
-                "reference"
-                if name == reference
-                else f"{100 * (stats['mean'] / base - 1):+.1f}%"
-            )
+            level = summaries(ctx)[k]
+            stats, ci = level["stats"], level["ci"]
+            change = "reference" if name == reference else change_cell(level, base)
             title = adapters.get(ctx["solution"].engine).title
             rows.append(
                 [
                     f"[{name}]({name}/report.md) ({title})",
-                    f"{stats['mean']:.3f}",
+                    with_interval(stats["mean"], ci["mean"], 3),
                     f"{stats['p50']:.3f}",
-                    f"{stats['p99']:.3f}",
-                    f"{rate:.2f}",
+                    with_interval(stats["p95"], ci["p95"], 3),
+                    with_interval(stats["p99"], ci["p99"], 3),
+                    with_interval(level["rate"], ci["rate"], 2),
                     change,
                 ]
             )
-        headers = ["Engine", "Mean ms", "p50 ms", "p99 ms", "Requests/s"]
-        text = table([*headers, "Mean vs reference"], rows, right=range(1, 6))
+        headers = ["Engine", "Mean ms", "p50 ms", "p95 ms", "p99 ms", "Requests/s"]
+        text = table([*headers, "Mean vs reference"], rows, right=range(1, 7))
         latency.append(f"### Concurrency {k}\n\n{text}" if several else text)
 
     gpu, agreement, versions = [], [], []
@@ -167,6 +182,13 @@ Requests/s · p99 ms at each level. In a closed loop, throughput rises with the 
         else f"{workload.levels[0]} in flight"
     )
     runs = first["scenario"].runs
+    between = (
+        f"With {runs.clean} processes, the intervals show the variation between "
+        "processes only roughly;"
+        if runs.clean > 1
+        else "With one process, the intervals cannot show the variation between "
+        "processes;"
+    )
     latency_tables = "\n\n".join(latency)
 
     return f"""# Beam-search engine comparison
@@ -177,7 +199,7 @@ Requests/s · p99 ms at each level. In a closed loop, throughput rises with the 
 
 {latency_tables}
 
-Each engine ran the same {runs.requests} requests over HTTP, {in_flight}, in {runs.clean} separate server processes; the reference is `{reference}`, at the same level.
+Each engine ran the same {runs.requests} requests over HTTP, {in_flight}, in {runs.clean} separate server processes; the reference is `{reference}`, at the same level. Brackets hold 95% intervals from a two-level bootstrap ({RESAMPLES:,} resamples of the server processes and then of the requests within each). Every engine's resamples draw the same requests, so the interval of the change against the reference is paired. {between} p99 rests on the slowest 1% of the pooled requests.
 
 {throughput}## GPU time per request
 

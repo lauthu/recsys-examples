@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import dataclasses
 import json
+import re
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
@@ -55,6 +56,38 @@ def test_statistics():
         "p99": pytest.approx(3.97),
         "max": 4.0,
     }
+
+
+def test_bootstrap_is_seeded_and_covers_the_estimate():
+    runs = [("clean_1", [10.0, 12.0, 14.0, 16.0], 0.05)] * 2
+    values = report.bootstrap(runs, seed="s", resamples=500)
+    assert values == report.bootstrap(runs, seed="s", resamples=500)
+    low, high = report.interval(values["mean"])
+    assert 10.0 < low < 13.0 < high < 16.0
+    assert report.interval(values["rate"]) == (80.0, 80.0)  # equal durations
+
+
+def test_bootstrap_includes_the_variation_between_processes():
+    # Each process answers every request in the same time, but the two differ:
+    # resampling only the requests would give a zero-width interval.
+    runs = [("clean_1", [10.0] * 50, 1.0), ("clean_2", [20.0] * 50, 2.0)]
+    values = report.bootstrap(runs, seed="s")
+    assert report.interval(values["mean"]) == (10.0, 20.0)
+    assert report.interval(values["p99"]) == (10.0, 20.0)
+    assert report.interval(values["rate"]) == (25.0, 50.0)  # 50 per 2 s .. per 1 s
+
+
+def test_report_tables_the_confidence_intervals():
+    ctx = context("sglang")
+    for result, latency in zip(ctx["clean"], ([10.0] * 4, [20.0] * 4)):
+        result["levels"] = levels(1, latency=latency)
+    text = report.render(ctx)
+    section = text.split("### 95% confidence intervals")[1].split("## GPU profile")[0]
+    assert "| Mean ms | p95 ms | p99 ms | Requests/s |" in section
+    assert "| 15.000 [10.00, 20.00] | 20.000 [10.00, 20.00] |" in section
+    assert "mean 15.000 ms (95% CI 10.00 to 20.00)" in text
+    assert "2,000 resamples, each drawing the server processes" in section
+    assert "which 2 processes show only roughly" in section
 
 
 def test_sunburst_is_valid_svg_with_one_slice_per_node():
@@ -233,7 +266,10 @@ def at(ctx, workload, *concurrency):
 
 def test_sid_gr_report_with_a_disabled_graph_runner():
     text = report.render(context("sid-gr"))
-    assert "mean 13.000 ms, p99 16.000 ms over 8 requests" in text
+    summary = (
+        r"mean 13\.000 ms \(95% CI \d+\.\d\d to \d+\.\d\d\), p99 16\.000 ms over 8"
+    )
+    assert re.search(summary, text)
     assert (
         "| clean_1 | 4 | 13.000 | 13.000 | 15.700 | 15.940 | 16.000 | 80.00 |" in text
     )
@@ -297,10 +333,11 @@ def test_report_tables_every_concurrency_level():
         "- **Latency and throughput** over 2 server processes × 4 requests per level"
         in text
     )
-    assert (
-        "concurrency 1: mean 13.000 ms, p99 16.000 ms, 80.00 requests/s; concurrency 2:"
-        in text
+    found = (
+        r"concurrency 1: mean 13\.000 ms \(95% CI [\d.]+ to [\d.]+\), p99 16\.000 ms, "
     )
+    assert re.search(found + r"80\.00 requests/s; concurrency 2:", text)
+    assert "| Concurrency | Mean ms | p95 ms | p99 ms | Requests/s |" in text
     assert "| Concurrency | Run | Requests | Mean ms |" in text
     assert (
         "| 1 | clean_1 | 4 | 13.000 |" in text

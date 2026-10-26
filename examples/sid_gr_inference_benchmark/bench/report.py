@@ -10,14 +10,18 @@ server's full settings and environment as it reported them (GET /pilot/config).
 """
 
 import json
+import math
+import random
 import shlex
 from collections import defaultdict
 
 import yaml
 from bench import adapters
-from bench.common import summarize
+from bench.common import interpolate, quantile, summarize
 from bench.sunburst import phase_key
 from bench.trace import NO_PHASE, NO_SECTION
+
+RESAMPLES = 2000  # bootstrap resamples per engine and concurrency level
 
 
 def short(name, limit=90):
@@ -53,6 +57,64 @@ def pooled(runs):
     """(stats, requests/s) of one level's runs, pooled."""
     stats = summarize([ms for _, latencies, _ in runs for ms in latencies])
     return stats, stats["n"] / sum(duration for _, _, duration in runs)
+
+
+def bootstrap(runs, seed, resamples=RESAMPLES):
+    """{statistic: resampled values} of one level's runs: each resample draws the
+    server processes with replacement and then the requests within each drawn
+    process, so process-to-process variation widens the intervals too. The draws
+    depend only on the seed and the run and request counts, so every engine of an
+    invocation gets the same draws: request i is the same request for each, which
+    pairs their comparison."""
+    rng = random.Random(seed)
+    values = {"mean": [], "p95": [], "p99": [], "rate": []}
+    for _ in range(resamples):
+        sample, seconds = [], 0.0
+        for r in rng.choices(range(len(runs)), k=len(runs)):
+            _, latencies, duration = runs[r]
+            n = len(latencies)
+            sample += [latencies[i] for i in rng.choices(range(n), k=n)]
+            seconds += duration
+        sample.sort()
+        values["mean"].append(math.fsum(sample) / len(sample))
+        values["p95"].append(interpolate(sample, 0.95))
+        values["p99"].append(interpolate(sample, 0.99))
+        values["rate"].append(len(sample) / seconds)
+    return values
+
+
+def interval(values):
+    """The 95% percentile interval of bootstrap values."""
+    return quantile(values, 0.025), quantile(values, 0.975)
+
+
+def summaries(ctx):
+    """{concurrency: {"stats", "rate", "ci", "means"}} of one engine, pooled over
+    its clean runs, with 95% intervals; computed once per context."""
+    if "summaries" not in ctx:
+        found = {}
+        for k, runs in level_runs(ctx["clean"]).items():
+            stats, rate = pooled(runs)
+            values = bootstrap(runs, seed=f"bootstrap/{k}")
+            ci = {name: interval(v) for name, v in values.items()}
+            found[k] = {"stats": stats, "rate": rate, "ci": ci, "means": values["mean"]}
+        ctx["summaries"] = found
+    return ctx["summaries"]
+
+
+def with_interval(value, bounds, digits):
+    return f"{value:.{digits}f} [{bounds[0]:.2f}, {bounds[1]:.2f}]"
+
+
+def interval_rows(ctx):
+    """Mean, p95, p99 and requests/s with their 95% intervals, per level."""
+    rows, several = [], len(summaries(ctx)) > 1
+    for k, level in summaries(ctx).items():
+        stats, ci = level["stats"], level["ci"]
+        cells = [with_interval(stats[s], ci[s], 3) for s in ("mean", "p95", "p99")]
+        cells.append(with_interval(level["rate"], ci["rate"], 2))
+        rows.append(([k] if several else []) + cells)
+    return rows
 
 
 def latency_rows(clean):
@@ -377,17 +439,23 @@ def render(ctx):
         sizes = listing(ctx["lengths"][:requests])
         sequential = f" (prompts of {sizes} tokens){sequential}"
     measured = f"({runs.clean} server process{'es' if runs.clean > 1 else ''} × {runs.requests})"
+    found = summaries(ctx)
+
+    def mean_text(k, stats):
+        low, high = found[k]["ci"]["mean"]
+        return f"mean {stats['mean']:.3f} ms (95% CI {low:.2f} to {high:.2f})"
+
     if len(levels) > 1:
         summary = "; ".join(
-            f"concurrency {k}: mean {s['mean']:.3f} ms, p99 {s['p99']:.3f} ms, "
+            f"concurrency {k}: {mean_text(k, s)}, p99 {s['p99']:.3f} ms, "
             f"{rate:.2f} requests/s"
             for k, (s, rate) in levels.items()
         )
         summary = f"- **Latency and throughput** over {measured.strip('()')} requests per level: {summary}."
     else:
-        ((stats, rate),) = levels.values()
+        ((k, (stats, rate)),) = levels.items()
         summary = (
-            f"- **Latency:** mean {stats['mean']:.3f} ms, p99 {stats['p99']:.3f} ms over "
+            f"- **Latency:** {mean_text(k, stats)}, p99 {stats['p99']:.3f} ms over "
             f"{stats['n']:,} requests {measured}, {rate:.2f} requests/s at concurrency {top}."
         )
     headers = [
@@ -403,6 +471,24 @@ def render(ctx):
     if len(levels) > 1:
         headers = ["Concurrency", *headers]
     latency_table = table(headers, latency, right=range(len(headers) - 7, len(headers)))
+    columns = ["Mean ms", "p95 ms", "p99 ms", "Requests/s"]
+    columns = (["Concurrency"] if len(levels) > 1 else []) + columns
+    pooled_n = next(iter(levels.values()))[0]["n"]
+    between = (
+        f"so they include the variation between server processes, which "
+        f"{runs.clean} processes show only roughly"
+        if runs.clean > 1
+        else "but one server process cannot show the variation between processes"
+    )
+    intervals = (
+        "\n\n### 95% confidence intervals\n\n"
+        + table(columns, interval_rows(ctx), right=range(len(columns)))
+        + f"\n\nEach cell is the pooled value and, in brackets, its 95% interval from a "
+        f"two-level bootstrap: {RESAMPLES:,} resamples, each drawing the server "
+        f"processes with replacement and then the requests within each drawn process, "
+        f"{between}. p99 rests on the slowest 1% of the {pooled_n:,} pooled requests"
+        f"{' per level' if len(levels) > 1 else ''}."
+    )
     by_length = ""
     if workload.min_context_length is not None:
         rows = length_rows(clean, ctx["lengths"][: runs.requests], workload)
@@ -429,7 +515,7 @@ def render(ctx):
 
 {latency_table}
 
-The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.{by_length}
+The client times each request from JSON encoding to the parsed response, each over a new loopback HTTP connection; {in_flight}. Every run is a separate server process; warmup requests are excluded. Percentiles interpolate linearly between order statistics.{intervals}{by_length}
 
 ## GPU profile
 

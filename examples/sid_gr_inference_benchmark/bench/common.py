@@ -54,7 +54,11 @@ def write_json(path, value, indent=2):
 
 def quantile(values, q):
     """Linear interpolation between order statistics at position (n - 1) * q."""
-    ordered = sorted(values)
+    return interpolate(sorted(values), q)
+
+
+def interpolate(ordered, q):
+    """quantile() of values already sorted ascending."""
     position = (len(ordered) - 1) * q
     lower, upper = math.floor(position), math.ceil(position)
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)

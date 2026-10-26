@@ -62,10 +62,30 @@ def test_comparison_table_uses_the_first_engine_as_reference():
     text = compare.render(
         [reference, other], ["sid_gr", "sglang_beam_search_new"], "sid_gr"
     )
-    assert "| [sid_gr](sid_gr/report.md) (SID-GR) | 10.000 |" in text
-    assert "| reference |" in text and "| +50.0% |" in text
+    # Every request takes the same time, so each interval is a single point.
+    row = "| [sid_gr](sid_gr/report.md) (SID-GR) | 10.000 [10.00, 10.00] | 10.000 |"
+    assert row in text and "| 80.00 [80.00, 80.00] | reference |" in text
+    assert "| +50.0% [+50.0%, +50.0%] |" in text
+    assert "| Engine | Mean ms | p50 ms | p95 ms | p99 ms | Requests/s |" in text
     assert "| sglang_beam_search_new | 0.0% | 100.0% (100.0%) | 0.0% |" in text
     assert "Output agreement with sid_gr" in text
+
+
+def test_the_change_against_the_reference_is_paired_by_request():
+    # Latencies vary from request to request, so each engine's own interval has
+    # width; the candidate takes exactly twice as long on every request, so the
+    # paired change is +100% in every resample.
+    reference = with_outputs("sglang", [A, B], 10.0)
+    candidate = with_outputs("vedantjh2-sglang", [A, B], 10.0)
+    for ref_run, run, offset in zip(reference["clean"], candidate["clean"], (0, 5)):
+        latency = [10.0 + offset + i for i in range(20)]
+        ref_run["levels"] = levels(1, latency=latency)
+        run["levels"] = levels(1, latency=[2 * ms for ms in latency])
+    text = compare.render([reference, candidate], ["sglang", "vedantjh2"], "sglang")
+    assert "| +100.0% [+100.0%, +100.0%] |" in text
+    row = text.split("[vedantjh2](vedantjh2/report.md)")[1].split("\n")[0]
+    low, high = (float(x) for x in row.split("[")[1].split("]")[0].split(", "))
+    assert low < high  # the engine's own mean is uncertain
 
 
 def test_the_reference_can_be_any_engine():
@@ -73,7 +93,8 @@ def test_the_reference_can_be_any_engine():
     second = with_outputs("sglang", [B, A], 15.0)
     text = compare.render([first, second], ["sid_gr", "sglang"], "sglang")
     assert "Output agreement with sglang" in text
-    assert "| -33.3% |" in text and "| reference |" in text  # sid_gr is faster
+    # sid_gr is faster
+    assert "| -33.3% [-33.3%, -33.3%] |" in text and "| reference |" in text
     assert "## Versions" in text and "example/engine `cccccccccccc`" in text
 
 
@@ -85,7 +106,8 @@ def test_comparison_with_several_levels_tables_each_and_charts_them():
     assert "### Concurrency 1" in text and "### Concurrency 4" in text
     # Against the reference at the same level: +100% at 1, +0% at 4.
     level_4 = text.split("### Concurrency 4")[1].split("## ")[0]
-    assert text.count("| +100.0% |") == 1 and "| +0.0% |" in level_4
+    assert text.count("| +100.0% [+100.0%, +100.0%] |") == 1
+    assert "| +0.0% [+0.0%, +0.0%] |" in level_4
     assert "## Throughput and p99 by concurrency" in text
     assert "| sglang | 80.00 · 10.0 ms | 80.00 · 20.0 ms |" in text
     assert "| vedantjh2 | 4 | 0.0% | 100.0% (100.0%) | 0.0% |" in text
