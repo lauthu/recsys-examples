@@ -103,8 +103,10 @@ def timeline(measured, timed, runtime, output_tokens):
     share one clock, so a request's latency splits exactly into: outside the
     server's handler (client and HTTP), queue (handler start to the start of its
     first prefill step), prefill, decode (prefill end to its last step's end) and
-    return (last step's end to the handler's return). Returns ({phase: [ms per
-    request]}, [[kind, requests, rows, tokens, schedule ms, step ms]]).
+    return (last step's end to the handler's return). A step that is still doing
+    its bookkeeping after the handler returned ends the request at the return.
+    Returns ({phase: [ms per request]}, [[kind, requests, rows, tokens, schedule
+    ms, step ms]]).
     """
     handled, steps = runtime["requests"], runtime["steps"]
     by_request = {}
@@ -125,8 +127,10 @@ def timeline(measured, timed, runtime, output_tokens):
             )
         started, returned = handled[rid]
         first = min(step["scheduled_ns"] for step in prefill)
-        prefilled = max(step["finished_ns"] for step in prefill)
-        finished = max(step["finished_ns"] for step in mine)
+        # A step can send its results before its own bookkeeping ends; the
+        # request's phases end no later than its handler's return.
+        prefilled = min(max(step["finished_ns"] for step in prefill), returned)
+        finished = min(max(step["finished_ns"] for step in mine), returned)
         spans = {
             "outside": (replied - sent) - (returned - started),
             "queue": first - started,

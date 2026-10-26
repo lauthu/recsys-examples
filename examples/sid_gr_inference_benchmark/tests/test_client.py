@@ -463,3 +463,34 @@ def test_profiled_runs_tell_the_server_what_to_mark(monkeypatch):
     argv, env = client.launch(adapters.get("sglang"), plan, 8000, "")
     assert argv[0] == "taskset" and env["BENCH_PROFILE"] == "0"
     assert client.level_order([1, 2, 4], "load_profile") == [4]
+
+
+def test_a_step_may_end_after_the_handler_returned():
+    """A step can send its results and then do bookkeeping; the request's decode
+    ends at its handler's return, not at the step's end."""
+    step = {"requests": ["r"], "rows": 1, "tokens": 4}
+    runtime = {
+        "requests": {"r": [100, 900]},
+        "steps": [
+            {
+                **step,
+                "kind": "prefill",
+                "scheduled_ns": 200,
+                "launched_ns": 250,
+                "finished_ns": 400,
+            },
+            {
+                **step,
+                "kind": "decode",
+                "scheduled_ns": 450,
+                "launched_ns": 460,
+                "finished_ns": 950,
+            },
+        ],
+    }
+    phases, steps = client.timeline(
+        [{"request_id": "r"}], [(None, 50, 1000)], runtime, 2
+    )
+    assert phases["decode"] == [pytest.approx(5e-4)] and phases["return"] == [0.0]
+    assert sum(ms for (ms,) in phases.values()) == pytest.approx(9.5e-4)
+    assert steps[1][5] == pytest.approx(5e-4)  # the step keeps its own full time

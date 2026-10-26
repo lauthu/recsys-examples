@@ -680,7 +680,7 @@ def render(ctx):
 
 {table(phase_columns, phase_rows(ctx), right=range(len(phase_columns)))}
 
-Mean per request, pooled over the server processes; the phases add up to the latency. The client's send and reply times and the server's own handler and step times share one clock (`time.perf_counter_ns`). **Outside server** is the latency minus the time the server's request handler took: the client, the connection and HTTP. **Queue** runs from the handler's start to the start of the request's first prefill step. **Prefill** is that step, shared with the requests batched into it. **Decode** runs from the end of the prefill to the end of the request's last decode step, including other requests' steps that ran in between. **Return** runs from there to the handler's return.
+Mean per request, pooled over the server processes; the phases add up to the latency. The client's send and reply times and the server's own handler and step times share one clock (`time.perf_counter_ns`). **Outside server** is the latency minus the time the server's request handler took: the client, the connection and HTTP. **Queue** runs from the handler's start to the start of the request's first prefill step. **Prefill** is that step, shared with the requests batched into it. **Decode** runs from the end of the prefill to the end of the request's last decode step, including other requests' steps that ran in between, or to the handler's return if a step sends its results before its own bookkeeping ends. **Return** runs from there to the handler's return.
 
 {table(step_columns, step_rows(ctx), right=[i for i, c in enumerate(step_columns) if c != "Step"])}
 
