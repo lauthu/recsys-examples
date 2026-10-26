@@ -2,7 +2,7 @@
 
 Measures beam-search latency and throughput of HTTP inference servers under a
 closed-loop load and shows where each engine's GPU time goes. Every engine gets
-the same seeded requests, the same checks and the same three outputs.
+the same seeded requests, the same checks and the same report.
 
 | `engine` | Server | Beam-search API |
 | --- | --- | --- |
@@ -15,30 +15,46 @@ the same seeded requests, the same checks and the same three outputs.
 
 Each engine's directory receives:
 
-- `report.md`: latency and requests/s of every run and pooled, at each concurrency level, with 95% confidence intervals for the pooled mean, p95, p99 and requests/s, and by prompt length when lengths vary; where each request's time goes (outside the server, queue, prefill, decode, return) and the engine's prefill and decode steps (count, time, requests, rows and prompt tokens each, share of wall time); kernel and non-kernel time by phase and section, launch calls, the longest-running kernels, the setup observed at runtime, and the server's full configuration as it reported it: every setting, the process environment, any value the solution or the benchmark set that the server runs with differently ("changed by the engine"), and how the profiled process differed from the latency runs.
-- `sunburst.svg`: server time per request, phase › section › kernel family, with the time no kernel runs (memcpy/memset only, or no GPU activity, in grey) in the phase and section it falls in. The report embeds it as an image; open the file in a browser to hover for details and click a slice to zoom in (the center or Esc zooms out).
-- `profile.nsys-rep`: the Nsight Systems trace of the profiled requests.
+- `results.json.gz`: everything the run measured and observed: each request's latency and phases, the engine's steps, the beams returned, the trace summaries, the server's configuration and the manifest. The reports are rendered from it alone.
+- `report.md`: how the run was measured; throughput and latency (mean, p50, p95, p99) at each concurrency level with 95% confidence intervals, per server start and, when prompt lengths vary, by prompt length; where each request's time goes (queue, prefill, decode, HTTP and response) and the engine's prefill and decode steps; the GPU profiles, opening with how each was captured; the setup observed at runtime and the server's full configuration as it reported it: every setting, the process environment, any value the solution or the benchmark set that the server runs with differently, and how the profiled processes differed from the measured ones.
+- `load.svg`, with several concurrency levels: throughput and latency against concurrency.
+- `breakdown.svg`: where a request's time goes at each level.
+- `sunburst.svg`: server time per request, phase › section › kernel family, with the time no kernel runs (memcpy/memset only, or no GPU activity, in grey) in the phase and section it falls in. Open it in a browser to hover for details and click a slice to zoom in (the center or Esc zooms out).
+- `profile.nsys-rep`: the Nsight Systems trace of the requests profiled one at a time.
 - `load_profile.nsys-rep`, with several concurrency levels: the trace of the profile under load at the largest level, which the report summarizes per engine step (see What is measured).
 
 When several engines run in one invocation, `comparison.md` in the output
-directory puts them side by side. At the request level: latency (mean, p50,
-p95, p99) at each concurrency level with 95% confidence intervals and the change
-in mean latency against the reference engine with its paired interval. At the
-service level: requests/s with its interval, the mean queue, prefill and decode
-time per request and the mean prefill and decode step times with their batch
-sizes. Then kernel time, GPU idle share and output agreement with the reference
-engine at each level. With several levels it adds requests/s and p99 per level
-and `throughput.svg`, p99 latency against requests/s with one line per engine
-(light or dark after the viewer's color scheme; open it in a browser to hover
-over a point).
+directory puts them side by side: throughput and latency at each concurrency
+level with 95% confidence intervals, and the change in mean latency against the
+reference engine with its paired interval; where the time goes and the engine
+steps; kernel time per request; output agreement with the reference; and the
+versions. With several levels, its `load.svg` draws throughput, mean and p99
+latency against concurrency, one line per engine. Charts follow the viewer's
+light or dark color scheme; open one in a browser to hover for its numbers,
+which the tables also hold.
 
 ```text
 OUTPUT/comparison.md             (several engines only)
-OUTPUT/throughput.svg            (several engines and concurrency levels)
-OUTPUT/<engine>/report.md        (one engine: these files go directly in OUTPUT)
+OUTPUT/load.svg                  (several engines and concurrency levels)
+OUTPUT/<engine>/results.json.gz  (one engine: these files go directly in OUTPUT)
+OUTPUT/<engine>/report.md
+OUTPUT/<engine>/load.svg         (several levels only)
+OUTPUT/<engine>/breakdown.svg
 OUTPUT/<engine>/sunburst.svg
 OUTPUT/<engine>/profile.nsys-rep
 OUTPUT/<engine>/load_profile.nsys-rep (several levels only)
+```
+
+The reports depend on `results.json.gz` alone, so the same results always
+render the same files. `bench/report.py` and `bench/compare.py` reduce the
+results to numbers; the templates in `bench/templates` (`report.md.j2`,
+`comparison.md.j2`) hold every word and table; `bench/chart.py` and
+`bench/sunburst.py` draw the charts, styled by `bench/templates/chart.css`. To
+render the reports again without Docker or the GPU, after changing a template
+for example:
+
+```bash
+python3 tools/render_reports.py OUTPUT
 ```
 
 ## Layout
@@ -57,14 +73,19 @@ bench/
   server_*.py          launch the engine's own HTTP server; PATCHES lists every change
   patching.py          the Patch table entry and how patches are applied and logged
   catalog.py           the shared item catalog: parsing and beam membership checks
-  trace.py sunburst.py report.py compare.py chart.py    outputs
+  trace.py             Nsight Systems trace summaries
+  results.py           results.json.gz: saving, loading and rendering the reports from it
+  report.py compare.py the numbers of report.md and comparison.md
+  template.py          renders templates/: the reports' words and tables, the charts' styles
+  chart.py sunburst.py the charts
 tools/make_catalog.py  seeded synthetic catalogs (see Catalog filtering)
+tools/render_reports.py  renders the reports again from saved results
 tests/                 CPU-only tests
 ```
 
 ## Run
 
-Requirements: Linux, Python 3.10+ with PyYAML, Docker with the NVIDIA runtime, the
+Requirements: Linux, Python 3.10+ with PyYAML and Jinja2, Docker with the NVIDIA runtime, the
 checkpoint the scenario pins, each engine's source at its pinned commit and a local image
 built from [images/](images/README.md). The source is mounted read-only and the
 server must import it from the mount, so an image only has to supply the
@@ -120,7 +141,7 @@ the runner does one after another.
 - **Latency and throughput:** `runs.clean` separate server processes, each measuring every level of `workload.concurrency` in turn: at each level, `runs.warmups` unmeasured and then `runs.requests` measured requests, each over a new loopback connection, from as many clients as the level: each sends its next request when its last one returns (closed loop; 1 means one at a time). The client times each request from JSON encoding to the parsed response; a level's requests/s is its measured requests over the time from their first send to their last reply.
 - **Confidence intervals:** 95% percentile intervals from a two-level bootstrap of each level's pooled requests (2,000 resamples): each resample draws the server processes with replacement, then the requests within each drawn process, so the intervals include the variation between processes as well as between requests. The draws depend only on the run and request counts, so every engine of an invocation gets the same draws and the change against the reference is paired request by request. A few processes show the variation between processes only roughly, and p99 rests on the slowest 1% of the requests: more processes narrow the first, more requests the second.
 - **Correctness:** every returned request must have `beam_width` distinct beams of `output_tokens` valid token IDs with finite scores in descending order. Scores are cumulative log-probabilities; SGLang's mean log-probability is multiplied by the beam length.
-- **Request phases and engine steps:** the launcher notes, on the clock the client uses (`time.perf_counter_ns`), when the server's request handler starts and returns and when each engine step is scheduled, launched and finished, with the requests, rows and prompt tokens it carried (SGLang: `get_next_batch_to_run` to `process_batch_result`; SID-GR: `_run_prefill` and `_run_decode_batch`). `/pilot/runtime` hands these over after each level. The client splits every measured request's latency into outside the server (client, connection and HTTP), queue (handler start to its first prefill step), prefill, decode (prefill end to its last decode step's end, including other requests' steps in between, or to the handler's return when a step sends its results before its own bookkeeping ends) and return (to the handler's return); a request without one prefill step and `output_tokens - 1` decode steps, or with times that disagree, fails the run. The hooks only read the clock: they never synchronize the GPU.
+- **Request phases and engine steps:** the launcher notes, on the clock the client uses (`time.perf_counter_ns`), when the server's request handler starts and returns and when each engine step is scheduled, launched and finished, with the requests, rows and prompt tokens it carried (SGLang: `get_next_batch_to_run` to `process_batch_result`; SID-GR: `_run_prefill` and `_run_decode_batch`). `/pilot/runtime` hands these over after each level. The client splits every measured request's latency into outside the server (client, connection and HTTP), queue (handler start to its first prefill step), prefill, decode (prefill end to its last decode step's end, including other requests' steps in between, or to the handler's return when a step sends its results before its own bookkeeping ends) and return (to the handler's return), and the reports show outside the server and return together as HTTP and response; a request without one prefill step and `output_tokens - 1` decode steps, or with times that disagree, fails the run. The hooks only read the clock: they never synchronize the GPU.
 - **Profile:** one more server process runs under `nsys` and captures `runs.profile_requests` requests after the warmups, one at a time at any concurrency, so GPU time can be attributed to each request. Kernels are attributed to a phase (`prefill`, `decode_1`, ...) and section through the NVTX range around their launch call. Each kernel also gets a family from its name (attention, attention_merge, linear, topk, sort, softmax, normalization, qk_norm, rotary, activation, kv_cache, copy, gather_scatter, reduction, math, elementwise); names cannot tell the GEMMs of different layers apart, so they share `linear`. Kernel time adds up kernel durations; the server window splits each request's handler time into kernel, overlap, memory-only and no-GPU-activity time, and the report counts the kernel and CUDA graph launch calls per request. Memory-only and no-GPU time go to the innermost phase and section range covering them, so the sunburst shows where the GPU waits, for example on eager kernel launches. With SGLang's overlap scheduler (`disable_overlap_schedule: false`) the server launches the next step before it processes the current step's results, so phases interleave in time; kernels still take the phase of their launch call. With several concurrency levels, one more server process runs under `nsys` at the largest level k: each of k clients sends `runs.profile_requests` requests, so requests share steps, and the server marks each engine step (`bench/step:<n>`, from choosing its batch to processing its results) instead of each request, with the step kind (`prefill`, `decode`) as its phase. The report gives per step kind the wall and kernel time per step, the kernel time per request amortized over the batch, the GPU time with no activity inside steps and between them, the sections, and the longest stretches with no GPU activity and where they fell. An engine that launches a step before the previous one's results are processed (SGLang's overlap scheduler) gets no profile under load: its steps cannot be told apart.
 - **Runtime facts:** attention backends, the weights' dtype (the run fails unless it is the scenario's `model.dtype`), package versions, CUDA graph use and, for SGLang, decode rows per forward (the beams of every request batched together) and whether the overlap scheduler ran are read from the running server, not inferred from settings. After the measured requests, the client also reads the server's full configuration once (`GET /pilot/config`): SGLang's resolved `ServerArgs`, SID-GR's `build_info`, and the server's environment, with the text values of names containing the word TOKEN, SECRET, PASSWORD or KEY redacted.
 - **Output agreement** (`comparison.md`): beams of the first clean run, request by request, against the reference engine (public SGLang by default, as in the SID-GR accuracy benchmark). Agreement with SGLang shows consistency, not correctness: reduced precision can flip near-tied beams.
@@ -237,7 +258,7 @@ workload:
 - **Reports.** Each report tables every level and, with variable lengths, the
   mean latency per quarter of the length range at each level; the comparison
   holds one latency table per level, agreement with the reference at the same
-  level, and `throughput.svg`.
+  level, and `load.svg`.
 
 ## Catalog filtering
 

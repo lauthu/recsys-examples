@@ -587,18 +587,10 @@ def test_every_engine_has_an_image_recipe_and_a_build_case():
             assert (runner.ROOT / adapter.recipe).is_file(), adapter.name
 
 
-def finished_run(tmp_path, name):
-    from tests.test_compare import with_outputs
-
-    run = runner.Run(name, None, None, None, tmp_path, "id", tmp_path / name)
-    return run, with_outputs("sglang" if name == PUBLIC else "sid-gr", [[1, 2, 3]], 9.0)
-
-
-def test_comparison_is_written_against_public_sglang_by_default(tmp_path):
-    args = Namespace(output=tmp_path, reference=None)
-    pairs = [finished_run(tmp_path, SID), finished_run(tmp_path, PUBLIC)]
-    runner.write_comparison(args, [p[0] for p in pairs], [p[1] for p in pairs])
-    assert "Output agreement with sglang" in (tmp_path / "comparison.md").read_text()
+def test_comparison_is_against_public_sglang_by_default():
+    assert runner.reference_name(Namespace(reference=None), [SID, PUBLIC]) == PUBLIC
+    assert runner.reference_name(Namespace(reference=None), [SID, LEGACY]) == SID
+    assert runner.reference_name(Namespace(reference=SID), [SID, PUBLIC]) == SID
 
 
 def test_manifest_combines_identities_pins_and_hashes(tmp_path):

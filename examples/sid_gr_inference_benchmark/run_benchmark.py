@@ -6,10 +6,13 @@
 A scenario (configs/scenarios/*.yaml) fixes what is measured: the model, the
 workload, the runs and an optional catalog. A solution (configs/solutions/*.yaml)
 fixes how one engine is configured. The command line gives the paths, CPUs and
-GPU of this invocation. Every clean run and the profiled run is a fresh
-container and server process. Each solution's directory receives report.md,
-sunburst.svg and profile.nsys-rep; with several solutions, OUTPUT also gets
-comparison.md. Intermediate files are kept in .work only when a run fails.
+GPU of this invocation. Every clean run and each profiled run is a fresh
+container and server process. Each solution's directory receives
+results.json.gz, everything measured and observed, and report.md with its
+charts, rendered from that file alone, and the Nsight Systems traces; with
+several solutions, OUTPUT also gets comparison.md and its chart.
+tools/render_reports.py renders the reports again from the saved results.
+Intermediate files are kept in .work only when a run fails.
 """
 
 import argparse
@@ -25,7 +28,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
-from bench import catalog, compare, provenance, report, sunburst, trace
+from bench import catalog, provenance, results, trace
 from bench.common import CACHE_ENV, fail, read_json, write_json
 from bench.config import (
     Resources,
@@ -381,13 +384,14 @@ def main(argv=None):
     if busy.split():
         fail(f"benchmark containers {busy.split()} are running; they would interfere")
     rows = make_workload(scenario, model_config)
-    finished = []
+    names = [run.name for run in runs]
+    invocation = {"solutions": names, "reference": reference_name(args, names)}
     for run in runs:
         print(f"=== {run.name}", flush=True)
         phases = run_phases(scenario, run)
-        finished.append(measure(args, run, phases, model_config, rows, model))
+        measure(args, run, phases, model_config, rows, model, invocation)
     if len(runs) > 1:
-        write_comparison(args, runs, finished)
+        results.write_comparison(args.output, results.engines(args.output))
     print(f"Wrote the reports to {args.output}")
     return 0
 
@@ -405,8 +409,8 @@ def run_phases(scenario, run):
     return phases
 
 
-def measure(args, run, phases, model_config, rows, model):
-    """Run every phase for one solution and write its three output files."""
+def measure(args, run, phases, model_config, rows, model, invocation):
+    """Run every phase for one solution and write its outputs."""
     image = run.image
     cache = args.cache_dir or args.output.parent / ".cache" / image.split(":")[-1][:12]
     (cache / "home").mkdir(parents=True, exist_ok=True)
@@ -423,11 +427,10 @@ def measure(args, run, phases, model_config, rows, model):
     # Newer configs name it "dtype"; Hugging Face reads a config without either as float32.
     dtype = model_config.get("torch_dtype") or model_config.get("dtype") or "float32"
     lengths = prompt_lengths(run.scenario, rows)
-    summary = write_outputs(
-        args, run, phases, catalog_info, before, model, dtype, lengths
+    write_outputs(
+        args, run, phases, catalog_info, before, model, dtype, lengths, invocation
     )
     shutil.rmtree(run.work)
-    return summary
 
 
 def manifest(args, run, before, model, profile):
@@ -455,42 +458,40 @@ def prompt_lengths(scenario, rows):
 
 
 def write_outputs(
-    args, run, phases, catalog_info, before, model, checkpoint_dtype, lengths
+    args,
+    run,
+    phases,
+    catalog_info,
+    before,
+    model,
+    checkpoint_dtype,
+    lengths,
+    invocation,
 ):
+    """Save the results, move the traces next to them and render the report."""
     work, resources = run.work, args.resources
-    summary = trace.analyze(work / "profile/trace.sqlite")
-    title = f"{run.adapter.title} · {model['id'].split('/')[-1]}"
-    subtitle = f"Server time per request, mean of {summary['windows']} profiled"
-    subtitle += " requests: phase › section › kernel family or non-kernel time"
-    svg = sunburst.render(
-        summary["work"], summary["gaps"], summary["windows"], title, subtitle
-    )
-    (run.output / "sunburst.svg").write_text(svg)
-    shutil.move(work / "profile/trace.nsys-rep", run.output / "profile.nsys-rep")
-    clean = [
-        read_json(work / p / "result.json") for p in phases if p.startswith("clean")
-    ]
+    profile = read_json(work / "profile/result.json")
     load = None
     if "load_profile" in phases:
         load = {
             "trace": trace.analyze(work / "load_profile/trace.sqlite", window="step"),
             "result": read_json(work / "load_profile/result.json"),
         }
-        target = run.output / "load_profile.nsys-rep"
-        shutil.move(work / "load_profile/trace.nsys-rep", target)
-    context = {
+    found = {
+        "name": run.name,
+        **invocation,
         "scenario": run.scenario,
         "solution": run.solution,
-        "clean": clean,
-        "profile": read_json(work / "profile/result.json"),
-        "trace": summary,
+        "clean": [
+            read_json(work / p / "result.json") for p in phases if p.startswith("clean")
+        ],
+        "profile": profile,
+        "trace": trace.analyze(work / "profile/trace.sqlite"),
         "load": load,
         "catalog": catalog_info,
         "model": model["id"].split("/")[-1],
         "checkpoint_dtype": checkpoint_dtype,
-        "manifest": manifest(
-            args, run, before, model, read_json(work / "profile/result.json")
-        ),
+        "manifest": manifest(args, run, before, model, profile),
         "cpus": {
             "server": cpu_list(resources.server_cpus),
             "client": cpu_list(resources.client_cpus),
@@ -501,18 +502,18 @@ def write_outputs(
         # The first clean run's beams per level and request, for the comparison.
         "outputs": read_json(work / phases[0] / "outputs.json"),
     }
-    (run.output / "report.md").write_text(report.render(context))
-    return context
+    results.save(run.output, found)
+    for phase in PROFILED:
+        if phase in phases:
+            shutil.move(
+                work / phase / "trace.nsys-rep", run.output / f"{phase}.nsys-rep"
+            )
+    results.write_report(run.output)
 
 
-def write_comparison(args, runs, finished):
-    names = [run.name for run in runs]
-    reference = args.reference or ("sglang" if "sglang" in names else names[0])
-    text = compare.render(finished, names, reference)
-    (args.output / "comparison.md").write_text(text)
-    svg = compare.chart_svg(finished, names)
-    if svg:
-        (args.output / compare.CHART).write_text(svg)
+def reference_name(args, names):
+    """The solution the comparison measures against."""
+    return args.reference or ("sglang" if "sglang" in names else names[0])
 
 
 if __name__ == "__main__":

@@ -1,39 +1,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""throughput.svg: p99 latency against requests/s, one line per engine through its
-concurrency levels, in increasing order. Static SVG for comparison.md, in light or
-dark colors after the viewer's color scheme; opened directly in a browser, every
-point shows its numbers on hover. The comparison's table holds the same numbers.
+"""Static SVG charts for report.md and comparison.md, styled by
+templates/chart.css; opened directly in a browser, every mark shows its numbers
+on hover. The reports' tables hold the same numbers.
+
+lines()    one small panel per measure (throughput, latency, ...) against the
+           concurrency levels, one line per series, so no chart needs two y-scales
+stacked()  one horizontal bar per row, split into parts, such as where a request's
+           time goes at each concurrency level
 """
 
 import math
+import re
+from pathlib import Path
 from xml.sax.saxutils import escape
 
-# Categorical slots in fixed order, (light, dark), checked with the dataviz
-# validator on the surfaces below: assign by engine order, never cycle.
-SERIES = (
-    ("#2a78d6", "#3987e5"),
-    ("#eb6834", "#d95926"),
-    ("#1baf7a", "#199e70"),
-    ("#eda100", "#c98500"),
-    ("#e87ba4", "#d55181"),
-    ("#008300", "#008300"),
-    ("#6250d6", "#9085e9"),
-    ("#e34948", "#e66767"),
-)
-# role: (light, dark)
-CHROME = {
-    "surface": ("#fcfcfb", "#1a1a19"),
-    "ink": ("#0b0b0b", "#f0efec"),
-    "ink-2": ("#52514e", "#c3c2b7"),
-    "muted": ("#898781", "#898781"),
-    "grid": ("#e1e0d9", "#2c2c2a"),
-    "axis": ("#c3c2b7", "#383835"),
-}
-WIDTH, HEIGHT = 760, 480
-LEFT, RIGHT, BOTTOM = 64, 136, 52  # plot margins; the right one holds end labels
-FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
-DIRECT_LABELS = 4  # engines up to which each line also carries its name
+STYLE = (Path(__file__).resolve().parent / "templates" / "chart.css").read_text()
+SLOTS = len(set(re.findall(r"\.l(\d+) ", STYLE)))  # series colors, in fixed order
+GAP = 2  # surface gap between touching marks, px
 
 
 def ticks(high, count=5):
@@ -51,145 +35,182 @@ def number(value):
     return f"{value:,.0f}" if value >= 10 or value == 0 else f"{value:g}"
 
 
-def colors(mode):
-    """Color rules for one mode (0 light, 1 dark); plain values rather than CSS
-    variables, which some Markdown and image renderers ignore."""
-    role = {name: pair[mode] for name, pair in CHROME.items()}
-    rules = [
-        f".surface {{ fill: {role['surface']}; }}",
-        f"text {{ fill: {role['ink']}; }}",
-        f".subtitle, .axis-title {{ fill: {role['ink-2']}; }}",
-        f".tick {{ fill: {role['muted']}; }}",
-        f".grid {{ stroke: {role['grid']}; }}",
-        f".axis {{ stroke: {role['axis']}; }}",
-        f".dot {{ stroke: {role['surface']}; }}",
-    ]
-    rules += [
-        f".l{i} {{ stroke: {pair[mode]}; }} .d{i} {{ fill: {pair[mode]}; }}"
-        for i, pair in enumerate(SERIES)
-    ]
-    return "\n".join(rules)
+def svg(width, height, title, body):
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+        f'width="{width}" height="{height}" role="img" aria-label="{escape(title)}">\n'
+        f'<style><![CDATA[\n{STYLE}]]></style>\n<rect class="surface" width="{width}" height="{height}"/>\n'
+        f"{body}\n</svg>\n"
+    )
 
 
-def style():
-    return f"""
-text {{ font-family: {FONT}; }}
-.title {{ font-size: 16px; font-weight: 600; }}
-.subtitle, .axis-title {{ font-size: 12px; }}
-.tick {{ font-size: 12px; font-variant-numeric: tabular-nums; }}
-.legend, .label {{ font-size: 13px; }}
-.grid, .axis {{ stroke-width: 1; }}
-.line {{ fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }}
-.dot {{ stroke-width: 2; }}
-.hit {{ fill: transparent; }}
-{colors(0)}
-@media (prefers-color-scheme: dark) {{
-{colors(1)}
-}}"""
-
-
-def legend(names, top):
-    """Rows of line-key and name; returns (svg, height)."""
-    parts, x, y = [], LEFT, top
-    for i, name in enumerate(names):
-        width = 40 + 7.2 * len(name)
-        if x + width > WIDTH - 16 and x > LEFT:
-            x, y = LEFT, y + 22
-        parts.append(
+def legend(names, slots, left, top, width, swatch):
+    """Rows of key and name; swatch "line" for lines, "box" for bars. Returns
+    (svg, height)."""
+    parts, x, y = [], left, top
+    for name in names:
+        size = 40 + 7.2 * len(name)
+        if x + size > width - 16 and x > left:
+            x, y = left, y + 22
+        i = slots[name]
+        key = (
             f'<line class="line l{i}" x1="{x}" y1="{y}" x2="{x + 22}" y2="{y}"/>'
             f'<circle class="dot d{i}" cx="{x + 11}" cy="{y}" r="4.5"/>'
-            f'<text class="legend" x="{x + 30}" y="{y + 4.5}">{escape(name)}</text>'
+            if swatch == "line"
+            else f'<rect class="d{i}" x="{x + 5}" y="{y - 6}" width="12" height="12" rx="2"/>'
         )
-        x += width + 18
+        parts.append(
+            key
+            + f'<text class="legend" x="{x + 30}" y="{y + 4.5}">{escape(name)}</text>'
+        )
+        x += size + 18
     return "".join(parts), y - top + 22
 
 
-def render(curves, title, subtitle):
-    """curves: {engine: [(concurrency, requests/s, p99 ms), ...]} in engine order.
-    None when there are more engines than categorical slots."""
-    names = list(curves)
-    if not names or len(names) > len(SERIES):
+def lines(title, subtitle, levels, panels):
+    """Small multiples against the concurrency levels: panels is [(panel title,
+    unit, {series: [(value, low, high) per level]})]; low and high (a 95%
+    interval) may be None. A series keeps one color in every panel; a legend
+    lists the series of panels that hold several, and a lone series is named by
+    its panel title. None with more series than color slots."""
+    slots = {}
+    for _, _, series in panels:
+        for name in series:
+            slots.setdefault(name, len(slots))
+    if len(slots) > SLOTS:
         return None
-    keys, key_height = legend(names, 78)
+    count = len(panels)
+    panel_w, gap, left = (300 if count <= 2 else 236), 64, 60
+    width = left + count * panel_w + (count - 1) * gap + 24
+    shared = [n for n in slots if any(n in s and len(s) > 1 for _, _, s in panels)]
+    keys, key_height = legend(shared, slots, left, 78, width, "line")
+    top = 78 + (key_height + 12 if shared else 0) + 26
+    plot_h, height = 230, top + 230 + 56
+    body = [
+        f'<text class="title" x="{left}" y="30">{escape(title)}</text>',
+        f'<text class="subtitle" x="{left}" y="50">{escape(subtitle)}</text>',
+        keys if shared else "",
+    ]
+    for p, (panel_title, unit, series) in enumerate(panels):
+        x0 = left + p * (panel_w + gap)
+        highs = [
+            point[2] if point[2] is not None else point[0]
+            for points in series.values()
+            for point in points
+        ]
+        ys = ticks(max(highs) * 1.05)
+        step = panel_w / len(levels)
+
+        def px(i, x0=x0, step=step):
+            return x0 + step * (i + 0.5)
+
+        def py(value, ys=ys):
+            return top + plot_h - plot_h * value / ys[-1]
+
+        body.append(
+            f'<text class="panel-title" x="{x0}" y="{top - 12}">{escape(panel_title)}</text>'
+        )
+        for value in ys:
+            y = py(value)
+            body.append(
+                f'<line class="grid" x1="{x0}" y1="{y:.1f}" x2="{x0 + panel_w}" y2="{y:.1f}"/>'
+                f'<text class="tick" x="{x0 - 8}" y="{y + 4:.1f}" text-anchor="end">{number(value)}</text>'
+            )
+        body.append(
+            f'<line class="axis" x1="{x0}" y1="{top + plot_h}" x2="{x0 + panel_w}" y2="{top + plot_h}"/>'
+        )
+        for i, level in enumerate(levels):
+            body.append(
+                f'<text class="tick" x="{px(i):.1f}" y="{top + plot_h + 18}" text-anchor="middle">{level}</text>'
+            )
+        body.append(
+            f'<text class="axis-title" x="{x0 + panel_w / 2:.1f}" y="{top + plot_h + 40}" '
+            'text-anchor="middle">Concurrency</text>'
+        )
+        marks = []
+        for name, points in series.items():
+            i = slots[name]
+            coords = [(px(j), py(value)) for j, (value, _, _) in enumerate(points)]
+            path = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+            body.append(f'<polyline class="line l{i}" points="{path}"/>')
+            for j, ((value, low, high), (x, y)) in enumerate(zip(points, coords)):
+                tip = f"{name} at concurrency {levels[j]}: {value:,.1f} {unit}"
+                if low is not None and high is not None:
+                    tip += f" (95% interval {low:,.1f} to {high:,.1f})"
+                    body.append(
+                        f'<line class="whisker l{i}" x1="{x:.1f}" y1="{py(low):.1f}" x2="{x:.1f}" y2="{py(high):.1f}"/>'
+                    )
+                marks.append(
+                    f'<g><title>{escape(tip)}</title><circle class="hit" cx="{x:.1f}" cy="{y:.1f}" r="12"/>'
+                    f'<circle class="dot d{i}" cx="{x:.1f}" cy="{y:.1f}" r="4.5"/></g>'
+                )
+        body += marks
+    return svg(width, height, title, "\n".join(body))
+
+
+def stacked(title, subtitle, axis, unit, parts, rows):
+    """Horizontal bars, one per row: rows is [(label, [value per part])]; each
+    bar is split into its parts, in order, and labeled with its total. axis
+    titles the value axis; unit follows each value on hover. None with more
+    parts than color slots."""
+    slots = {name: i for i, name in enumerate(parts)}
+    if len(parts) > SLOTS:
+        return None
+    width, left, right = 760, 116, 84
+    keys, key_height = legend(parts, slots, left, 78, width, "box")
     top = 78 + key_height + 18
-    plot_w, plot_h = WIDTH - LEFT - RIGHT, HEIGHT - top - BOTTOM
-    xs = ticks(max(rate for points in curves.values() for _, rate, _ in points) * 1.05)
-    ys = ticks(max(p99 for points in curves.values() for _, _, p99 in points) * 1.05)
+    row_h, bar = 36, 20
+    plot_w = width - left - right
+    height = top + row_h * len(rows) + 56
+    xs = ticks(max(sum(values) for _, values in rows) * 1.02)
 
-    def px(rate):
-        return LEFT + plot_w * rate / xs[-1]
+    def px(value):
+        return left + plot_w * value / xs[-1]
 
-    def py(ms):
-        return top + plot_h - plot_h * ms / ys[-1]
-
-    grid = []
-    for value in ys:
-        y = py(value)
-        grid.append(
-            f'<line class="grid" x1="{LEFT}" y1="{y:.1f}" x2="{LEFT + plot_w}" y2="{y:.1f}"/>'
-        )
-        grid.append(
-            f'<text class="tick" x="{LEFT - 8}" y="{y + 4:.1f}" text-anchor="end">{number(value)}</text>'
-        )
+    body = [
+        f'<text class="title" x="{left}" y="30">{escape(title)}</text>',
+        f'<text class="subtitle" x="{left}" y="50">{escape(subtitle)}</text>',
+        keys,
+    ]
+    bottom = top + row_h * len(rows)
     for value in xs:
         x = px(value)
-        grid.append(
-            f'<text class="tick" x="{x:.1f}" y="{top + plot_h + 18}" text-anchor="middle">{number(value)}</text>'
+        body.append(
+            f'<line class="grid" x1="{x:.1f}" y1="{top - 6}" x2="{x:.1f}" y2="{bottom}"/>'
+            f'<text class="tick" x="{x:.1f}" y="{bottom + 18}" text-anchor="middle">{number(value)}</text>'
         )
-    grid.append(
-        f'<line class="axis" x1="{LEFT}" y1="{top + plot_h}" x2="{LEFT + plot_w}" y2="{top + plot_h}"/>'
+    body.append(
+        f'<text class="axis-title" x="{left + plot_w}" y="{bottom + 40}" text-anchor="end">{escape(axis)}</text>'
     )
-
-    lines, dots, labels, ends = [], [], [], []
-    for i, (name, points) in enumerate(curves.items()):
-        coords = [(px(rate), py(p99)) for _, rate, p99 in points]
-        path = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
-        lines.append(f'<polyline class="line l{i}" points="{path}"/>')
-        for (k, rate, p99), (x, y) in zip(points, coords):
-            tip = f"{name} · concurrency {k}: {rate:.2f} requests/s, p99 {p99:.1f} ms"
-            dots.append(
-                f'<g><title>{escape(tip)}</title><circle class="hit" cx="{x:.1f}" cy="{y:.1f}" r="11"/>'
-                f'<circle class="dot d{i}" cx="{x:.1f}" cy="{y:.1f}" r="4.5"/></g>'
-            )
-        ends.append((coords[-1][1], coords[-1][0], name))
-    if len(names) <= DIRECT_LABELS:
-        placed = []
-        for y, x, name in sorted(
-            ends
-        ):  # top to bottom; skip a label that would collide
-            if all(abs(y - other) >= 16 for other in placed):
-                placed.append(y)
-                # Right of the last point, or left of it where it would leave the chart.
-                left = x + 10 + 7.2 * len(name) > WIDTH - 8
-                anchor = (
-                    f'x="{x - 10:.1f}" text-anchor="end"'
-                    if left
-                    else f'x="{x + 10:.1f}"'
+    for r, (label, values) in enumerate(rows):
+        y = top + r * row_h + (row_h - bar) / 2
+        total = sum(values)
+        body.append(
+            f'<text class="label" x="{left - 10}" y="{y + bar / 2 + 4.5:.1f}" text-anchor="end">{escape(label)}</text>'
+        )
+        start, last = 0.0, max(i for i, v in enumerate(values) if v > 0)
+        for i, value in enumerate(values):
+            if value <= 0:
+                continue
+            x, w = px(start), px(start + value) - px(start)
+            start += value
+            share = 100 * value / total
+            tip = f"{label}: {parts[i]} {value:,.1f} {unit} ({share:.0f}%)"
+            if i == last:  # rounded data end, square where it meets the previous part
+                r_ = min(4.0, w / 2)
+                shape = (
+                    f'<path class="d{slots[parts[i]]}" d="M{x:.1f},{y:.1f} h{w - r_:.1f} '
+                    f"a{r_:.1f},{r_:.1f} 0 0 1 {r_:.1f},{r_:.1f} v{bar - 2 * r_:.1f} "
+                    f'a{r_:.1f},{r_:.1f} 0 0 1 {-r_:.1f},{r_:.1f} h{-(w - r_):.1f} z"/>'
                 )
-                labels.append(
-                    f'<text class="label" {anchor} y="{y + 4.5:.1f}">{escape(name)}</text>'
+            else:
+                shape = (
+                    f'<rect class="d{slots[parts[i]]}" x="{x:.1f}" y="{y:.1f}" '
+                    f'width="{max(w - GAP, 0.5):.1f}" height="{bar}"/>'
                 )
-
-    axis_titles = (
-        f'<text class="axis-title" x="{LEFT}" y="{top - 10}">p99 latency (ms)</text>'
-        f'<text class="axis-title" x="{LEFT + plot_w}" y="{HEIGHT - 12}" text-anchor="end">Requests/s</text>'
-    )
-    body = "\n".join(
-        [
-            f'<rect class="surface" width="{WIDTH}" height="{HEIGHT}"/>',
-            f'<text class="title" x="{LEFT}" y="30">{escape(title)}</text>',
-            f'<text class="subtitle" x="{LEFT}" y="50">{escape(subtitle)}</text>',
-            keys,
-            *grid,
-            axis_titles,
-            *lines,
-            *dots,
-            *labels,
-        ]
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<svg xmlns="http://www.w3.org/2000/svg" class="viz-root" viewBox="0 0 {WIDTH} {HEIGHT}" '
-        f'width="{WIDTH}" height="{HEIGHT}" role="img" aria-label="{escape(title)}">\n'
-        f"<style>{style()}\n</style>\n{body}\n</svg>\n"
-    )
+            body.append(f"<g><title>{escape(tip)}</title>{shape}</g>")
+        body.append(
+            f'<text class="value" x="{px(total) + 8:.1f}" y="{y + bar / 2 + 4.5:.1f}">{total:,.1f}</text>'
+        )
+    return svg(width, height, title, "\n".join(body))

@@ -1,0 +1,92 @@
+{#- comparison.md across the engines of one invocation. The view comes from
+    bench/compare.py:view(); numbers are formatted only here, by the filters in
+    bench/template.py. -#}
+{% import "common.j2" as common %}
+# Beam-search engine comparison
+
+{{ common.scope(model, dtype, workload, catalog, gpu) }}
+
+## How it was measured
+
+- **Engines:** {% for engine in engines %}[{{ engine.name }}]({{ engine.name }}/report.md){% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %}, one after another on the same GPU (driver {{ driver }}). Every engine received the same requests in the same order.
+{{ common.method(workload, runs, resamples) }}
+- **Change against the reference,** {{ reference | code }}: of the mean latency at the same concurrency, with a paired 95% interval, since every engine's bootstrap resamples draw the same requests.
+
+Each engine's report adds how its GPU profiles were captured, its engine steps and its full setup.
+
+## Throughput and latency
+
+{% if "load.svg" in charts %}
+![Throughput and latency by concurrency](load.svg)
+
+{% endif %}
+{% for level in results %}
+{% if levels | length > 1 %}
+### Concurrency {{ level.k }}
+
+{% endif %}
+| Engine | Throughput (requests/s) | Mean latency (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Mean vs {{ reference }} |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+{% for row in level.engines %}
+| {{ row.name }} | {{ row.rate | num }} ({{ row.ci.rate | span }}) | {{ row.mean | num }} ({{ row.ci.mean | span }}) | {{ row.p50 | num }} | {{ row.p95 | num }} | {{ row.p99 | num }} | {% if row.change %}{{ row.change[0] | change }} ({{ row.change[1] | change }} to {{ row.change[2] | change }}){% else %}reference{% endif %} |
+{% endfor %}
+
+{% endfor %}
+## Where the time goes
+
+| Engine |{{ " Concurrency |" if levels | length > 1 }}{% for part in parts %} {{ part }} (ms) |{% endfor %} Latency (ms) |
+| --- |{{ " ---: |" if levels | length > 1 }}{% for part in parts %} ---: |{% endfor %} ---: |
+{% for engine in engines %}
+{% set i = loop.index0 %}
+{% for level in results %}
+{% set row = level.engines[i] %}
+| {{ engine.name }} |{{ " %s |" | format(level.k) if levels | length > 1 }}{% for ms in row.parts %} {{ ms | num }} |{% endfor %} {{ row.mean | num }} |
+{% endfor %}
+{% endfor %}
+
+The mean per request; the parts add up to the mean latency. Queue runs from the server receiving the request to its prefill step, prefill is that step, decode runs to the request's last decode step, and HTTP and response is the rest, inside and outside the server.
+
+## Batching
+
+| Engine |{{ " Concurrency |" if levels | length > 1 }} Prefill step (ms) | Requests per prefill step | Decode step (ms) | Requests per decode step | Engine busy |
+| --- |{{ " ---: |" if levels | length > 1 }} ---: | ---: | ---: | ---: | ---: |
+{% for engine in engines %}
+{% set i = loop.index0 %}
+{% for level in results %}
+{% set row = level.engines[i] %}
+{% set prefill, decode = row.steps.get("prefill", {}), row.steps.get("decode", {}) %}
+| {{ engine.name }} |{{ " %s |" | format(level.k) if levels | length > 1 }} {{ prefill.get("mean") | num }} | {{ prefill.get("requests") | num(2) }} | {{ decode.get("mean") | num }} | {{ decode.get("requests") | num(2) }} | {{ row.busy | pct(0) }} |
+{% endfor %}
+{% endfor %}
+
+An engine step runs from the scheduler starting to choose its batch to its results being processed. Engine busy is the share of the measuring time in which a step was running.
+
+## GPU time per request
+
+| Engine | Kernel time, one request at a time (ms) | No GPU activity, one request at a time |{% if levels | length > 1 %} Kernel time under load, concurrency {{ levels[-1] }} (ms) |{% endif +%}
+| --- | ---: | ---: |{{ " ---: |" if levels | length > 1 }}
+{% for row in gpu_rows %}
+| {{ row.name }} | {{ row.single | num }} | {{ row.idle_share | pct }} |{% if levels | length > 1 %} {{ row.loaded | num }} |{% endif +%}
+{% endfor %}
+
+From each engine's GPU profile, a separate server start under Nsight Systems; under load, the steps' kernel time over the requests they served.{% if levels | length > 1 and none in gpu_rows | map(attribute="loaded") %} "–": not captured, since the overlap scheduler leaves the steps indistinguishable in a trace.{% endif +%}
+
+## Output agreement with {{ reference }}
+
+| Engine |{{ " Concurrency |" if levels | length > 1 }} Top-1 match | Beam overlap (worst request) | Rank match | Max score Δ |
+| --- |{{ " ---: |" if levels | length > 1 }} ---: | ---: | ---: | ---: |
+{% for row in agreement %}
+| {{ row.name }} |{{ " %s |" | format(row.k) if levels | length > 1 }} {{ row.top1 | pct }} | {{ row.overlap | pct }} ({{ row.overlap_min | pct }}) | {{ row.rank | pct }} | {{ "%.4g" | format(row.score_delta) }} |
+{% endfor %}
+
+Over the measured requests of each engine's first server start{{ ", at each level" if levels | length > 1 }}. Top-1 match: identical best beam. Beam overlap: the share of the reference's beams that the engine also returned, in any order, as the mean over requests and, in parentheses, the lowest request. Rank match: the share of ranks with identical tokens. Max score Δ: the largest difference in cumulative log-probability among shared beams; with a catalog, engines normalize over different token sets, so it can be nonzero when the beams agree.
+
+## Versions
+
+| Engine | Implementation | Source | Image | Pins enforced |
+| --- | --- | --- | --- | --- |
+{% for row in versions %}
+| {{ row.name }} | {{ row.title }} | {{ row.source.url.removeprefix("https://github.com/") }} {{ row.source.commit[:12] | code }} | {{ row.image.removeprefix("sha256:")[:12] | code }} | {{ "yes" if row.source.enforced else "**no**" }} |
+{% endfor %}
+
+Model {{ model_pin.id }} @ {{ model_pin.revision[:12] | code }}; each engine's report holds its full manifest.

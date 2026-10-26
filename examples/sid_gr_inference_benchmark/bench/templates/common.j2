@@ -1,0 +1,21 @@
+{#- Macros shared by report.md.j2 and comparison.md.j2. -#}
+
+{% macro prompts(workload) -%}
+{% if workload.min_context_length is none %}{{ workload.context_length | num(0) }}-token prompts{% else %}prompts of {{ workload.min_context_length | num(0) }} to {{ workload.context_length | num(0) }} tokens{% endif %}
+{%- endmacro %}
+
+{% macro scope(model, dtype, workload, catalog, gpu) -%}
+{{ model }}, {{ dtype }} · {{ prompts(workload) }} · {{ workload.beam_width }} beams · {{ workload.output_tokens }} output tokens{% if catalog %} · catalog of {{ catalog["items"] | num(0) }} items{% endif %} · {{ gpu }}
+{%- endmacro %}
+
+{% macro method(workload, runs, resamples) -%}
+- **Load:** a closed loop. At concurrency *k*, *k* clients each send a request and, as soon as its reply arrives, their next one. Measured at concurrency {{ workload.levels | listing }}.
+- **Requests:** {{ (runs.clean * runs.requests) | num(0) }} per concurrency level: {{ runs.requests | num(0) }} in each of {{ "separate server start" | plural(runs.clean) }}{% if workload.levels | length > 1 %}, each of which measures every level in turn{% endif %}. Each level begins with {{ "unmeasured warmup request" | plural(runs.warmups) }}.
+- **Latency:** the client's time from sending a request to parsing its reply, over a new loopback HTTP connection per request.
+- **Throughput:** measured requests per second, from the first one's send to the last one's reply in each server start.
+- **Ranges** in parentheses are 95% confidence intervals, from a bootstrap that resamples the server starts and then the requests within each ({{ resamples | num(0) }} resamples){% if runs.clean == 1 %}; with one server start, they leave out the variation between starts{% endif %}.
+{%- endmacro %}
+
+{% macro source(found) -%}
+{{ found.url }} @ {{ found.commit[:12] | code }}{% if not found.enforced %} **(pin not enforced: {{ found.differences | join("; ") or "no difference" }})**{% endif %}
+{%- endmacro %}
