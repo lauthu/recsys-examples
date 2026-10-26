@@ -123,12 +123,18 @@ class Runs:
     # measures every concurrency in turn; the results pool the rounds.
     rounds: int
     requests: int  # measured requests per concurrency in each round
-    warmups: int  # unmeasured requests before each concurrency's measured ones
+    # Unmeasured requests per client before each concurrency's measured ones, so
+    # concurrency k starts with k times as many and runs full before measuring.
+    warmups: int
     profile_requests: int  # requests each GPU profile captures
 
     def __post_init__(self):
         minimums = dict(rounds=1, requests=1, warmups=0, profile_requests=1)
         at_least(self, "runs", **minimums)
+
+    def warmups_at(self, concurrency):
+        """Unmeasured requests before the measured ones at this concurrency."""
+        return self.warmups * concurrency
 
 
 @dataclass(frozen=True)
@@ -348,26 +354,29 @@ def load_model(model, workload):
     return config
 
 
-def requests_per_level(runs):
-    """Warmup and measured requests at one concurrency (a level)."""
-    return runs.warmups + max(runs.requests, runs.profile_requests)
+def block_layout(scenario):
+    """(warmup rows, rows) of each concurrency's block of requests (a level):
+    every block holds the warmups the largest concurrency sends, then the
+    measured requests, which so start at the same row in every block."""
+    runs = scenario.runs
+    warmups = runs.warmups_at(max(scenario.workload.levels))
+    return warmups, warmups + max(runs.requests, runs.profile_requests)
 
 
 def make_workload(scenario, model_config):
     """Seeded random token IDs without special tokens, identical for every engine.
 
-    Each concurrency level gets its own block of requests_per_level requests, in
-    level order, with new IDs and tokens, so a server never sees a request twice
+    Each concurrency gets its own block of requests (block_layout), in order, with new IDs and tokens, so a server never sees a request twice
     and cannot answer one level from another. With min_context_length, the
     seeded lengths are the same in every block.
     """
-    workload, runs = scenario.workload, scenario.runs
+    workload = scenario.workload
     special = set()
     for key in ("bos_token_id", "eos_token_id", "pad_token_id"):
         value = model_config.get(key)
         special.update(value if isinstance(value, list) else [value])
     allowed = [t for t in range(model_config["vocab_size"]) if t not in special]
-    count = requests_per_level(runs)
+    count = block_layout(scenario)[1]
     lengths = [workload.context_length] * count
     if workload.min_context_length is not None:
         draw = random.Random(f"{workload.seed}/lengths")

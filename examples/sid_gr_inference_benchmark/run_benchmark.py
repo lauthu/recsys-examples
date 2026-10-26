@@ -35,6 +35,7 @@ from bench.config import (
     RunConfig,
     Scenario,
     Solution,
+    block_layout,
     load_model,
     load_scenario,
     load_solution,
@@ -439,10 +440,8 @@ def manifest(args, run, before, model, profile):
 
 def prompt_lengths(scenario, rows):
     """Prompt tokens of the measured requests, in the order every level sends them."""
-    runs = scenario.runs
-    measured = rows[
-        runs.warmups : runs.warmups + max(runs.requests, runs.profile_requests)
-    ]
+    first, size = block_layout(scenario)
+    measured = rows[first:size]
     return [len(row["input_ids"]) for row in measured]
 
 

@@ -70,9 +70,10 @@ OUTPUT/<engine>/load_profile.nsys-rep  several concurrency values
    turn, starting at a different one each time. The results pool all rounds,
    so they include the variation between server starts.
 2. **Load.** At concurrency *k*, *k* clients each send a request and, as soon
-   as its reply arrives, their next one (a closed loop). Each concurrency sends
-   `runs.warmups` unmeasured requests, then `runs.requests` measured ones; no
-   request is sent twice.
+   as its reply arrives, their next one (a closed loop). Each client first
+   sends `runs.warmups` unmeasured requests, so the server runs full before
+   measuring, then the clients send `runs.requests` measured ones; no request
+   is sent twice.
 3. **Latency and throughput.** Latency is the client's time from sending a
    request to parsing its reply, over a new loopback HTTP connection.
    Throughput is measured requests per second, from the first send to the last
@@ -151,9 +152,9 @@ workload:
   concurrency: [1, 2, 4, 8]   # requests in flight: one value, or several in turn
   seed: 42                    # seeds the token IDs and lengths
 runs:
-  rounds: 3                   # each starts a new server and measures every concurrency
+  rounds: 5                   # each starts a new server and measures every concurrency
   requests: 200               # measured requests per concurrency in each round
-  warmups: 10                 # unmeasured requests before them
+  warmups: 10                 # unmeasured requests per client before them
   profile_requests: 3         # requests each GPU profile captures
 catalog:                      # optional: see Catalog filtering
   sha256: <SHA-256 of the catalog JSONL>

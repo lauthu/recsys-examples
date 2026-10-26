@@ -30,7 +30,7 @@ from pathlib import Path
 
 from bench import catalog, engines
 from bench.common import PHASES, call, read_json, write_json
-from bench.config import RunConfig, requests_per_level
+from bench.config import RunConfig, block_layout
 from bench.engines.adapter import AMBIENT
 
 # What the server marks in each profiled run: BENCH_PROFILE for its launcher.
@@ -230,7 +230,7 @@ def check_server(adapter, config, port, runtime):
 def level_blocks(rows, config):
     """{concurrency: its requests}: workload.json holds one block per
     concurrency, in order (bench.config.make_workload)."""
-    size, levels = requests_per_level(config.scenario.runs), config.workload.levels
+    size, levels = block_layout(config.scenario)[1], config.workload.levels
     return {k: rows[i * size : (i + 1) * size] for i, k in enumerate(levels)}
 
 
@@ -252,7 +252,7 @@ def run(config, name, profile, work=Path("/work")):
     directory.mkdir(parents=True, exist_ok=True)
     adapter, workload = engines.get(config.solution.engine), config.workload
     runs = config.scenario.runs
-    warmups = runs.warmups
+    start_row = block_layout(config.scenario)[0]  # each block's first measured row
     blocks = level_blocks(read_json(work / "workload.json"), config)
     mode = PROFILES[name] if profile else ""
     count = runs.profile_requests if profile else runs.requests
@@ -289,7 +289,8 @@ def run(config, name, profile, work=Path("/work")):
             # Each concurrency sends its own requests; the run "profile", the first's.
             first_block = blocks[workload.levels[0]]
             rows = first_block if mode == "requests" else blocks[concurrency]
-            measured = rows[warmups : warmups + count]
+            warmups = runs.warmups_at(concurrency)
+            measured = rows[start_row : start_row + count]
             warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
             for row, (response, *_) in zip(rows[:warmups], warm):
                 validate(adapter, config, row, response, paths)
@@ -321,6 +322,7 @@ def run(config, name, profile, work=Path("/work")):
             result["levels"].append(
                 {
                     "concurrency": concurrency,
+                    "warmups": warmups,
                     "latency_ms": latency,
                     "duration_s": duration,
                     "phases_ms": phases,

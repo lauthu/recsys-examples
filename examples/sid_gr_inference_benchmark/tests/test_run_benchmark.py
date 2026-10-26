@@ -306,9 +306,10 @@ def test_every_level_gets_new_requests_of_the_same_lengths(tmp_path):
     value = configs.load_scenario(write(tmp_path, scenario(**changes)))
     model = {"vocab_size": 50, "bos_token_id": 0, "eos_token_id": [1, 2]}
     rows = configs.make_workload(value, model)
-    size = configs.requests_per_level(value.runs)
+    # Each block: 10 warmups per client of concurrency 4, then 200 measured.
+    warmups, size = configs.block_layout(value)
     first, second = rows[:size], rows[size:]
-    assert len(rows) == 2 * size == 420
+    assert warmups == 40 and len(rows) == 2 * size == 480
     assert len({row["request_id"] for row in rows}) == len(rows)
     assert all(a["input_ids"] != b["input_ids"] for a, b in zip(first, second))
     assert [len(r["input_ids"]) for r in first] == [len(r["input_ids"]) for r in second]
@@ -483,8 +484,8 @@ def command(tmp_path, *engine_names):
 
 def test_dry_run_prints_every_phase_and_writes_nothing(tmp_path, capsys):
     assert runner.main(command(tmp_path, SID)) == 0
-    # three rounds, one profile
-    assert capsys.readouterr().out.count("docker run") == 4
+    # five rounds, one profile
+    assert capsys.readouterr().out.count("docker run") == 6
     assert not (tmp_path / "out").exists()
 
 
@@ -538,7 +539,7 @@ def test_several_solutions_get_their_own_directories(tmp_path, capsys):
     runs = runner.build_runs(args, configs.load_scenario(args.scenario))
     assert [run.output for run in runs] == [args.output / SID, args.output / LEGACY]
     assert runner.main(command(tmp_path, SID, LEGACY)) == 0
-    assert capsys.readouterr().out.count("docker run") == 8
+    assert capsys.readouterr().out.count("docker run") == 12
 
 
 def test_the_scenario_is_required(tmp_path, capsys):

@@ -10,7 +10,7 @@ import sys
 import pytest
 from bench import client, engines
 from bench.common import read_json, write_json
-from bench.config import RunConfig
+from bench.config import RunConfig, make_workload
 from tests.fixtures import WORKLOAD, run_config
 
 PATHS = [[1000 + a, 2000, 3000] for a in range(4)]
@@ -116,14 +116,6 @@ def run_fake(
 ):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
-    blocks = len(concurrency) if isinstance(concurrency, list) else 1
-    write_json(  # one block of 2 warmups + 3 measured requests per concurrency
-        tmp_path / "workload.json",
-        [
-            {"request_id": f"request-{i}", "input_ids": [5, 6, 7, 8]}
-            for i in range(5 * blocks)
-        ],
-    )
     cpus = sorted(os.sched_getaffinity(0))  # CPUs this job has
     config = run_config(
         workload=dataclasses.replace(WORKLOAD, concurrency=concurrency),
@@ -132,6 +124,10 @@ def run_fake(
         client_cpus=cpus[1:],
         catalog_items=len(PATHS),
     )
+    # One block per concurrency: 2 warmups per client of the largest, then 3
+    # measured requests.
+    rows = make_workload(config.scenario, {"vocab_size": 5000})
+    write_json(tmp_path / "workload.json", rows)
     monkeypatch.setattr(
         engines.get("sid-gr"),
         "server",
@@ -192,7 +188,7 @@ def test_clients_keep_concurrency_requests_in_flight(tmp_path, monkeypatch):
     assert len(result["levels"][0]["latency_ms"]) == 3
     # Responses stay with their requests whatever order they finish in.
     outputs = read_json(tmp_path / "round_1/outputs.json")["3"]
-    assert sorted(outputs) == ["request-2", "request-3", "request-4"]
+    assert sorted(outputs) == ["request-6", "request-7", "request-8"]
 
 
 def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
@@ -202,14 +198,17 @@ def test_each_level_is_measured_in_turn_without_warmups(tmp_path, monkeypatch):
     assert result["order"] == [2, 3, 1]
     assert [level["concurrency"] for level in result["levels"]] == [2, 3, 1]
     assert all(len(level["latency_ms"]) == 3 for level in result["levels"])
+    # Every client sends 2 warmups first, so concurrency k runs full before measuring.
+    assert [level["warmups"] for level in result["levels"]] == [4, 6, 2]
     # Each level's warmups fall between snapshots: 3 levels x 3 measured requests.
     assert result["counters"]["prefill.graph_replays"] == 9
     assert result["catalog_beams"] == 3 * 3 * 4
     # Each level sends its own block of requests; the fake server rejects repeats.
     outputs = read_json(tmp_path / "round_2/outputs.json")
-    assert sorted(outputs["1"]) == ["request-2", "request-3", "request-4"]
-    assert sorted(outputs["2"]) == ["request-7", "request-8", "request-9"]
-    assert sorted(outputs["3"]) == ["request-12", "request-13", "request-14"]
+    # Blocks of 9: 6 warmup rows (enough for concurrency 3), then 3 measured.
+    assert sorted(outputs["1"]) == ["request-6", "request-7", "request-8"]
+    assert sorted(outputs["2"]) == ["request-15", "request-16", "request-17"]
+    assert sorted(outputs["3"]) == ["request-24", "request-25", "request-26"]
 
 
 def test_each_latency_splits_into_phases_from_the_server_times(tmp_path, monkeypatch):

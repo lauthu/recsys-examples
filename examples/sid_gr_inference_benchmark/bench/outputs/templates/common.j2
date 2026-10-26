@@ -11,7 +11,7 @@
 {% macro method(workload, runs, resamples) -%}
 - **Load:** a closed loop. At concurrency *k*, *k* clients each send a request and, as soon as its reply arrives, their next one. Measured at concurrency {{ workload.levels | listing }}.
 - **Rounds:** {{ runs.rounds }}. Each round starts a new container and server{% if workload.levels | length > 1 %} and measures every concurrency in turn, starting at a different one each time{% endif %}; the results pool the rounds.
-- **Requests:** {{ (runs.rounds * runs.requests) | num(0) }} measured per concurrency{% if runs.rounds > 1 %}: {{ runs.requests | num(0) }} in each round{% endif %}, after {{ "unmeasured warmup request" | plural(runs.warmups) }} at that concurrency.
+- **Requests:** {{ (runs.rounds * runs.requests) | num(0) }} measured per concurrency{% if runs.rounds > 1 %}: {{ runs.requests | num(0) }} in each round{% endif %}, after {{ "unmeasured warmup request" | plural(runs.warmups) }} per client{% if workload.levels[-1] > 1 %}, so {{ runs.warmups }} × *k* at concurrency *k*{% endif %}.
 - **Latency:** the client's time from sending a request to parsing its reply, over a new loopback HTTP connection per request.
 - **Throughput:** measured requests per second, timed from the first send to the last reply in each round.
 - **Ranges** in parentheses are 95% confidence intervals, from a bootstrap that resamples the rounds and then the requests within each ({{ resamples | num(0) }} resamples){% if runs.rounds == 1 %}; with one round, they leave out the variation between rounds{% endif %}.

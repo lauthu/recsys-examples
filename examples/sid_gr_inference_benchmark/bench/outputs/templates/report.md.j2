@@ -104,7 +104,7 @@ Pooled over the rounds. A step starts in SGLang's `get_next_batch_to_run` or SID
 How {{ "each capture was" if load else "the capture was" }} taken:
 
 - **A separate server process** under Nsight Systems, after the rounds; tracing slows the server, so no result above comes from {{ "these" if load else "it" }}.
-- **Only the captured requests** are traced: the client sends {{ "warmup request" | plural(runs.warmups) }} at the capture's concurrency, has the server call `cudaProfilerStart`, sends the captured requests and has the server call `cudaProfilerStop`; Nsight Systems records only in between (`--capture-range=cudaProfilerApi`).
+- **Only the captured requests** are traced: the client sends {{ "warmup request" | plural(runs.warmups) }} per client at the capture's concurrency, has the server call `cudaProfilerStart`, sends the captured requests and has the server call `cudaProfilerStop`; Nsight Systems records only in between (`--capture-range=cudaProfilerApi`).
 - **One request at a time:** the server marks each request, with its phases and sections, as NVTX ranges, so the times are per request{% if profile.lengths %} (prompts of {{ profile.lengths | listing }} tokens){% endif %}.
 {% if load %}
 - **Under load:** {{ load.k }} clients keep {{ load.k }} requests in flight, as in the measured runs, so requests share steps. The server marks each engine step instead, and kernel time per request is the steps' kernel time over the {{ load.requests }} requests they served.

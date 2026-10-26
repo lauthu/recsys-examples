@@ -29,9 +29,9 @@ workload:
   seed: 42              # seeds the synthetic token IDs
 
 runs:
-  rounds: 3             # each starts a new server and measures every concurrency
+  rounds: 5             # each starts a new server and measures every concurrency
   requests: 200         # measured requests per concurrency in each round
-  warmups: 10           # unmeasured requests before them
+  warmups: 10           # unmeasured requests per client before them
   profile_requests: 3   # requests each GPU profile captures
 
 # Optional: constrain every beam to a catalog (README, Catalog filtering). The

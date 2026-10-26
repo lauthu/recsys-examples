@@ -17,7 +17,7 @@ from bench.config import Scenario, Solution, parse
 from bench.outputs import report, summary
 
 NAME = "results.json.gz"
-FORMAT = 2  # raised when saved fields change, so old results fail loudly
+FORMAT = 3  # raised when saved fields change, so old results fail loudly
 
 
 def save(directory, results):

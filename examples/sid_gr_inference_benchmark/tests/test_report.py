@@ -350,7 +350,7 @@ def test_report_opens_with_how_it_was_measured():
     rounds = "- **Rounds:** 2. Each round starts a new container and server; the"
     assert rounds + " results pool the rounds." in method
     requests = "8 measured per concurrency: 4 in each round, after 1 unmeasured warmup"
-    assert requests + " request at that concurrency." in method
+    assert requests + " request per client." in method
     assert "(2,000 resamples)." in method
     assert (
         "one more server process under Nsight Systems, apart from the rounds" in method
@@ -375,6 +375,9 @@ def test_report_charts_throughput_and_latency_by_concurrency():
     files = report.render(at(saved("sglang"), 1, 2))
     text = files["report.md"]
     assert "Measured at concurrency 1 and 2." in text
+    assert (
+        "1 unmeasured warmup request per client, so 1 × *k* at concurrency *k*." in text
+    )
     assert "measures every concurrency in turn, starting at a different one" in text
     assert "![Throughput and latency by concurrency](load.svg)" in text
     assert re.search(
@@ -415,7 +418,7 @@ def test_report_states_how_each_capture_was_taken():
     assert row + " [profile.nsys-rep](profile.nsys-rep) |" in gpu
     assert "Under load" not in gpu  # one level
     assert "How the capture was taken:" in gpu
-    assert "the client sends 1 warmup request at the capture's concurrency" in gpu
+    assert "the client sends 1 warmup request per client at the capture's" in gpu
     assert "(`--capture-range=cudaProfilerApi`)" in gpu
     assert "```bash\nnsys profile taskset python3 server\n```" in gpu
 
@@ -576,7 +579,7 @@ def test_old_results_fail_with_their_format(tmp_path):
     original = results.FORMAT
     try:
         results.FORMAT = original + 1
-        with pytest.raises(ValueError, match="has format 2, not 3"):
+        with pytest.raises(ValueError, match="has format 3, not 4"):
             results.load(tmp_path)
     finally:
         results.FORMAT = original
