@@ -25,10 +25,11 @@ Different, and nothing else
                                    and the request and step times, which it then forgets
         GET  /pilot/config         the server's build_info and environment, read
                                    once after the measured requests
-        POST /pilot/profile/start  cudaProfilerStart (BENCH_PROFILE=1 only)
+        POST /pilot/profile/start  cudaProfilerStart (profiled processes only)
         POST /pilot/profile/stop   cudaProfilerStop
-  - "profile" entries exist only in the profiled process (BENCH_PROFILE=1) and
-    push NVTX ranges bench/request|phase|section only while a capture is active.
+  - "profile" entries exist only in the profiled processes and push NVTX ranges
+    only while a capture is active: bench/request|phase|section per request, or,
+    under load (BENCH_PROFILE=steps), bench/step|phase|section per engine step.
 
 The server log lists every applied patch at startup.
 """
@@ -51,7 +52,10 @@ from bench.patching import (  # PYTHONPATH has /benchmark-tools
     configuration,
 )
 
-PROFILE = os.environ.get("BENCH_PROFILE") == "1"
+# What the profiled process marks: each request ("requests") or, under load, each
+# engine step ("steps"); "0" in the latency runs.
+MARKS = os.environ.get("BENCH_PROFILE", "0")
+PROFILE = MARKS != "0"
 PACKAGES = (
     "torch triton flashinfer-python nvidia-cutlass-dsl quack-kernels transformers"
 )
@@ -245,7 +249,7 @@ def profile(serving, start):
 
     global _capturing
     if not PROFILE:
-        raise ValueError("profiling requires BENCH_PROFILE=1")
+        raise ValueError("profiling requires BENCH_PROFILE=requests or steps")
     with _idle(serving):
         device = _executor(serving).engine.model.embed_tokens.weight.device
         with torch.cuda.device(device):
@@ -265,8 +269,8 @@ def request_range(original):
     def wrapped(self, payload):
         rid = payload.get("rid") or payload.get("request_id")
         started = time.perf_counter_ns()
-        try:
-            with nvtx("request", rid):
+        try:  # requests overlap under load, so only steps are marked there
+            with nvtx("request", rid if MARKS == "requests" else None):
                 return original(self, payload)
         finally:
             if rid is not None:
@@ -304,15 +308,28 @@ def step_times(decode):
 
 
 # ---- profile-only hooks ------------------------------------------------------
+_windows = iter(range(1, 1 << 62))  # step window numbers
+
+
 def phase_range(decode):
+    """NVTX phase per request (prefill, decode_<k>) or, marking steps, a step window
+    with its kind (prefill, decode) as the phase."""
+
     def make(original):
         def wrapped(self, *args):
             ids = args[0].request_ids if decode else args[0]
-            rid = ",".join(map(str, ids))
-            name = f"decode_{args[0].step + 1}" if decode else "prefill"
-            previous, _scope.rid = getattr(_scope, "rid", None), rid
+            if MARKS == "steps":
+                if not ids:  # _run_prefill returns at once without requests
+                    return original(self, *args)
+                unit, name = str(next(_windows)), "decode" if decode else "prefill"
+                window = nvtx("step", unit)
+            else:
+                unit = ",".join(map(str, ids))
+                name = f"decode_{args[0].step + 1}" if decode else "prefill"
+                window = contextlib.nullcontext()
+            previous, _scope.rid = getattr(_scope, "rid", None), unit
             try:
-                with nvtx("phase", f"{rid}:{name}"):
+                with window, nvtx("phase", f"{unit}:{name}"):
                     return original(self, *args)
             finally:
                 _scope.rid = previous

@@ -288,3 +288,61 @@ def test_overlap_scheduler_copies_keep_their_step_times(monkeypatch):
     for s in steps:
         assert s["scheduled_ns"] <= s["launched_ns"] <= s["finished_ns"]
     assert server_sglang._steps == []  # taken records are forgotten
+
+
+def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
+    """Under load the window opens when the scheduler starts choosing a batch, holds
+    the batch's phase and section ranges, and closes after its results; it closes
+    at once when no batch was chosen. Phases are the step kind."""
+    marks = []
+    nvtx = types.SimpleNamespace(
+        range_push=lambda text: marks.append(text),
+        range_pop=lambda: marks.append("pop"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(cuda=types.SimpleNamespace(nvtx=nvtx)),
+    )
+    for name, value in (("MARKS", "steps"), ("_capturing", True), ("_window", [])):
+        monkeypatch.setattr(server_sglang, name, value)
+    monkeypatch.setattr(server_sglang, "_batch_phase", {})
+    monkeypatch.setattr(server_sglang, "_windows", iter(range(1, 100)))
+
+    class Batch:
+        def __init__(self, decode):
+            self.reqs = [types.SimpleNamespace(rid=r) for r in ("r1", "r2")]
+            self.forward_mode = types.SimpleNamespace(is_decode=lambda: decode)
+
+    class Scheduler:  # stacked as the profiled process installs them
+        get_next_batch_to_run = server_sglang.open_window(lambda self, plan: plan)
+        run_batch = server_sglang.batch_scope("run", "scheduler_forward")(
+            lambda self, batch: None
+        )
+        process_batch_result = server_sglang.close_window(
+            server_sglang.batch_scope("result", "result")(lambda self, b, r: None)
+        )
+
+    scheduler = Scheduler()
+    scheduler.get_next_batch_to_run(types.SimpleNamespace(batch_to_run=None))
+    for batch in (Batch(False), Batch(True)):
+        scheduler.get_next_batch_to_run(types.SimpleNamespace(batch_to_run=batch))
+        scheduler.run_batch(batch)
+        scheduler.process_batch_result(batch, None)
+
+    def step(n, kind):
+        return [
+            f"bench/step:{n}",
+            f"bench/phase:{n}:{kind}",
+            f"bench/section:{n}:scheduler_forward",
+            "pop",
+            "pop",
+            f"bench/phase:{n}:{kind}",
+            f"bench/section:{n}:result",
+            "pop",
+            "pop",
+            "pop",
+        ]
+
+    assert marks == ["bench/step:1", "pop", *step(2, "prefill"), *step(3, "decode")]
+    assert server_sglang._window == []

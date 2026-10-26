@@ -116,6 +116,7 @@ def run_fake(
     concurrency=1,
     dtype="bfloat16",
     name="clean_1",
+    profile=False,
 ):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
@@ -162,7 +163,7 @@ def run_fake(
     monkeypatch.setattr(
         client, "machine", lambda: {"gpu": "G", "driver": "D", "cpu": "C"}
     )
-    client.run(plan, name, False, work=tmp_path)
+    client.run(plan, name, profile, work=tmp_path)
     return read_json(tmp_path / name / "result.json")
 
 
@@ -427,3 +428,38 @@ def test_public_sglang_uses_native_beam_width_and_checks_the_length_penalty():
     adapter.check_counters({"env": {}}, {}, 1, {"length_penalty": 1.0})
     with pytest.raises(RuntimeError, match="length penalty"):
         adapter.check_counters({"env": {}}, {}, 1, {"length_penalty": 0.5})
+
+
+def test_the_load_profile_keeps_the_largest_level_in_flight(tmp_path, monkeypatch):
+    monkeypatch.setattr(client, "nsys", lambda name: [])  # no Nsight here
+    monkeypatch.setattr(client, "export", lambda name: ["true"])
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "nsys").write_text("#!/bin/sh\necho NVIDIA Nsight Systems version 0\n")
+    (fake / "nsys").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+    result = run_fake(
+        tmp_path,
+        monkeypatch,
+        mode="slow",
+        concurrency=[1, 3],
+        name="load_profile",
+        profile=True,
+    )
+    # The largest level's own requests: each of 3 clients sends profile_requests (1).
+    assert result["order"] == [3] and result["runtime"]["max_in_flight"] == 3
+    (level,) = result["levels"]
+    assert len(level["latency_ms"]) == 3 and len(level["steps"]) == 9
+    outputs = read_json(tmp_path / "load_profile/result.json")
+    assert outputs["profile"] is True
+
+
+def test_profiled_runs_tell_the_server_what_to_mark(monkeypatch):
+    plan = {"env": {}, "server_cpus": [4, 5], "workload": WORKLOAD}
+    for name, marks in (("profile", "requests"), ("load_profile", "steps")):
+        argv, env = client.launch(adapters.get("sglang"), plan, 8000, marks, name)
+        assert argv[0] == "nsys" and f"/work/{name}/trace" in argv
+        assert env["BENCH_PROFILE"] == marks
+    argv, env = client.launch(adapters.get("sglang"), plan, 8000, "")
+    assert argv[0] == "taskset" and env["BENCH_PROFILE"] == "0"
+    assert client.level_order([1, 2, 4], "load_profile") == [4]

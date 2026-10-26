@@ -40,6 +40,7 @@ from bench.config import (
 ROOT = Path(__file__).resolve().parent
 BENCH = ROOT / "bench"
 LABEL = "sid-gr-inference-benchmark"
+PROFILED = ("profile", "load_profile")  # server processes run under Nsight Systems
 
 
 @dataclass
@@ -139,7 +140,7 @@ def docker_command(args, run, cache, image, name, phase):
         option = f"type=bind,src={path},dst={target}"
         argv += ["--mount", option + (",readonly" if readonly else "")]
     argv += [image, "python3", "-m", "bench.client", "--plan", "/work/plan.json"]
-    return argv + ["--run", phase] + (["--profile"] if phase == "profile" else [])
+    return argv + ["--run", phase] + (["--profile"] if phase in PROFILED else [])
 
 
 def run_container(argv, name, log):
@@ -346,8 +347,6 @@ def main(argv=None):
     runs = build_runs(args, scenario)
     if args.output.exists() and any(args.output.iterdir()):
         fail(f"output directory {args.output} is not empty")
-    phases = [f"clean_{i}" for i in range(1, scenario.runs.clean + 1)]
-    phases.append("profile")
     if args.dry_run:
         vocab, items = model_config["vocab_size"], None
         if args.catalog:
@@ -357,7 +356,7 @@ def main(argv=None):
             print(f"# {run.name}: added to the solution's settings (PORT is per run)")
             print(yaml.safe_dump(added, sort_keys=False).rstrip())
             cache = args.cache_dir or args.output.parent / ".cache"
-            for phase in phases:
+            for phase in run_phases(scenario, run):
                 print(
                     shlex.join(
                         docker_command(args, run, cache, run.image, "bench", phase)
@@ -385,11 +384,25 @@ def main(argv=None):
     finished = []
     for run in runs:
         print(f"=== {run.name}", flush=True)
+        phases = run_phases(scenario, run)
         finished.append(measure(args, run, phases, model_config, rows, model))
     if len(runs) > 1:
         write_comparison(args, runs, finished)
     print(f"Wrote the reports to {args.output}")
     return 0
+
+
+def run_phases(scenario, run):
+    """The server processes of one solution, in order: the clean runs, the profile
+    one request at a time and, with several levels, the profile under load at
+    the largest, unless the engine overlaps steps (no step can be told apart)."""
+    phases = [f"clean_{i}" for i in range(1, scenario.runs.clean + 1)]
+    phases.append("profile")
+    if len(scenario.workload.levels) > 1 and not run.adapter.overlaps_steps(
+        run.solution
+    ):
+        phases.append("load_profile")
+    return phases
 
 
 def measure(args, run, phases, model_config, rows, model):
@@ -447,20 +460,31 @@ def write_outputs(
     work, resources = run.work, args.resources
     summary = trace.analyze(work / "profile/trace.sqlite")
     title = f"{run.adapter.title} · {model['id'].split('/')[-1]}"
-    subtitle = f"Server time per request, mean of {summary['requests']} profiled"
+    subtitle = f"Server time per request, mean of {summary['windows']} profiled"
     subtitle += " requests: phase › section › kernel family or non-kernel time"
     svg = sunburst.render(
-        summary["work"], summary["gaps"], summary["requests"], title, subtitle
+        summary["work"], summary["gaps"], summary["windows"], title, subtitle
     )
     (run.output / "sunburst.svg").write_text(svg)
     shutil.move(work / "profile/trace.nsys-rep", run.output / "profile.nsys-rep")
-    clean = [read_json(work / phase / "result.json") for phase in phases[:-1]]
+    clean = [
+        read_json(work / p / "result.json") for p in phases if p.startswith("clean")
+    ]
+    load = None
+    if "load_profile" in phases:
+        load = {
+            "trace": trace.analyze(work / "load_profile/trace.sqlite", window="step"),
+            "result": read_json(work / "load_profile/result.json"),
+        }
+        target = run.output / "load_profile.nsys-rep"
+        shutil.move(work / "load_profile/trace.nsys-rep", target)
     context = {
         "scenario": run.scenario,
         "solution": run.solution,
         "clean": clean,
         "profile": read_json(work / "profile/result.json"),
         "trace": summary,
+        "load": load,
         "catalog": catalog_info,
         "model": model["id"].split("/")[-1],
         "checkpoint_dtype": checkpoint_dtype,

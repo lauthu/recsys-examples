@@ -46,7 +46,10 @@ from bench import adapters
 from bench.patching import Patch, apply, configuration
 
 ENGINE = os.environ.get("BENCH_ENGINE")
-PROFILE = os.environ.get("BENCH_PROFILE") == "1"
+# What the profiled process marks: each request ("requests") or, under load, each
+# engine step ("steps"); "0" in the latency runs.
+MARKS = os.environ.get("BENCH_PROFILE", "0")
+PROFILE = MARKS != "0"
 # The engine's code paths (Adapter.features) decide which patches apply.
 FEATURES = adapters.get(ENGINE).features if ENGINE else frozenset()
 TRIE_HEAD = "trie_head" in FEATURES
@@ -161,6 +164,19 @@ def patches():
                 ("_reclaim_orphans", "beam_kv"),
             )
         ),
+        # Listed after the phase patches, so their wrappers enclose those ranges.
+        Patch(
+            f"{scheduler}.get_next_batch_to_run",
+            open_window,
+            "NVTX window `bench/step:<n>` from choosing a batch (marking steps)",
+            profile_only=True,
+        ),
+        Patch(
+            f"{scheduler}.process_batch_result",
+            close_window,
+            "ends the NVTX step window after the step's results (marking steps)",
+            profile_only=True,
+        ),
         Patch(
             "sglang.srt.beam_search.trie_output_head:BeamTrieOutputHead.project_mixed",
             section("trie_output_head"),
@@ -210,6 +226,7 @@ _capturing = False
 _context = threading.local()  # request ID of the batch running on this thread
 _decode_steps: dict[str, int] = {}
 _batch_phase: dict[int, tuple[str, str]] = {}
+_window: list[int] = []  # the open step window's number, when marking steps
 # Engine steps, in the scheduler process: finished ones until /pilot/runtime takes
 # them, launched ones by batch until their results are processed.
 _steps: list[dict] = []
@@ -389,7 +406,18 @@ def capture_stopped(original):
 
 
 def batch_phase(batch, advance=False, preparation=None):
-    """(request ID, "prefill" | "decode_<k>") for a batch holding one request."""
+    """(request ID, "prefill" | "decode_<k>") for a batch holding one request; when
+    marking steps, (step window, "prefill" | "decode") for any batch."""
+    if MARKS == "steps":
+        if not _window:
+            return None, None
+        decode = preparation == "decode" or (
+            preparation is None and batch.forward_mode.is_decode()
+        )
+        unit = (str(_window[0]), "decode" if decode else "prefill")
+        if advance:
+            _batch_phase[id(batch)] = unit
+        return unit
     ids = {str(req.rid) for req in getattr(batch, "reqs", ())}
     if len(ids) != 1:
         return None, None
@@ -403,6 +431,43 @@ def batch_phase(batch, advance=False, preparation=None):
         _decode_steps[rid] = step
         _batch_phase[id(batch)] = (rid, label)
     return rid, label
+
+
+_windows = iter(range(1, 1 << 62))  # step window numbers
+
+
+def open_window(original):
+    """Marking steps: a window opens when the scheduler starts choosing a batch and,
+    if it chose one, stays open until the batch's results are processed."""
+
+    def wrapped(self, *args, **kwargs):
+        if MARKS != "steps" or not _capturing or _window:
+            return original(self, *args, **kwargs)
+        import torch
+
+        _window.append(next(_windows))
+        torch.cuda.nvtx.range_push(f"bench/step:{_window[0]}")
+        plan = original(self, *args, **kwargs)
+        if plan.batch_to_run is None:
+            torch.cuda.nvtx.range_pop()
+            _window.clear()
+        return plan
+
+    return wrapped
+
+
+def close_window(original):
+    def wrapped(self, *args, **kwargs):
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            if _window:
+                import torch
+
+                torch.cuda.nvtx.range_pop()
+                _window.clear()
+
+    return wrapped
 
 
 def batch_scope(mode, label):
@@ -483,8 +548,8 @@ def request_range(original):
         obj = kwargs.get("obj", args[0] if args else None)
         rid = getattr(obj, "rid", None)
         started = time.perf_counter_ns()
-        try:
-            with nvtx("request", rid):
+        try:  # requests overlap under load, so only steps are marked there
+            with nvtx("request", rid if MARKS == "requests" else None):
                 return await original(*args, **kwargs)
         finally:
             if rid is not None:

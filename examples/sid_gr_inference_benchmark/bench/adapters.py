@@ -92,8 +92,15 @@ class Adapter:
         # CPU thread pools match the server CPUs unless the solution says otherwise.
         threads = str(len(plan["server_cpus"]))
         env = {"OMP_NUM_THREADS": threads, "MKL_NUM_THREADS": threads}
-        env.update(plan["env"], BENCH_PROFILE="1" if profile else "0")
+        # What the launcher marks: "requests" or "steps"; "0" when not profiled.
+        env.update(plan["env"], BENCH_PROFILE=profile or "0")
         return env
+
+    def overlaps_steps(self, solution):
+        """Whether the engine launches a step before the previous one's results
+        are processed (SGLang's overlap scheduler); then steps cannot be told
+        apart in a trace."""
+        return False
 
     def profile(self, port, start):
         """Start or stop the cudaProfilerApi capture range in the server process."""
@@ -253,6 +260,9 @@ class SGLangAdapter(Adapter):
             fail(f"server_settings must not set {managed}: the runner sets them")
         if settings.get("tp_size", 1) != 1:
             fail("server_settings need tp_size 1: phase markers need one process")
+
+    def overlaps_steps(self, solution):
+        return not solution.server_settings.get("disable_overlap_schedule", False)
 
     def server(self, plan, port, profile):
         env = self.environment(plan, profile)

@@ -25,7 +25,7 @@ GAPS = [
     ["no phase", "no section", "idle", 15_000_000],
 ]
 TRACE = {
-    "requests": 2,
+    "windows": 2,
     "window_ns": 30_000_000,
     "kernel_ns": 12_000_000,
     "kernels": 40,
@@ -255,6 +255,7 @@ def context(engine, **overrides):
             "server_command": ["nsys", "profile", "taskset", "python3", "server"],
         },
         "trace": TRACE,
+        "load": None,
         "catalog": None,
         "model": "Qwen3-0.6B",
         "checkpoint_dtype": "float32",
@@ -461,3 +462,58 @@ def test_report_splits_the_latency_and_tables_the_steps():
         "| decode | 16 | 2.000 | 2.000 | 0.200 | 1.00 | 256.0 | – | 32.0% |" in section
     )
     assert "a decode step of k requests has k × 256 rows" in section
+
+
+LOAD_TRACE = {
+    "windows": 3,
+    "window_ns": 30_000_000,
+    "span_ns": 40_000_000,
+    "kernel_ns": 24_000_000,
+    "work": [
+        ["decode", "model", "attention", 16_000_000],
+        ["prefill", "model", "linear", 8_000_000],
+    ],
+    "gaps": [
+        ["decode", "model", "idle", 2_000_000],
+        ["prefill", "no section", "idle", 1_000_000],
+    ],
+    "idle": [[30_000_000, 10_000_000, "between steps"]],
+}
+
+
+def loaded(ctx, load):
+    """ctx measured at concurrency 1 and 4, with this capture under load."""
+    workload = dataclasses.replace(ctx["scenario"].workload, concurrency=[1, 4])
+    at(ctx, workload, 1, 4)
+    ctx["load"] = load
+    return ctx
+
+
+def test_report_shows_the_gpu_profile_under_load():
+    steps = [["prefill", 4, 4, 8192, 0.5, 10.0]] + [
+        ["decode", 4, 1024, None, 0.2, 10.0]
+    ] * 2
+    result = {"levels": [{"concurrency": 4, "latency_ms": [30.0] * 4, "steps": steps}]}
+    text = report.render(
+        loaded(context("sglang"), {"trace": LOAD_TRACE, "result": result})
+    )
+    section = text.split("## GPU profile under load")[1].split("## Setup")[0]
+    assert "at concurrency 4: each of 4 clients" in section
+    assert "the capture holds 3 steps. Trace: [load_profile.nsys-rep]" in section
+    # Kernel ms each over the step kind's steps, per request over the 4 requests.
+    assert "| prefill | 1 | 4.00 | 10.000 | 8.000 | 2.000 | 1.000 |" in section
+    assert "| decode | 2 | 4.00 | 10.000 | 8.000 | 4.000 | 1.000 |" in section
+    assert (
+        "6.000 ms in all at concurrency 4, against 6.000 ms one request at a time"
+        in section
+    )
+    assert "The steps took 30.000 ms of the 40.000 ms" in section
+    assert "no activity for 3.000 ms, and 10.000 ms passed between steps" in section
+    assert "| decode | model | 8.000 | 1.000 |" in section
+    assert "| 30.000 | 10.000 | between steps |" in section
+
+
+def test_report_says_why_there_is_no_profile_under_load():
+    text = report.render(loaded(context("sglang"), None))
+    assert "Not captured: the overlap scheduler launches each step" in text
+    assert "GPU profile under load" not in report.render(context("sglang"))

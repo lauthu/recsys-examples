@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Per-request GPU accounting from an Nsight Systems SQLite export.
+"""GPU accounting per request or per engine step from an Nsight Systems SQLite
+export.
 
-A request window is the server's NVTX range <prefix>/request:<rid>. A kernel gets
-a phase (and, separately, a section) only through launch evidence: the CUDA
-runtime/driver call with the same process and correlation ID must start inside
-the innermost <prefix>/phase:<rid>:<name> range on its own thread. CUDA graph
-nodes (captured with --cuda-graph-trace=node) inherit their graph launch's
-markers. Anything without unambiguous evidence stays "unknown".
+A window is the server's NVTX range <prefix>/request:<rid>, or, for a capture
+under load, <prefix>/step:<n> around one engine step. A kernel gets a phase (and,
+separately, a section) only through launch evidence: the CUDA runtime/driver
+call with the same process and correlation ID must start inside the innermost
+<prefix>/phase:<unit>:<name> range on its own thread. CUDA graph nodes (captured
+with --cuda-graph-trace=node) inherit their graph launch's markers. Anything
+without unambiguous evidence stays "unknown".
 
 Window time with no kernel running (memory operations only, or no GPU activity)
 is labeled by time instead: the innermost phase and section range, on any
@@ -20,8 +22,10 @@ from collections import defaultdict
 from bench.common import MARKER
 
 NO_PHASE, NO_SECTION = "no phase", "no section"
+BETWEEN = "between steps"  # idle time outside every step window
 
 TOP = 12  # kernels listed in the report
+IDLE = 5  # longest GPU-idle intervals listed for a capture under load
 
 # Kernel symbol substrings (lowercase) per operation family; the first match wins.
 # Only what a kernel name reveals: GEMMs of different layers (QKV, MLP, LM head)
@@ -158,7 +162,49 @@ def _partition(start, end, kernels, memory, phases, sections):
     return totals, gaps
 
 
-def analyze(path, prefix=MARKER):
+def _idle(start, end, busy):
+    """[(a, b)] stretches of [start, end) that no row of `busy` overlaps."""
+    stretches, cursor = [], start
+    for row in sorted(busy, key=lambda r: r["start"]):
+        if row["start"] > cursor:
+            stretches.append((cursor, min(row["start"], end)))
+        cursor = max(cursor, row["end"])
+        if cursor >= end:
+            break
+    if cursor < end:
+        stretches.append((cursor, end))
+    return [(a, b) for a, b in stretches if a < b]
+
+
+def _at(markers, point, default):
+    """Label of the innermost marker running at `point`, else default."""
+    running = [m for m in markers if m["start"] <= point < m["end"]]
+    if not running:
+        return default
+    return min(running, key=lambda m: m["end"] - m["start"])["label"]
+
+
+def longest_idle(windows, busy, phases, sections):
+    """The IDLE longest stretches with no GPU activity from the first window's
+    start to the last one's end, cut at window edges: [start ns from the first
+    window, ns, where], with `where` the phase and section running when the
+    stretch starts, or BETWEEN outside every window."""
+    start, end = windows[0]["start"], windows[-1]["end"]
+    edges = sorted({point for w in windows for point in (w["start"], w["end"])})
+    found = []
+    for a, b in _idle(start, end, busy):
+        cuts = [a, *(point for point in edges if a < point < b), b]
+        for c, d in zip(cuts, cuts[1:]):
+            where = BETWEEN
+            if any(w["start"] <= c < w["end"] for w in windows):
+                phase, section = _at(phases, c, NO_PHASE), _at(sections, c, NO_SECTION)
+                where = f"{phase} / {section}"
+            found.append([c - start, d - c, where])
+    return sorted(found, key=lambda gap: -gap[1])[:IDLE]
+
+
+def analyze(path, prefix=MARKER, window="request"):
+    """GPU time of each window kind ("request" or "step"), summed over windows."""
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         tables = {
@@ -185,11 +231,17 @@ def analyze(path, prefix=MARKER):
             ranges[kind].append(
                 {**row, "label": value.rpartition(":")[2], "rid": value}
             )
-    windows = sorted(ranges["request"], key=lambda w: w["start"])
+    windows = sorted(ranges[window], key=lambda w: w["start"])
     if not windows:
-        raise ValueError(f"trace has no complete {prefix}/request: NVTX ranges")
+        raise ValueError(f"trace has no complete {prefix}/{window}: NVTX ranges")
     if any(b["start"] < a["end"] for a, b in zip(windows, windows[1:])):
-        raise ValueError("request windows overlap; profile requests sequentially")
+        raise ValueError(f"{window} windows overlap; they must run one at a time")
+    span = (windows[0]["start"], windows[-1]["end"])
+    in_span = [
+        row
+        for row in kernels + memory
+        if row["start"] < span[1] and span[0] < row["end"]
+    ]
 
     def inside(row):
         return any(row["start"] < w["end"] and w["start"] < row["end"] for w in windows)
@@ -219,8 +271,8 @@ def analyze(path, prefix=MARKER):
     work, gaps = defaultdict(int), defaultdict(int)
     top = defaultdict(lambda: [0, 0])  # kernel symbol -> [ns, launches]
     busy = dict.fromkeys(("kernel", "overlap", "memory", "idle"), 0)
-    for window in windows:
-        a, b = window["start"], window["end"]
+    for each in windows:
+        a, b = each["start"], each["end"]
         phases, sections = (
             [m for m in ranges[kind] if m["start"] < b and a < m["end"]]
             for kind in ("phase", "section")
@@ -241,9 +293,15 @@ def analyze(path, prefix=MARKER):
             busy[state] += value
         for key, value in window_gaps.items():
             gaps[key] += value
+    idle = []
+    if window == "step":
+        device = [row for row in in_span if row["deviceId"] in devices]
+        idle = longest_idle(windows, device, ranges["phase"], ranges["section"])
     return {
-        "requests": len(windows),
+        "windows": len(windows),
         "window_ns": sum(w["end"] - w["start"] for w in windows),
+        "span_ns": span[1] - span[0],
+        "idle": idle,
         "busy_ns": busy,
         "kernel_ns": sum(work.values()),
         "kernels": len(kernels),

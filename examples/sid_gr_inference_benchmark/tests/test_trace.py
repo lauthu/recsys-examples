@@ -8,8 +8,11 @@ from bench import trace
 PID, THREAD, HTTP = 7, (7 << 24) | 1, (7 << 24) | 2
 
 
-def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
-    """Two requests; kernels launched inside phase/section ranges on one thread."""
+def make_trace(
+    path, windows=((100, 200), (400, 420)), graph_level=False, unit="request"
+):
+    """Two requests (or engine steps); kernels launched inside phase/section ranges
+    on one thread."""
     db = sqlite3.connect(path)
     db.executescript(
         """
@@ -27,7 +30,7 @@ def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
     names += ["cudaLaunchKernel_v7000", "cudaGraphLaunch_v10000", "cuLaunchKernelEx"]
     db.executemany("INSERT INTO StringIds VALUES (?, ?)", enumerate(names))
     nvtx = [
-        (a, b, f"bench/request:r{i}", None, HTTP) for i, (a, b) in enumerate(windows)
+        (a, b, f"bench/{unit}:r{i}", None, HTTP) for i, (a, b) in enumerate(windows)
     ]
     nvtx += [
         (110, 150, "bench/phase:r0:prefill", None, THREAD),
@@ -65,7 +68,7 @@ def make_trace(path, windows=((100, 200), (400, 420)), graph_level=False):
 
 def test_attribution_and_window_partition(tmp_path):
     result = trace.analyze(make_trace(tmp_path / "t.sqlite"))
-    assert result["requests"] == 2 and result["window_ns"] == 120
+    assert result["windows"] == 2 and result["window_ns"] == 120
     # Exclusive kernels 5+5+10+6+10, overlapping 5, memcpy alone 5, the rest idle.
     assert result["busy_ns"] == {"kernel": 36, "overlap": 5, "memory": 5, "idle": 74}
     assert result["kernels"] == 5 and result["unknown_kernels"] == 1
@@ -149,3 +152,22 @@ def test_top_kernels_are_ranked_by_time(tmp_path):
     top = trace.analyze(make_trace(tmp_path / "t.sqlite"))["top"]
     assert top[0] == ["gemm_kernel", "linear", 20, 2]
     assert [row[2] for row in top] == sorted((row[2] for row in top), reverse=True)
+
+
+def test_steps_under_load_report_their_span_and_idle_stretches(tmp_path):
+    """Windows are engine steps; idle time is cut at their edges and placed where
+    it starts: inside a step's phase and section, or between steps."""
+    result = trace.analyze(
+        make_trace(tmp_path / "t.sqlite", unit="step"), window="step"
+    )
+    assert result["windows"] == 2 and result["window_ns"] == 120
+    assert result["span_ns"] == 320  # first step's start to last step's end
+    assert result["idle"] == [
+        [100, 100, "between steps"],  # 200-300, before the kernel launched at 299
+        [210, 90, "between steps"],  # 310-400
+        [35, 25, "prefill / model"],  # 135-160
+        [0, 20, "no phase / no section"],  # 100-120
+        [80, 12, "decode_1 / no section"],  # 180-192
+    ]
+    # Request windows report no idle stretches; profile one at a time there.
+    assert trace.analyze(make_trace(tmp_path / "r.sqlite"))["idle"] == []

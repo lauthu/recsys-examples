@@ -157,3 +157,20 @@ def test_comparison_has_a_service_level_table():
     )
     # The request-level tables keep latency only.
     assert "| Engine | Mean ms | p50 ms | p95 ms | p99 ms | Mean vs reference |" in text
+
+
+def test_gpu_table_adds_the_kernel_time_per_request_under_load():
+    from tests.test_report import LOAD_TRACE
+
+    result = {"levels": [{"concurrency": 4, "latency_ms": [30.0] * 8, "steps": []}]}
+    first = with_outputs("sglang", [A, B], 10.0, concurrency=(1, 4))
+    first["load"] = {"trace": LOAD_TRACE, "result": result}
+    second = with_outputs("vedantjh2-sglang", [B, A], 20.0, concurrency=(1, 4))
+    second["load"] = None
+    text = compare.render([first, second], ["sglang", "vedantjh2"], "sglang")
+    assert (
+        "| Engine | Kernel ms/request | No GPU activity | Kernel ms/request at concurrency 4 |"
+        in text
+    )
+    assert "| sglang | 6.000 | 60.0% | 3.000 |" in text  # 24 ms over 8 requests
+    assert "| vedantjh2 | 6.000 | 60.0% | – |" in text

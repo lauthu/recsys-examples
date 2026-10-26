@@ -149,9 +149,15 @@ def render(contexts, names, reference):
     gpu, agreement, versions = [], [], []
     for name, ctx in zip(names, contexts):
         trace = ctx["trace"]
-        per_request = trace["kernel_ns"] / trace["requests"] / 1e6
+        per_request = trace["kernel_ns"] / trace["windows"] / 1e6
         idle = 100 * trace["busy_ns"]["idle"] / trace["window_ns"]
         gpu.append([name, f"{per_request:.3f}", f"{idle:.1f}%"])
+        if several:  # amortized over the requests the steps served under load
+            load = ctx["load"]
+            served = load and len(load["result"]["levels"][0]["latency_ms"])
+            gpu[-1].append(
+                f"{load['trace']['kernel_ns'] / served / 1e6:.3f}" if load else "–"
+            )
         for k in workload.levels:
             found = parity(ref["outputs"][str(k)], ctx["outputs"][str(k)])
             agreement.append(
@@ -205,6 +211,16 @@ Requests/s · p99 ms at each level. In a closed loop, throughput rises with the 
         else f"{workload.levels[0]} in flight"
     )
     runs = first["scenario"].runs
+    top = workload.levels[-1]
+    gpu_headers = ["Engine", "Kernel ms/request", "No GPU activity"]
+    loaded = ""
+    if several:
+        gpu_headers.append(f"Kernel ms/request at concurrency {top}")
+        loaded = (
+            f" At concurrency {top}, another Nsight run marks engine steps instead: "
+            "their kernel time over the requests they served ('–' for an engine whose "
+            "overlap scheduler leaves steps indistinguishable)."
+        )
     service_headers = ["Engine"] + (["Concurrency"] if several else [])
     service_headers += ["Requests/s", "Queue ms", "Prefill ms", "Decode ms"]
     service_headers += ["Prefill step ms", "Decode step ms"]
@@ -235,9 +251,9 @@ Requests/s with its 95% interval as above. Queue, prefill and decode are the mea
 
 {throughput}## GPU time per request
 
-{table(["Engine", "Kernel ms/request", "No GPU activity"], gpu, right=(1, 2))}
+{table(gpu_headers, gpu, right=range(1, len(gpu_headers)))}
 
-From each engine's separate Nsight run, which sends its requests one at a time; see its report for the definitions.
+From each engine's separate Nsight run, which sends its requests one at a time; see its report for the definitions.{loaded}
 
 ## Output agreement with {reference}
 

@@ -611,3 +611,25 @@ def test_manifest_combines_identities_pins_and_hashes(tmp_path):
     assert found["benchmark_code"] == "abc123" and found["nsys"] == "nsys 1"
     assert found["recipe"] == "images/Dockerfile.sid-gr"
     assert set(found["configs"]) == {"scenario", "solution"}
+
+
+def test_a_load_profile_follows_with_several_levels_unless_steps_overlap():
+    from types import SimpleNamespace
+
+    levels = dataclasses.replace(
+        shipped(), workload=dataclasses.replace(shipped().workload, concurrency=[1, 4])
+    )
+
+    def run(name, **settings):
+        return SimpleNamespace(
+            adapter=adapters.get(name),
+            solution=SimpleNamespace(server_settings=settings),
+        )
+
+    off = run("sglang", disable_overlap_schedule=True)
+    assert runner.run_phases(levels, off)[-2:] == ["profile", "load_profile"]
+    assert (
+        runner.run_phases(shipped(), off)[-1] == "profile"
+    )  # one level: nothing to load
+    assert "load_profile" not in runner.run_phases(levels, run("sglang"))  # overlap on
+    assert runner.run_phases(levels, run("sid-gr"))[-1] == "load_profile"

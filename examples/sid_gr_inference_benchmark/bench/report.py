@@ -193,6 +193,98 @@ def step_rows(ctx):
     return rows
 
 
+def load_rows(ctx):
+    """Per step kind of the capture under load: steps, requests each, wall and
+    kernel ms each, kernel ms per request (amortized over the batch) and ms with
+    no GPU activity each. Wall ms comes from the server's step times."""
+    trace, (level,) = ctx["load"]["trace"], ctx["load"]["result"]["levels"]
+    requests, rows = len(level["latency_ms"]), []
+    for kind in ("prefill", "decode"):
+        steps = [step for step in level["steps"] if step[0] == kind]
+        if not steps:
+            continue
+        kernel = sum(ns for phase, _, _, ns in trace["work"] if phase == kind)
+        idle = sum(
+            ns
+            for phase, _, state, ns in trace["gaps"]
+            if (phase, state) == (kind, "idle")
+        )
+        rows.append(
+            [
+                kind,
+                f"{len(steps):,}",
+                f"{statistics.fmean(step[1] for step in steps):.2f}",
+                f"{statistics.fmean(step[5] for step in steps):.3f}",
+                f"{kernel / len(steps) / 1e6:.3f}",
+                f"{kernel / requests / 1e6:.3f}",
+                f"{idle / len(steps) / 1e6:.3f}",
+            ]
+        )
+    return rows
+
+
+def load_section(ctx):
+    """## GPU profile under load, when the scenario has several levels."""
+    load, levels = ctx["load"], ctx["scenario"].workload.levels
+    if load is None:
+        if len(levels) == 1:
+            return ""
+        return (
+            "\n\n## GPU profile under load\n\nNot captured: the overlap scheduler "
+            "launches each step before the previous step's results are processed, "
+            "so a trace cannot tell the steps apart."
+        )
+    trace, (level,) = load["trace"], load["result"]["levels"]
+    k, requests = level["concurrency"], len(level["latency_ms"])
+    one = ctx["trace"]
+    single = one["kernel_ns"] / one["windows"] / 1e6
+    loaded = trace["kernel_ns"] / requests / 1e6
+    between = trace["span_ns"] - trace["window_ns"]
+    in_steps = sum(ns for _, _, state, ns in trace["gaps"] if state == "idle")
+    columns = ["Step", "Steps", "Requests each", "Wall ms each", "Kernel ms each"]
+    columns += ["Kernel ms per request", "No GPU activity ms each"]
+    sections, gaps = defaultdict(int), defaultdict(int)
+    for phase, section, _, ns in trace["work"]:
+        sections[(phase, section)] += ns
+    for phase, section, _, ns in trace["gaps"]:
+        gaps[(phase, section)] += ns
+    counts = defaultdict(int)
+    for step in level["steps"]:
+        counts[step[0]] += 1
+    section_rows = []
+    for phase, section in sorted(
+        set(sections) | set(gaps), key=lambda key: (phase_key(key[0]), -sections[key])
+    ):
+        steps = counts.get(phase) or len(level["steps"])  # unknown: per any step
+        section_rows.append(
+            [
+                phase,
+                section,
+                f"{sections[(phase, section)] / steps / 1e6:.3f}",
+                f"{gaps[(phase, section)] / steps / 1e6:.3f}",
+            ]
+        )
+    idle_rows = [
+        [f"{start / 1e6:.3f}", f"{ns / 1e6:.3f}", where]
+        for start, ns, where in trace["idle"]
+    ]
+    return f"""
+
+## GPU profile under load
+
+Another server process ran under Nsight Systems at concurrency {k}: each of {k} clients sent its next request when its last returned, {requests} measured requests after the warmups. The server marked each engine step instead of each request, since requests share steps under load; the capture holds {trace['windows']:,} steps. Trace: [load_profile.nsys-rep](load_profile.nsys-rep).
+
+{table(columns, load_rows(ctx), right=range(1, len(columns)))}
+
+Kernel time per request is the steps' kernel time over the {requests} requests they served: {loaded:.3f} ms in all at concurrency {k}, against {single:.3f} ms one request at a time (GPU profile above). The steps took {trace['window_ns'] / 1e6:.3f} ms of the {trace['span_ns'] / 1e6:.3f} ms from the first step's start to the last one's end; inside them the GPU had no activity for {in_steps / 1e6:.3f} ms, and {between / 1e6:.3f} ms passed between steps with no step running.
+
+{table(["Step", "Section", "Kernel ms per step", "Non-kernel ms per step"], section_rows, right=(2, 3))}
+
+Longest stretches with no GPU activity, from the first step's start:
+
+{table(["Starts at ms", "Lasts ms", "Inside"], idle_rows, right=(0, 1))}"""
+
+
 def interval_rows(ctx):
     """Mean, p95, p99 and requests/s with their 95% intervals, per level."""
     rows, several = [], len(summaries(ctx)) > 1
@@ -442,7 +534,7 @@ def render(ctx):
     solution, clean, trace = ctx["solution"], ctx["clean"], ctx["trace"]
     adapter = adapters.get(solution.engine)
     workload, runs = ctx["scenario"].workload, ctx["scenario"].runs
-    requests = trace["requests"]
+    requests = trace["windows"]
 
     def per_request(ns):
         return ns / requests / 1e6
@@ -521,6 +613,7 @@ def render(ctx):
         ""
         if top == 1
         else ", so it shows one request's GPU time, not how the latency runs batch"
+        + ("; the profile under load below does" if ctx["load"] else "")
     )
     if workload.min_context_length is not None:
         sizes = listing(ctx["lengths"][:requests])
@@ -640,7 +733,7 @@ Launch calls per request: {launches['kernel'] / requests:g} kernel launches and 
 
 Families come from kernel names only: GEMMs of different layers (QKV, MLP, LM head) look alike, so they share `linear`; phase and section show where a kernel ran. Open the sunburst to see families per phase and section.
 
-The server window is the request handler (NVTX `bench/request`). Times are per request. Kernel time adds up kernel durations, so concurrent kernels count separately and the total exceeds the server window by their overlap. A kernel gets its phase and section from the NVTX range around its launch call; {trace['unknown_kernels']} of {trace['kernels']:,} kernels had no unambiguous launch range and are listed as `unknown`. Non-kernel time (memory copy/set only, or no GPU activity) gets the innermost phase and section range, on any thread, that covers it; outside every range it is `{NO_PHASE}` / `{NO_SECTION}`. "No GPU activity" means no traced kernel or memory operation, which alone does not prove CPU overhead. Profiled timings are separate from the latency runs.
+The server window is the request handler (NVTX `bench/request`). Times are per request. Kernel time adds up kernel durations, so concurrent kernels count separately and the total exceeds the server window by their overlap. A kernel gets its phase and section from the NVTX range around its launch call; {trace['unknown_kernels']} of {trace['kernels']:,} kernels had no unambiguous launch range and are listed as `unknown`. Non-kernel time (memory copy/set only, or no GPU activity) gets the innermost phase and section range, on any thread, that covers it; outside every range it is `{NO_PHASE}` / `{NO_SECTION}`. "No GPU activity" means no traced kernel or memory operation, which alone does not prove CPU overhead. Profiled timings are separate from the latency runs.{load_section(ctx)}
 
 ## Setup
 

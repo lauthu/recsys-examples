@@ -9,10 +9,12 @@ warmup and then measured requests from a closed loop of that many clients (a new
 loopback connection per request); checks every returned beam, splits each
 request's latency into phases from the server's handler and step times
 (timeline) and writes /work/<run>/result.json, with the server's full settings
-and environment read once after the last level's measured requests. With --profile the
-server runs under Nsight Systems, requests go one at a time and the capture
-covers only the measured ones; the report is exported to SQLite after the
-server exits.
+and environment read once after the last level's measured requests. With
+--profile the server runs under Nsight Systems, the capture covers only the
+measured requests and the report is exported to SQLite after the server exits:
+the run "profile" sends requests one at a time and the server marks each
+request; the run "load_profile" keeps the largest level's requests in flight
+and the server marks each engine step.
 """
 
 import argparse
@@ -29,27 +31,36 @@ from pathlib import Path
 from bench import adapters, catalog
 from bench.common import PHASES, call, read_json, write_json
 
-# Capture only between cudaProfilerStart/Stop; trace CUDA graph replays per node.
-NSYS = (
-    "nsys profile --trace=cuda,nvtx,osrt --sample=none --cpuctxsw=none "
-    "--capture-range=cudaProfilerApi --capture-range-end=stop "
-    "--cuda-graph-trace=node --force-overwrite=true --output /work/profile/trace"
-).split()
-EXPORT = (
-    "nsys export --type=sqlite --force-overwrite=true "
-    "--output /work/profile/trace.sqlite /work/profile/trace.nsys-rep"
-).split()
+# What the server marks in each profiled run: BENCH_PROFILE for its launcher.
+PROFILES = {"profile": "requests", "load_profile": "steps"}
 
 
-def launch(adapter, plan, port, profile):
+def nsys(name):
+    """Capture only between cudaProfilerStart/Stop; trace CUDA graph replays per node."""
+    return (
+        "nsys profile --trace=cuda,nvtx,osrt --sample=none --cpuctxsw=none "
+        "--capture-range=cudaProfilerApi --capture-range-end=stop "
+        f"--cuda-graph-trace=node --force-overwrite=true --output /work/{name}/trace"
+    ).split()
+
+
+def export(name):
+    return (
+        "nsys export --type=sqlite --force-overwrite=true "
+        f"--output /work/{name}/trace.sqlite /work/{name}/trace.nsys-rep"
+    ).split()
+
+
+def launch(adapter, plan, port, profile, name="profile"):
     """Return (argv, env) for the server, pinned to the server CPUs. The image's
-    engine settings (AMBIENT) are dropped: the server sees only the plan's."""
+    engine settings (AMBIENT) are dropped: the server sees only the plan's.
+    profile is what the server marks ("requests" or "steps"), or empty."""
     argv, env = adapter.server(plan, port, profile)
     inherited = {
         k: v for k, v in os.environ.items() if not k.startswith(adapters.AMBIENT)
     }
     argv = ["taskset", "--cpu-list", ",".join(map(str, plan["server_cpus"])), *argv]
-    return (NSYS + argv if profile else argv), {**inherited, **env}
+    return (nsys(name) + argv if profile else argv), {**inherited, **env}
 
 
 def wait_ready(process, port, path, timeout=1800):
@@ -221,10 +232,13 @@ def level_blocks(rows, plan):
 
 def level_order(levels, name):
     """Concurrency levels in the order run `name` measures them. clean_i rotates
-    them by i - 1, so no level always runs first; the profiled run sends one
-    request at a time, because the trace attributes GPU time per request."""
+    them by i - 1, so no level always runs first. The run "profile" sends one
+    request at a time, because its trace attributes GPU time per request;
+    "load_profile" measures the largest level, attributing GPU time per step."""
     if name == "profile":
         return [1]
+    if name == "load_profile":
+        return [max(levels)]
     shift = (int(name.rsplit("_", 1)[1]) - 1) % len(levels)
     return levels[shift:] + levels[:shift]
 
@@ -235,7 +249,11 @@ def run(plan, name, profile, work=Path("/work")):
     adapter, workload = adapters.get(plan["engine"]), plan["workload"]
     warmups = plan["warmups"]
     blocks = level_blocks(read_json(plan["workload_path"]), plan)
+    mode = PROFILES[name] if profile else ""
     count = plan["profile_requests"] if profile else plan["requests"]
+    if mode == "steps":  # each client sends profile_requests, as far as the block goes
+        top = max(plan["levels"])
+        count = min(top * count, max(plan["requests"], plan["profile_requests"]))
     paths = None
     if plan["catalog"]:
         data = Path(plan["catalog"]["path"]).read_bytes()
@@ -251,7 +269,7 @@ def run(plan, name, profile, work=Path("/work")):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    argv, env = launch(adapter, plan, port, profile)
+    argv, env = launch(adapter, plan, port, mode, name)
     pid = None
     with (directory / "server.log").open("w") as log:
         options = {"stdout": log, "stderr": subprocess.STDOUT, "env": env}
@@ -261,8 +279,10 @@ def run(plan, name, profile, work=Path("/work")):
         os.sched_setaffinity(0, plan["client_cpus"])  # client threads inherit it
         counters, outputs = {}, {}
         for concurrency in order:
-            # Each level sends its own requests; the profiled run, the first level's.
-            rows = blocks[plan["levels"][0]] if profile else blocks[concurrency]
+            # Each level sends its own requests; the run "profile", the first level's.
+            rows = (
+                blocks[plan["levels"][0]] if mode == "requests" else blocks[concurrency]
+            )
             measured = rows[warmups : warmups + count]
             warm = send_all(port, adapter, rows[:warmups], workload, concurrency)
             for row, (response, *_) in zip(rows[:warmups], warm):
@@ -312,7 +332,7 @@ def run(plan, name, profile, work=Path("/work")):
     finally:
         stop(process, pid, profile)
     if profile:
-        subprocess.run(EXPORT, check=True)
+        subprocess.run(export(name), check=True)
     write_json(directory / "result.json", result)
     if not profile:  # the comparison reads these; compact because they are large
         write_json(directory / "outputs.json", outputs, indent=None)
