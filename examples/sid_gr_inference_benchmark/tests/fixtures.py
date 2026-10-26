@@ -16,13 +16,14 @@ from bench.config import (
 WORKLOAD = Workload(
     context_length=4, beam_width=4, output_tokens=3, concurrency=1, seed=0
 )
+RUNS = Runs(rounds=1, requests=3, warmups=2, profile_requests=1)
 
 
 def run_config(
     engine="sid-gr",
     *,
     workload=WORKLOAD,
-    runs=Runs(rounds=1, requests=3, warmups=2, profile_requests=1),
+    runs=RUNS,
     dtype="bfloat16",
     env=None,
     server_cpus=(4, 5),

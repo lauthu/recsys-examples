@@ -11,7 +11,7 @@ import pytest
 from bench import client, engines
 from bench.common import read_json, write_json
 from bench.config import RunConfig, make_workload
-from tests.fixtures import WORKLOAD, run_config
+from tests.fixtures import RUNS, WORKLOAD, run_config
 
 PATHS = [[1000 + a, 2000, 3000] for a in range(4)]
 # Answers like a SID-GR server with the benchmark wrapper; SGLang's native
@@ -113,6 +113,7 @@ def run_fake(
     dtype="bfloat16",
     name="round_1",
     profile=False,
+    profile_concurrency=None,
 ):
     rows = [{"item_id": i, "token_ids": p} for i, p in enumerate(PATHS)]
     (tmp_path / "catalog.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
@@ -123,6 +124,7 @@ def run_fake(
         server_cpus=cpus[:1],
         client_cpus=cpus[1:],
         catalog_items=len(PATHS),
+        runs=dataclasses.replace(RUNS, profile_concurrency=profile_concurrency),
     )
     # One block per concurrency: 2 warmups per client of the largest, then 3
     # measured requests.
@@ -277,6 +279,8 @@ def test_level_order_rotates_between_rounds():
     assert client.level_order(levels, "round_3") == [4, 1, 2]
     assert client.level_order(levels, "round_4") == [1, 2, 4]
     assert client.level_order(levels, "profile") == [1]
+    assert client.level_order(levels, "load_profile") == [4]
+    assert client.level_order(levels, "load_profile", 2) == [2]
 
 
 def test_sid_gr_fails_when_it_captures_prefill_graphs_while_measured(
@@ -428,7 +432,12 @@ def test_public_sglang_uses_native_beam_width_and_checks_the_length_penalty():
         adapter.check_counters({"env": {}}, {}, 1, {"length_penalty": 0.5})
 
 
-def test_the_load_profile_keeps_the_largest_level_in_flight(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "concurrency, chosen, k", [([1, 3], None, 3), ([1, 2, 3], 2, 2)]
+)
+def test_the_load_profile_keeps_its_concurrency_in_flight(
+    tmp_path, monkeypatch, concurrency, chosen, k
+):
     monkeypatch.setattr(client, "nsys", lambda name: [])  # no Nsight here
     monkeypatch.setattr(client, "export", lambda name: ["true"])
     fake = tmp_path / "bin"
@@ -440,14 +449,16 @@ def test_the_load_profile_keeps_the_largest_level_in_flight(tmp_path, monkeypatc
         tmp_path,
         monkeypatch,
         mode="slow",
-        concurrency=[1, 3],
+        concurrency=concurrency,
         name="load_profile",
         profile=True,
+        profile_concurrency=chosen,
     )
-    # The largest level's own requests: each of 3 clients sends profile_requests (1).
-    assert result["order"] == [3] and result["runtime"]["max_in_flight"] == 3
+    # runs.profile_concurrency (by default the largest) with its own requests:
+    # each of k clients sends profile_requests (1).
+    assert result["order"] == [k] and result["runtime"]["max_in_flight"] == k
     (level,) = result["levels"]
-    assert len(level["latency_ms"]) == 3 and len(level["steps"]) == 9
+    assert len(level["latency_ms"]) == k and len(level["steps"]) == 3 * k
     outputs = read_json(tmp_path / "load_profile/result.json")
     assert outputs["profile"] is True
 

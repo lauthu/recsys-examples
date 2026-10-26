@@ -127,6 +127,8 @@ class Runs:
     # concurrency k starts with k times as many and runs full before measuring.
     warmups: int
     profile_requests: int  # requests each GPU profile captures
+    # The concurrency the GPU profile under load captures; default: the largest.
+    profile_concurrency: int | None = None
 
     def __post_init__(self):
         minimums = dict(rounds=1, requests=1, warmups=0, profile_requests=1)
@@ -158,6 +160,13 @@ class Scenario:
     workload: Workload
     runs: Runs
     catalog: CatalogPin | None = None
+
+    def __post_init__(self):
+        chosen = self.runs.profile_concurrency
+        check(
+            chosen is None or chosen in self.workload.levels,
+            "runs.profile_concurrency must be one of workload.concurrency",
+        )
 
 
 # ---- command line ----------------------------------------------------------
@@ -352,6 +361,11 @@ def load_model(model, workload):
     if workload.beam_width > config["vocab_size"]:
         fail("beam_width exceeds the vocabulary size")
     return config
+
+
+def load_concurrency(scenario):
+    """The concurrency the GPU profile under load captures."""
+    return scenario.runs.profile_concurrency or max(scenario.workload.levels)
 
 
 def block_layout(scenario):

@@ -63,7 +63,7 @@ An engine step runs from the scheduler starting to choose its batch to its resul
 
 ## GPU time per request
 
-| Engine | Kernel time, one request at a time (ms) | No GPU activity, one request at a time |{% if levels | length > 1 %} Kernel time under load, concurrency {{ levels[-1] }} (ms) |{% endif +%}
+| Engine | Kernel time, one request at a time (ms) | No GPU activity, one request at a time |{% if levels | length > 1 %} Kernel time under load, concurrency {{ load_concurrency }} (ms) |{% endif +%}
 | --- | ---: | ---: |{{ " ---: |" if levels | length > 1 }}
 {% for row in gpu_rows %}
 | {{ row.name }} | {{ row.single | num }} | {{ row.idle_share | pct }} |{% if levels | length > 1 %} {{ row.loaded | num }} |{% endif +%}

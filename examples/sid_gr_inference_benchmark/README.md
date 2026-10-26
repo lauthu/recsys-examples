@@ -90,8 +90,9 @@ OUTPUT/<engine>/load_profile.nsys-rep  several concurrency values
 6. **GPU profiles.** One more server process runs under Nsight Systems and
    captures `runs.profile_requests` requests one at a time, so GPU time is
    attributed to each request's phases and sections. With several concurrency
-   values, another one captures the largest under load, per engine step (not
-   with SGLang's overlap scheduler, whose steps a trace cannot tell apart).
+   values, another one captures `runs.profile_concurrency` (by default the
+   largest) under load, per engine step, except with SGLang's overlap
+   scheduler, whose steps a trace cannot tell apart.
    Captures hold only the measured requests (`cudaProfilerApi`); tracing slows
    the server, so no latency comes from them.
 7. **Checks.** Every reply must hold `beam_width` distinct beams of
@@ -153,9 +154,10 @@ workload:
   seed: 42                    # seeds the token IDs and lengths
 runs:
   rounds: 5                   # each starts a new server and measures every concurrency
-  requests: 200               # measured requests per concurrency in each round
+  requests: 500               # measured requests per concurrency in each round
   warmups: 10                 # unmeasured requests per client before them
   profile_requests: 3         # requests each GPU profile captures
+  profile_concurrency: 4      # optional: the concurrency profiled under load; default the largest
 catalog:                      # optional: see Catalog filtering
   sha256: <SHA-256 of the catalog JSONL>
 ```

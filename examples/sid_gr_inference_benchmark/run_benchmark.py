@@ -388,8 +388,8 @@ def main(argv=None):
 def run_phases(scenario, run):
     """The server processes of one solution, in order: the rounds, the profile
     one request at a time and, with several concurrency values, the profile
-    under load at the largest, unless the engine overlaps steps (then no step
-    can be told apart)."""
+    under load at runs.profile_concurrency (by default the largest), unless
+    the engine overlaps steps (then no step can be told apart)."""
     phases = [f"round_{i}" for i in range(1, scenario.runs.rounds + 1)]
     phases.append("profile")
     if len(scenario.workload.levels) > 1 and not run.adapter.overlaps_steps(

@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import re
 import xml.etree.ElementTree as ET
 
@@ -149,6 +150,17 @@ def test_gpu_table_adds_the_kernel_time_per_request_under_load():
     assert "| sglang | 6.0 | 60.0% | 3.0 |" in part  # 24 ms over 8 requests
     assert "| vedantjh2 | 6.0 | 60.0% | – |" in part
     assert '"–": not captured' in part
+
+
+def test_the_gpu_table_names_the_profiled_concurrency():
+    result = {"levels": [{"concurrency": 2, "latency_ms": [30.0] * 8, "steps": []}]}
+    found = with_outputs("sglang", [A, B], 10.0, concurrency=(1, 2, 4))
+    runs = dataclasses.replace(found["scenario"].runs, profile_concurrency=2)
+    found["scenario"] = dataclasses.replace(found["scenario"], runs=runs)
+    found["load"] = {"trace": LOAD_TRACE, "result": result}
+    part = section(text_of([found], ["sglang"], "sglang"), "## GPU time per request")
+    assert "| Kernel time under load, concurrency 2 (ms) |" in part
+    assert "| sglang | 6.0 | 60.0% | 3.0 |" in part
 
 
 def test_chart_assigns_colors_in_order_and_never_cycles():

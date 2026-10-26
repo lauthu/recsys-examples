@@ -109,6 +109,7 @@ INVALID_SCENARIO = [
     ({"workload.min_context_length": 0}, "between 1 and context_length"),
     ({"workload.min_context_length": 4096}, "between 1 and context_length"),
     ({"runs.rounds": "3"}, "runs.rounds must be int, not str"),
+    ({"runs.profile_concurrency": 2}, "must be one of workload.concurrency"),
     ({"model.revision": "main"}, "40-character Hub commit"),
     ({"model.dtype": "half"}, "model.dtype must be one of bfloat16, float16"),
     ({"catalog": {"sha256": "abc"}}, "catalog.sha256 must be a 64-character"),
@@ -296,7 +297,7 @@ def test_workload_is_seeded_and_skips_special_tokens(tmp_path):
     model = {"vocab_size": 50, "bos_token_id": 0, "eos_token_id": [1, 2]}
     rows = configs.make_workload(value, model)
     assert rows == configs.make_workload(value, model)
-    assert len(rows) == 210 and rows[10]["request_id"] == "request-10"
+    assert len(rows) == 510 and rows[10]["request_id"] == "request-10"
     assert {t for row in rows for t in row["input_ids"]} <= set(range(3, 50))
 
 
@@ -309,7 +310,7 @@ def test_every_level_gets_new_requests_of_the_same_lengths(tmp_path):
     # Each block: 10 warmups per client of concurrency 4, then 200 measured.
     warmups, size = configs.block_layout(value)
     first, second = rows[:size], rows[size:]
-    assert warmups == 40 and len(rows) == 2 * size == 480
+    assert warmups == 40 and len(rows) == 2 * size == 1080
     assert len({row["request_id"] for row in rows}) == len(rows)
     assert all(a["input_ids"] != b["input_ids"] for a, b in zip(first, second))
     assert [len(r["input_ids"]) for r in first] == [len(r["input_ids"]) for r in second]
@@ -427,7 +428,7 @@ def test_prepare_writes_the_run_config_and_vedantjh2_model_view(tmp_path):
     assert config.resources.server_cpus == list(range(10))
     assert config.resources.client_cpus == [10]
     assert config.vocab_size == 5000 and config.catalog_items == 256
-    assert len(read_json(run.work / "workload.json")) == 210
+    assert len(read_json(run.work / "workload.json")) == 510
     assert run.adapter.catalog_source == "/model/trie_output_head.safetensors"
     view = run.work / "model"
     assert (view / "config.json").readlink().as_posix() == "/model-source/config.json"

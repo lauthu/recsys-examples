@@ -13,8 +13,9 @@ and environment read once after the last concurrency's measured requests. With
 --profile the server runs under Nsight Systems, the capture covers only the
 measured requests and the report is exported to SQLite after the server exits:
 the run "profile" sends requests one at a time and the server marks each
-request; the run "load_profile" keeps the largest concurrency's requests in
-flight and the server marks each engine step.
+request; the run "load_profile" keeps runs.profile_concurrency's requests in
+flight (by default the largest concurrency's) and the server marks each
+engine step.
 """
 
 import argparse
@@ -30,7 +31,7 @@ from pathlib import Path
 
 from bench import catalog, engines
 from bench.common import PHASES, call, read_json, write_json
-from bench.config import RunConfig, block_layout
+from bench.config import RunConfig, block_layout, load_concurrency
 from bench.engines.adapter import AMBIENT
 
 # What the server marks in each profiled run: BENCH_PROFILE for its launcher.
@@ -234,15 +235,16 @@ def level_blocks(rows, config):
     return {k: rows[i * size : (i + 1) * size] for i, k in enumerate(levels)}
 
 
-def level_order(levels, name):
+def level_order(levels, name, load=None):
     """The concurrency values in the order run `name` measures them. round_i
     rotates them by i - 1, so none always runs first. The run "profile" sends one
     request at a time, because its trace attributes GPU time per request;
-    "load_profile" measures the largest, attributing GPU time per step."""
+    "load_profile" measures concurrency `load` (by default the largest),
+    attributing GPU time per step."""
     if name == "profile":
         return [1]
     if name == "load_profile":
-        return [max(levels)]
+        return [load or max(levels)]
     shift = (int(name.rsplit("_", 1)[1]) - 1) % len(levels)
     return levels[shift:] + levels[:shift]
 
@@ -256,9 +258,9 @@ def run(config, name, profile, work=Path("/work")):
     blocks = level_blocks(read_json(work / "workload.json"), config)
     mode = PROFILES[name] if profile else ""
     count = runs.profile_requests if profile else runs.requests
+    load = load_concurrency(config.scenario)
     if mode == "steps":  # each client sends profile_requests, as far as the block goes
-        top = max(workload.levels)
-        count = min(top * count, max(runs.requests, runs.profile_requests))
+        count = min(load * count, max(runs.requests, runs.profile_requests))
     paths = None
     if config.catalog_items is not None:
         data = (work / "catalog.jsonl").read_bytes()
@@ -266,7 +268,7 @@ def run(config, name, profile, work=Path("/work")):
             output_tokens=workload.output_tokens, beam_width=workload.beam_width
         )
         paths, _ = catalog.parse(data, **shape, vocab_size=config.vocab_size)
-    order = level_order(workload.levels, name)
+    order = level_order(workload.levels, name, load)
     result = {"run": name, "profile": profile, "order": order, "levels": []}
     result.update(machine())
     if profile:

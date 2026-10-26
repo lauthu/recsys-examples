@@ -9,6 +9,7 @@ at the same concurrency, using the first round of each.
 """
 
 from bench import engines
+from bench.config import load_concurrency
 from bench.outputs import chart, template
 from bench.outputs.report import (
     PARTS,
@@ -126,6 +127,7 @@ def view(everything, names, reference):
         "driver": first["rounds"][0]["driver"],
         "workload": workload,
         "levels": workload.levels,
+        "load_concurrency": load_concurrency(first["scenario"]),
         "runs": first["scenario"].runs,
         "catalog": first["catalog"],
         "resamples": RESAMPLES,
