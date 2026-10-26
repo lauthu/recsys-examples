@@ -32,6 +32,22 @@ Each engine's report adds how its GPU profiles were captured, its engine steps a
 {% endfor %}
 
 {% endfor %}
+{% if lengths %}
+## Latency by prompt length
+
+{% if "lengths.svg" in charts %}
+![Latency by prompt length at concurrency {{ levels[0] }}](lengths.svg)
+
+{% endif %}
+| Concurrency | Prompt tokens | Requests per round |{% for engine in engines %} {{ engine.name }} (ms) |{% endfor +%}
+| ---: | --- | ---: |{% for engine in engines %} ---: |{% endfor +%}
+{% for row in lengths %}
+| {{ row.k }} | {{ row.low | num(0) }}–{{ row.high | num(0) }} | {{ row.requests }} |{% for ms in row.means %} {{ ms | num }} |{% endfor +%}
+{% endfor %}
+
+The mean latency of the requests whose prompts fall in each quarter of the length range, pooled over the rounds. Every engine gets the same prompts. At higher concurrency, a request shares its batch with prompts of other lengths, so its own length matters less.
+
+{% endif %}
 ## Where the time goes
 
 | Engine |{{ " Concurrency |" if levels | length > 1 }}{% for part in parts %} {{ part }} (ms) |{% endfor %} Latency (ms) |

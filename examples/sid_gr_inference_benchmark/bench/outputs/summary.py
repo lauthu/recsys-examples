@@ -15,6 +15,7 @@ from bench.outputs.report import (
     PARTS,
     RESAMPLES,
     interval,
+    length_rows,
     level_records,
     parts,
     phase_means,
@@ -84,6 +85,28 @@ def level_view(everything, names, reference):
     return levels
 
 
+def length_view(everything):
+    """Mean latency per prompt-length bin at each concurrency, one value per
+    engine; None with one prompt length. Every engine gets the same prompts,
+    so the bins hold the same requests."""
+    per_engine = [length_rows(results) for results in everything]
+    if per_engine[0] is None:
+        return None
+    rows = []
+    for i, k in enumerate(everything[0]["scenario"].workload.levels):
+        for b, first in enumerate(per_engine[0]):
+            rows.append(
+                {
+                    "k": k,
+                    "low": first["low"],
+                    "high": first["high"],
+                    "requests": first["requests"],
+                    "means": [engine[b]["means"][i] for engine in per_engine],
+                }
+            )
+    return rows
+
+
 def gpu_rows(everything, names):
     """Kernel time per request of each engine's captures."""
     rows = []
@@ -132,6 +155,7 @@ def view(everything, names, reference):
         "catalog": first["catalog"],
         "resamples": RESAMPLES,
         "results": level_view(everything, names, reference),
+        "lengths": length_view(everything),
         "gpu_rows": gpu_rows(everything, names),
         "agreement": agreement,
         "versions": [
@@ -181,12 +205,37 @@ def load_chart(found):
     )
 
 
+def length_chart(found):
+    """Mean latency against prompt length at the lowest concurrency, one line
+    per engine, where length matters most; None with one prompt length or
+    more engines than color slots."""
+    rows = found["lengths"]
+    if not rows:
+        return None
+    k = found["levels"][0]
+    rows = [row for row in rows if row["k"] == k]
+    labels = [f"{row['low']:,}–{row['high']:,}" for row in rows]
+    series = {
+        engine["name"]: [(row["means"][i], None, None) for row in rows]
+        for i, engine in enumerate(found["engines"])
+    }
+    return chart.lines(
+        f"Latency by prompt length at concurrency {k}",
+        scope(found),
+        labels,
+        [("Mean latency (ms)", "ms", series)],
+        axis="Prompt tokens",
+        where="with {}-token prompts",
+    )
+
+
 def render(everything, names, reference):
     """{file name: text} of summary.md and its chart."""
     found = view(everything, names, reference)
     files = {}
-    svg = load_chart(found)
-    if svg:
-        files["load.svg"] = svg
+    for name, draw in (("load.svg", load_chart), ("lengths.svg", length_chart)):
+        svg = draw(found)
+        if svg:
+            files[name] = svg
     text = template.render("summary.md.j2", **found, charts=files.keys(), parts=PARTS)
     return {"summary.md": text, **files}

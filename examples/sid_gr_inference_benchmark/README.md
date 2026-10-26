@@ -42,6 +42,7 @@ python3 run_benchmark.py --scenario configs/scenarios/qwen3_0_6b.yaml \
 ```text
 OUTPUT/summary.md                      several engines: all of them side by side
 OUTPUT/load.svg                        several engines, several concurrency values
+OUTPUT/lengths.svg                     several engines, prompts of several lengths
 OUTPUT/<engine>/report.md              one engine (with one engine, its files are in OUTPUT)
 OUTPUT/<engine>/results.json.gz
 OUTPUT/<engine>/load.svg               several concurrency values
@@ -55,11 +56,12 @@ OUTPUT/<engine>/load_profile.nsys-rep  several concurrency values
   concurrency; where a request's time goes; the engine's steps; the GPU
   profiles and how they were captured; the setup; and how to reproduce it.
 - `summary.md`: the engines side by side, with the change in mean latency
-  against the reference, kernel time per request, output agreement and versions.
+  against the reference, latency by prompt length when lengths vary, kernel
+  time per request, output agreement and versions.
 - `results.json.gz`: everything measured and observed. The reports are rendered
   from it alone, so the same results always give the same reports.
-- `load.svg`, `breakdown.svg`: throughput and latency against concurrency, and
-  where a request's time goes. `sunburst.svg`: GPU time per request by phase,
+- `load.svg`, `breakdown.svg`, `lengths.svg`: throughput and latency against
+  concurrency, where a request's time goes, and latency against prompt length. `sunburst.svg`: GPU time per request by phase,
   section and kernel family; open it in a browser to zoom.
 - `*.nsys-rep`: the Nsight Systems traces of the GPU profiles.
 

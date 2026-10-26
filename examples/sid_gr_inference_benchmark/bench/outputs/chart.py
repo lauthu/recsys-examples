@@ -4,8 +4,9 @@
 templates/chart.css; opened directly in a browser, every mark shows its numbers
 on hover. The reports' tables hold the same numbers.
 
-lines()    one small panel per measure (throughput, latency, ...) against the
-           concurrency levels, one line per series, so no chart needs two y-scales
+lines()    one small panel per measure (throughput, latency, ...) against
+           concurrency or another category, one line per series, so no chart
+           needs two y-scales
 stacked()  one horizontal bar per row, split into parts, such as where a request's
            time goes at each concurrency level
 """
@@ -68,12 +69,16 @@ def legend(names, slots, left, top, width, swatch):
     return "".join(parts), y - top + 22
 
 
-def lines(title, subtitle, levels, panels):
-    """Small multiples against the concurrency levels: panels is [(panel title,
-    unit, {series: [(value, low, high) per level]})]; low and high (a 95%
-    interval) may be None. A series keeps one color in every panel; a legend
-    lists the series of panels that hold several, and a lone series is named by
-    its panel title. None with more series than color slots."""
+def lines(
+    title, subtitle, labels, panels, axis="Concurrency", where="at concurrency {}"
+):
+    """Small multiples against categories on the x-axis, concurrency values by
+    default: panels is [(panel title, unit, {series: [(value, low, high) per
+    label]})]; low and high (a 95% interval) may be None. axis titles the
+    x-axis, and where says where a point is on hover. A series keeps one color
+    in every panel; a legend lists the series of panels that hold several, and
+    a lone series is named by its panel title. None with more series than color
+    slots."""
     slots = {}
     for _, _, series in panels:
         for name in series:
@@ -81,7 +86,7 @@ def lines(title, subtitle, levels, panels):
     if len(slots) > SLOTS:
         return None
     count = len(panels)
-    panel_w, gap, left = (300 if count <= 2 else 236), 64, 60
+    panel_w, gap, left = {1: 420, 2: 300}.get(count, 236), 64, 60
     width = left + count * panel_w + (count - 1) * gap + 24
     shared = [n for n in slots if any(n in s and len(s) > 1 for _, _, s in panels)]
     keys, key_height = legend(shared, slots, left, 78, width, "line")
@@ -100,7 +105,7 @@ def lines(title, subtitle, levels, panels):
             for point in points
         ]
         ys = ticks(max(highs) * 1.05)
-        step = panel_w / len(levels)
+        step = panel_w / len(labels)
 
         def px(i, x0=x0, step=step):
             return x0 + step * (i + 0.5)
@@ -120,13 +125,13 @@ def lines(title, subtitle, levels, panels):
         body.append(
             f'<line class="axis" x1="{x0}" y1="{top + plot_h}" x2="{x0 + panel_w}" y2="{top + plot_h}"/>'
         )
-        for i, level in enumerate(levels):
+        for i, label in enumerate(labels):
             body.append(
-                f'<text class="tick" x="{px(i):.1f}" y="{top + plot_h + 18}" text-anchor="middle">{level}</text>'
+                f'<text class="tick" x="{px(i):.1f}" y="{top + plot_h + 18}" text-anchor="middle">{escape(str(label))}</text>'
             )
         body.append(
             f'<text class="axis-title" x="{x0 + panel_w / 2:.1f}" y="{top + plot_h + 40}" '
-            'text-anchor="middle">Concurrency</text>'
+            f'text-anchor="middle">{escape(axis)}</text>'
         )
         marks = []
         for name, points in series.items():
@@ -135,7 +140,7 @@ def lines(title, subtitle, levels, panels):
             path = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
             body.append(f'<polyline class="line l{i}" points="{path}"/>')
             for j, ((value, low, high), (x, y)) in enumerate(zip(points, coords)):
-                tip = f"{name} at concurrency {levels[j]}: {value:,.1f} {unit}"
+                tip = f"{name} {where.format(labels[j])}: {value:,.1f} {unit}"
                 if low is not None and high is not None:
                     tip += f" (95% interval {low:,.1f} to {high:,.1f})"
                     body.append(

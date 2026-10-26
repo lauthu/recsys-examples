@@ -163,6 +163,38 @@ def test_the_gpu_table_names_the_profiled_concurrency():
     assert "| sglang | 6.0 | 60.0% | 3.0 |" in part
 
 
+def variable(engine, offset):
+    """Two rounds at concurrency 1 and 4 with prompts of 100, 200, 300 and 500
+    tokens, answered in 10, 12, 14 and 16 ms plus offset."""
+    found = with_outputs(engine, [A, B], 10.0, concurrency=(1, 4))
+    workload = dataclasses.replace(
+        found["scenario"].workload, context_length=500, min_context_length=100
+    )
+    found["scenario"] = dataclasses.replace(found["scenario"], workload=workload)
+    found["lengths"] = [100, 200, 300, 500]
+    for run in found["rounds"]:
+        latency = [ms + offset for ms in (10.0, 12.0, 14.0, 16.0)]
+        run["levels"] = levels(1, 4, latency=latency)
+    return found
+
+
+def test_summary_tables_and_charts_latency_by_prompt_length():
+    everything = [variable("sglang", 0.0), variable("vedantjh2-sglang", 5.0)]
+    files = summary.render(everything, ["sglang", "vedantjh2"], "sglang")
+    part = section(files["summary.md"], "## Latency by prompt length")
+    columns = "| Concurrency | Prompt tokens | Requests per round |"
+    assert columns + " sglang (ms) | vedantjh2 (ms) |" in part
+    assert "| 1 | 100–199 | 1 | 10.0 | 15.0 |" in part
+    assert "| 4 | 400–500 | 1 | 16.0 | 21.0 |" in part
+    assert "![Latency by prompt length at concurrency 1](lengths.svg)" in part
+    svg = files["lengths.svg"]
+    assert "vedantjh2 with 400–500-token prompts: 21.0 ms" in svg
+    root = ET.fromstring(svg.split("\n", 1)[1])
+    assert len(root.findall(f".//{SVG}polyline")) == 2  # one line per engine
+    fixed = summary.render([with_outputs("sglang", [A, B], 10.0)], ["sglang"], "sglang")
+    assert "lengths.svg" not in fixed and "by prompt length" not in fixed["summary.md"]
+
+
 def test_chart_assigns_colors_in_order_and_never_cycles():
     series = {
         f"e{i}": [(10.0 + i, None, None), (15.0 + i, None, None)] for i in range(8)
