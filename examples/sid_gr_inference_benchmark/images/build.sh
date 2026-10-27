@@ -7,6 +7,9 @@
 #   vedantjh2-sglang          docker/Dockerfile; CHECKOUT is the fork at its pin
 #   sid-gr                  Dockerfile.sid-gr plus the dependencies of SID-GR's
 #                             pinned commit; CHECKOUT is a recsys-examples clone
+#   gr-inference-internal   the source's own Dockerfile, which starts from an
+#                             SGLang release; CHECKOUT is a clone with its
+#                             submodule
 # Images of pinned source are tagged <owner>-<repo>:<branch>-<commit> and
 # labeled with the source URL, commit and branch from configs/solutions/.
 set -euo pipefail
@@ -69,6 +72,32 @@ case "$engine" in
     echo "building SID-GR's dependencies at $url@$pinned ($branch)"
     DOCKER_BUILDKIT=1 docker build -f "$here/Dockerfile.sid-gr" \
       "${labels[@]}" -t "$name-sid-gr-inference:$tag" "$context"
+    ;;
+  gr-inference-internal)
+    # Its own recipe, from the pinned tree and submodule whatever the work tree
+    # holds. Its entrypoint, the server script, gives way to the SGLang base's
+    # again: the benchmark starts its client, which starts the server from the
+    # mounted source.
+    pin
+    context="$(mktemp -d)"
+    trap 'rm -rf "$context"' EXIT
+    git -C "$checkout" archive "$pinned" | tar -x -C "$context"
+    grep -q '^ARG BASE_IMAGE=lmsysorg/sglang:' "$context/Dockerfile" || {
+      echo "$url@$pinned: its Dockerfile does not start from an SGLang release" >&2
+      exit 1; }
+    submodule=third_party/gr-decode-attention
+    mkdir -p "$context/$submodule"
+    git -C "$checkout/$submodule" archive \
+      "$(git -C "$checkout" rev-parse "$pinned:$submodule")" |
+      tar -x -C "$context/$submodule"
+    recipe="$context/Dockerfile.benchmark"
+    sed 's|^ENTRYPOINT .*|ENTRYPOINT ["/opt/nvidia/nvidia_entrypoint.sh"]|' \
+      "$context/Dockerfile" >"$recipe"
+    [[ "$(grep -c '^ENTRYPOINT' "$recipe")" == 1 ]] || {
+      echo "$url@$pinned: no single ENTRYPOINT in its Dockerfile" >&2; exit 1; }
+    echo "building gr-inference-internal at $url@$pinned ($branch) from source"
+    DOCKER_BUILDKIT=1 docker build -f "$recipe" \
+      "${labels[@]}" -t "$name:$tag" "$context"
     ;;
   *)
     echo "unknown engine $engine" >&2

@@ -223,7 +223,8 @@ class Solution:
     engine: str  # a name in bench.engines.ENGINES
     source: Source
     env: dict[str, str]  # server environment, passed verbatim
-    # SGLang ServerArgs, passed verbatim; SGLang validates names and values.
+    # SGLang ServerArgs or gr-inference-internal's server options, passed
+    # verbatim; the engine validates names and values.
     server_settings: dict[str, Any] | None = None
 
     def __post_init__(self):

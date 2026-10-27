@@ -6,7 +6,7 @@ a launcher, which runs the engine's own HTTP server in the container with the
 patches it lists in PATCHES (patching.py):
 
     sglang.py  sglang_server.py   public SGLang, beam-search-new, vedantjh2-sglang
-    sid_gr.py  sid_gr_server.py   SID-GR
+    sid_gr.py  sid_gr_server.py   SID-GR, gr-inference-internal
 
 This package loads no adapter until get() asks for one: the launchers run in
 the engine's server process, which should load only what it needs.
@@ -18,6 +18,7 @@ import importlib
 # A solution's `engine` -> "module:adapter class" in this package.
 ENGINES = {
     "sid-gr": "sid_gr:SidGrAdapter",
+    "gr-inference-internal": "sid_gr:GRInferenceInternalAdapter",
     "sglang": "sglang:PublicSGLangAdapter",
     "sglang-beam-search-new": "sglang:BeamSearchNewAdapter",
     "vedantjh2-sglang": "sglang:Vedantjh2SGLangAdapter",

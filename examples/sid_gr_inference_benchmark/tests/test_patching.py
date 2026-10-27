@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+import asyncio
 import contextlib
 import enum
+import inspect
 import json
 import subprocess
 import sys
@@ -105,11 +107,144 @@ def test_latency_runs_patch_only_counters_step_times_and_routes():
         "BeamGroup.finalize",
         "shared_context_attention",
     ]
-    assert always(sid_gr_server, "sid-gr") == [
+    sid_gr = [
         "GRHTTPServingAdapter._dispatch",
         "GRHTTPServingAdapter._handle_sglang_generate",
         "GRContinuousServingExecutor._run_prefill",
         "GRContinuousServingExecutor._run_decode_batch",
+    ]
+    assert always(sid_gr_server, "sid-gr") == sid_gr
+    assert always(sid_gr_server, "gr-inference-internal") == [
+        *sid_gr[:2],
+        "GRHTTPServingAdapter._handle_sglang_generate_async",
+        *sid_gr[2:],
+    ]
+
+
+def engine_modules(monkeypatch, **modules):
+    """Stand-ins for the engine's modules, by dotted name, with their parents."""
+    for name, attributes in modules.items():
+        parts = name.split(".")
+        for depth in range(1, len(parts)):
+            parent = ".".join(parts[:depth])
+            if parent not in sys.modules:
+                monkeypatch.setitem(sys.modules, parent, types.ModuleType(parent))
+        module = types.ModuleType(name)
+        vars(module).update(attributes)
+        monkeypatch.setitem(sys.modules, name, module)
+
+
+def test_the_launcher_patches_the_awaited_handler_of_an_asgi_server(monkeypatch):
+    """gr-inference-internal's server is ASGI; SID-GR's runs a thread per request."""
+
+    class Threaded:
+        def _handle_sglang_generate(self, payload):
+            pass
+
+    class ASGI(Threaded):
+        async def handle_async(self, method, path, body=None):
+            pass
+
+    http = "gr_inference.gr_serving.http"
+    engine_modules(monkeypatch, **{http: {"GRHTTPServingAdapter": Threaded}})
+    assert sid_gr_server.features() == frozenset()
+    engine_modules(monkeypatch, **{http: {"GRHTTPServingAdapter": ASGI}})
+    assert sid_gr_server.features() == {"asgi"}
+
+
+def test_an_awaited_handler_records_its_start_and_return(monkeypatch):
+    async def handle(self, payload, *, disconnected=None):
+        await asyncio.sleep(0)
+        return {"rid": payload["rid"], "disconnected": disconnected}
+
+    monkeypatch.setattr(sid_gr_server, "_requests", {})
+    hooked = sid_gr_server.request_range(handle)
+    assert inspect.iscoroutinefunction(hooked)
+    response = asyncio.run(hooked(None, {"rid": "a"}, disconnected="event"))
+    assert response == {"rid": "a", "disconnected": "event"}
+    ((rid, (started, returned)),) = sid_gr_server.taken_records()["requests"].items()
+    assert rid == "a" and 0 < started <= returned
+
+
+def test_beam_selection_reports_the_extension_and_its_calls(monkeypatch):
+    name = "fake_gr_inference.gr_kernels.beam_selection"
+    monkeypatch.setattr(sid_gr_server, "BEAM_SELECTION", name)
+    assert sid_gr_server.beam_selection() == (None, {})  # SID-GR has none
+    status = {"loaded": True, "failed": False, "error": None, "source": "jit"}
+    calls = {
+        "radix_topk_cuda": 6,
+        "sort_topk_ties_cuda": 2,
+        "sort_ties_value_dtype_unsupported": 1,
+        "gather_selected_tokens_cuda_failed": 1,
+    }
+    extension = {"extension_status": lambda: status, "call_counts": lambda: calls}
+    engine_modules(monkeypatch, **{name: extension})
+    assert sid_gr_server.beam_selection() == (
+        {"loaded": True, "failed": False, "error": None, "build": "jit"},
+        {"beam_selection.cuda_calls": 8, "beam_selection.fallbacks": 2},
+    )
+
+
+def test_beam_selection_fails_when_the_extension_module_cannot_import(monkeypatch):
+    def import_module(name):
+        raise ModuleNotFoundError("No module named 'torch'", name="torch")
+
+    monkeypatch.setattr(sid_gr_server.importlib, "import_module", import_module)
+    with pytest.raises(ModuleNotFoundError, match="torch"):
+        sid_gr_server.beam_selection()
+
+
+def test_an_abandoned_mixed_step_batch_is_not_a_step(monkeypatch):
+    """gr-inference-internal reruns a mixed-step decode batch it abandons as one
+    batch per step; the reruns are the requests' steps."""
+
+    class _MixedStepDecodeFallback(Exception):  # the engine's name for it
+        pass
+
+    def decode(self, batch, states):
+        if len(set(batch.steps)) > 1:
+            raise _MixedStepDecodeFallback
+        if not batch.request_ids[0]:
+            raise ValueError("failed")
+        return ()
+
+    monkeypatch.setattr(sid_gr_server, "_steps", [])
+    hooked = sid_gr_server.step_times(decode=True)(decode)
+
+    def batch(ids, steps):
+        return types.SimpleNamespace(request_ids=ids, beam_width=2, steps=steps)
+
+    with pytest.raises(_MixedStepDecodeFallback):
+        hooked(None, batch(("a", "b"), (0, 1)), ())
+    hooked(None, batch(("a",), (0,)), ())
+    hooked(None, batch(("b",), (1,)), ())
+    with pytest.raises(ValueError):  # a failed step still took its time
+        hooked(None, batch(("",), (0,)), ())
+    steps = sid_gr_server.taken_records()["steps"]
+    assert [(step["requests"], step["rows"]) for step in steps] == [
+        (["a"], 2),
+        (["b"], 2),
+        ([""], 2),
+    ]
+
+
+def test_the_sid_gr_launcher_runs_other_commands_as_python3(monkeypatch):
+    """gr-inference-internal's script probes and installs its packages through
+    $PYTHON_BIN."""
+    calls = []
+
+    def execv(executable, argv):
+        calls.append(argv)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(sid_gr_server.os, "execv", execv)
+    for argv in (["-"], ["-m", "pip", "install", "orjson"]):
+        monkeypatch.setattr(sys, "argv", ["sid_gr_server.py", *argv])
+        with pytest.raises(SystemExit):
+            sid_gr_server.main()
+    assert calls == [
+        [sys.executable, "-"],
+        [sys.executable, "-m", "pip", "install", "orjson"],
     ]
 
 

@@ -6,6 +6,7 @@ import os
 import socket
 import subprocess
 import sys
+import types
 
 import pytest
 from bench import client, engines
@@ -50,8 +51,11 @@ class Handler(BaseHTTPRequestHandler):
                     "decode.eager_fallbacks": None,
                     "prefill.graph_captures": served[0] if mode == "captures" else 0}
         catalog = {"source": "/work/catalog.jsonl", "item_count": len(paths)}
+        source = "/source/examples/sid-gr-inference/src/gr_inference"
+        if mode == "installed":  # an engine copy in the image, not the mounted one
+            source = "/usr/local/lib/python3.12/dist-packages/gr_inference"
         runtime = {"pid": os.getpid(), "counters": counters, "max_in_flight": in_flight[1],
-                   "dtype": "bfloat16"}
+                   "dtype": "bfloat16", "gr_inference": source, "beam_selection": None}
         if self.path == "/pilot/runtime":
             with lock:
                 runtime.update(requests=dict(records["requests"]), steps=list(records["steps"]))
@@ -293,6 +297,40 @@ def test_sid_gr_fails_when_it_captures_prefill_graphs_while_measured(
 def test_invalid_beams_fail_the_run(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="duplicate beams"):
         run_fake(tmp_path, monkeypatch, mode="duplicate")
+
+
+def test_near_tied_beams_may_be_out_of_order_by_the_engines_tolerance():
+    """gr-inference-internal orders beams within 2e-5 of each other by token path."""
+    workload = types.SimpleNamespace(beam_width=2, output_tokens=1)
+    tolerance = engines.get("gr-inference-internal").score_order_tolerance
+    near = [([1], -1.00001), ([2], -1.000001)]
+    client.check(near, workload, 10, tolerance)
+    with pytest.raises(ValueError, match="not sorted by descending score"):
+        client.check(near, workload, 10, engines.get("sid-gr").score_order_tolerance)
+    with pytest.raises(ValueError, match="not sorted by descending score"):
+        client.check([([1], -1.0001), ([2], -1.0)], workload, 10, tolerance)
+
+
+def test_a_server_importing_another_copy_of_the_engine_fails_the_run(
+    tmp_path, monkeypatch
+):
+    with pytest.raises(RuntimeError, match="not the mounted SID-GR"):
+        run_fake(tmp_path, monkeypatch, mode="installed")
+
+
+def test_gr_inference_internal_fails_without_its_beam_selection_extension():
+    adapter = engines.get("gr-inference-internal")
+    built = {"loaded": True, "failed": False, "error": None, "build": "jit"}
+    adapter.check_counters(None, {}, 4, {"beam_selection": built})
+    failed = {**built, "loaded": False, "failed": True, "error": "OSError: no nvcc"}
+    with pytest.raises(RuntimeError, match="did not build: OSError: no nvcc"):
+        adapter.check_counters(None, {}, 4, {"beam_selection": failed})
+    with pytest.raises(RuntimeError, match="has no beam-selection CUDA extension"):
+        adapter.check_counters(None, {}, 4, {"beam_selection": None})
+    with pytest.raises(RuntimeError, match="captured 2 decode CUDA graphs"):
+        adapter.check_counters(
+            None, {"decode.graph_captures": 2}, 4, {"beam_selection": built}
+        )
 
 
 def test_weights_in_another_dtype_than_the_scenario_fail_the_run(tmp_path, monkeypatch):

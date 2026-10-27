@@ -7,6 +7,7 @@ requests, the same checks and the same report.
 | `engine` | Server | Beam-search API |
 | --- | --- | --- |
 | `sid-gr` | [SID-GR](../sid-gr-inference) | `n` beams |
+| `gr-inference-internal` | [cb521/gr-inference-internal](https://github.com/cb521/gr-inference-internal), the repository SID-GR was imported from, at its `perf_precision_fix` branch ([facff3d](https://github.com/cb521/gr-inference-internal/tree/facff3db9c4d94ba5a5f1676169e318898cf82ba)) | `n` beams; no catalog support |
 | `sglang` | Public [SGLang](https://github.com/sgl-project/sglang) v0.5.22 or newer | native `beam_width`; no catalog support |
 | `sglang-beam-search-new` | SGLang [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891) | `use_beam_search` |
 | `vedantjh2-sglang` | SGLang [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788) | native `beam_width`; with a catalog, a trie output head |
@@ -98,8 +99,10 @@ OUTPUT/<engine>/load_profile.nsys-rep  several concurrency values
    Captures hold only the measured requests (`cudaProfilerApi`); tracing slows
    the server, so no latency comes from them.
 7. **Checks.** Every reply must hold `beam_width` distinct beams of
-   `output_tokens` valid tokens with finite scores in descending order; with a
-   catalog, every beam must be a catalog item. The server must run the mounted
+   `output_tokens` valid tokens with finite scores in descending order
+   (gr-inference-internal orders beams within 2e-5 of each other by token path,
+   so it may return them up to 2e-5 out of order); with a catalog, every beam
+   must be a catalog item. The server must run the mounted
    source, hold its weights in the scenario's dtype and take the requested code
    paths. Any failed check fails the run.
 8. **Output agreement** (`summary.md`): each engine's beams in its first round
@@ -116,13 +119,13 @@ with the same arguments and returns its result; it only counts calls, notes
 times or pushes NVTX ranges, and never synchronizes the GPU. A missing target
 stops the server, and `server.log` lists every patch applied.
 
-| What | For | SGLang | SID-GR |
+| What | For | SGLang | SID-GR and gr-inference-internal |
 | --- | --- | --- | --- |
 | Routes | readiness, runtime facts, configuration, profiler | adds `/pilot/ready`, `/pilot/runtime`, `/pilot/config` | adds `/pilot/runtime`, `/pilot/config`, `/pilot/profile/start` and `stop` |
 | Runtime facts | packages, attention backends, weights' dtype, overlap scheduler | `Scheduler.get_internal_state` | read in `/pilot/runtime` |
-| Request times | queue, prefill, decode, response | `/generate` | `_handle_sglang_generate` |
+| Request times | queue, prefill, decode, response | `/generate` | `_handle_sglang_generate`, and `_handle_sglang_generate_async` where the server is ASGI |
 | Step times | batch sizes, engine busy | `get_next_batch_to_run`, `run_batch`, `process_batch_result`, `ScheduleBatch.copy` | `_run_prefill`, `_run_decode_batch` |
-| Counters | CUDA graph use, code paths taken | `ModelRunner.forward`, `BeamGroup.finalize`, `shared_context_attention` | read from SID-GR's own status |
+| Counters | CUDA graph use, code paths taken | `ModelRunner.forward`, `BeamGroup.finalize`, `shared_context_attention` | read from the engine's own status and gr-inference-internal's beam-selection extension |
 | NVTX ranges, GPU profiles only | phases, sections, steps | input preparation, forward, beam selection, beam KV, results | prefill, decode steps, SID-GR's profile sections |
 
 ## Configuration
@@ -165,7 +168,8 @@ catalog:                      # optional: see Catalog filtering
 ```
 
 - One deployment per engine serves every concurrency, sized for the largest:
-  CUDA graph sizes, request slots, and SID-GR's batch and pools.
+  CUDA graph sizes, request slots, and the batch and pools of SID-GR and
+  gr-inference-internal.
 - With `min_context_length`, SGLang captures prefill graphs in 1.5× steps,
   since it replays a graph only below 2× padding. SID-GR captures graphs only
   for `context_length`, at startup, so other lengths run without them, as the
@@ -177,10 +181,10 @@ catalog:                      # optional: see Catalog filtering
 
 | Key | Meaning |
 | --- | --- |
-| `engine` | `sid-gr`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang` |
+| `engine` | `sid-gr`, `gr-inference-internal`, `sglang`, `sglang-beam-search-new` or `vedantjh2-sglang` |
 | `source` | `url` and full `commit` of the engine source; optional `branch`, which names a from-source image |
 | `env` | environment variables for the server, as strings; `OMP_NUM_THREADS` and `MKL_NUM_THREADS` default to the number of server CPUs |
-| `server_settings` | SGLang engines: `ServerArgs`, passed verbatim. The runner sets the model path, host, port, dtype, seed, CUDA graph sizes, request slots and beam-search-new's catalog |
+| `server_settings` | SGLang engines: `ServerArgs`, passed verbatim. The runner sets the model path, host, port, dtype, seed, CUDA graph sizes, request slots and beam-search-new's catalog. gr-inference-internal: `tools/serve_qwen3_gr_http.py` options, passed after the ones its script sets from the runner's variables (`true` is `--name`, `false` `--no-name`) |
 
 Values a run depends on, such as `tp_size: 1` or `page_size: 1`, stay in the
 solution with a comment saying why. To vary a setting, copy the file: its name
@@ -202,7 +206,9 @@ the file with `--catalog items.jsonl`:
 - Each engine gets the same paths in its native form: SID-GR the JSONL,
   beam-search-new a token-trie pickle, vedantjh2-sglang a
   `trie_output_head.safetensors` next to links to the checkpoint. Public SGLang
-  has no catalog support.
+  has no catalog support, and neither has gr-inference-internal here: its
+  catalog lists semantic-ID codes, which it maps to `<sid_N>` tokens that Qwen3
+  lacks.
 - vedantjh2-sglang's trie output head takes exactly three codebooks from
   `model.sid_codebooks`, so `output_tokens` must be 3; without a catalog it
   serves the checkpoint as is.
@@ -224,7 +230,7 @@ The runner refuses to start when a pin does not hold:
 
 | Pin | Where | Checked |
 | --- | --- | --- |
-| Engine source | `source.url` and `source.commit` in the solution | The checkout contains the commit, and the paths the engine reads (`python/` for SGLang; `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR) match it with no uncommitted changes |
+| Engine source | `source.url` and `source.commit` in the solution | The checkout contains the commit, and the paths the engine reads (`python/` for SGLang; `examples/sid-gr-inference` and `corelib/gr_decode_atten` for SID-GR; `pyproject.toml`, `scripts`, `src`, `tools` and the `third_party/gr-decode-attention` submodule for gr-inference-internal) match it with no uncommitted changes |
 | Checkpoint | `model.id`, `model.revision` and `model.sha256` in the scenario | SHA-256 of `config.json` and every weight and index file |
 | Catalog | `catalog.sha256` in the scenario | SHA-256 of the `--catalog` file |
 | Image | a recipe in [images/](images/README.md); dev branches built from source and tagged with repository, branch and commit | Recorded, not enforced: a local build gets a new ID each time |

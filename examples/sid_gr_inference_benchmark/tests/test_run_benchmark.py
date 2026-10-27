@@ -16,10 +16,17 @@ from bench import engines
 from bench.common import read_json
 from bench.config import Workload
 from bench.engines.sglang import TRIE_HEAD_FILE, prefill_tokens
+from bench.engines.sid_gr import server_options
 from tests.fixtures import run_config
 
-CONFIGS = ("sid_gr", "sglang", "sglang_beam_search_new", "vedantjh2_sglang")
-SID, PUBLIC, LEGACY, VEDANTJH2 = CONFIGS
+CONFIGS = (
+    "sid_gr",
+    "sglang",
+    "sglang_beam_search_new",
+    "vedantjh2_sglang",
+    "gr_inference_internal",
+)
+SID, PUBLIC, LEGACY, VEDANTJH2, INTERNAL = CONFIGS
 SCENARIOS = ("qwen3_0_6b", "qwen3_1_7b", "qwen3_0_6b_load")
 
 
@@ -167,6 +174,11 @@ INVALID_SOLUTION = [
     (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
     (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
     (VEDANTJH2, {"env.SGLANG_BEAM_TRIE_TOPK_LOGPROB": "1"}, '"true"'),
+    (INTERNAL, {"server_settings.port": 30000}, "must not set"),
+    (INTERNAL, {"server_settings.decode_steps": 2}, "must not set"),
+    (INTERNAL, {"server_settings.rec_vocab_file": "/tmp/sids"}, "must not set"),
+    (INTERNAL, {"env.GR_CACHE_ROOT": "/tmp"}, "runner-managed"),
+    (INTERNAL, {"env.GR_MAX_OUTPUT_TOKENS": "3"}, "runner-managed"),
 ]
 
 
@@ -251,8 +263,9 @@ def test_sglang_adapters_set_only_the_settings_solutions_may_not():
     assert legacy["beam_search_constraint_dict"] == "/work/catalog.pkl"
 
 
-def test_sglang_solutions_need_server_settings(tmp_path):
-    value = solution(PUBLIC)
+@pytest.mark.parametrize("name", [PUBLIC, INTERNAL])
+def test_engines_with_server_options_need_server_settings(tmp_path, name):
+    value = solution(name)
     del value["server_settings"]
     with pytest.raises(ValueError, match=r"sections \['server_settings'\]"):
         configs.load_solution(write(tmp_path, value), shipped())
@@ -276,8 +289,53 @@ def test_sid_gr_serves_only_bfloat16():
     half = dataclasses.replace(shipped().model, dtype="float16")
     half = dataclasses.replace(shipped(), model=half)
     configs.load_solution(path(PUBLIC), half)  # SGLang takes the scenario's dtype
-    with pytest.raises(ValueError, match="builds its model in bfloat16"):
-        configs.load_solution(path(SID), half)
+    for name in (SID, INTERNAL):
+        with pytest.raises(ValueError, match="builds its model in bfloat16"):
+            configs.load_solution(path(name), half)
+
+
+def test_gr_inference_internal_takes_sid_grs_shape_and_its_options_after_it():
+    workload = Workload(
+        context_length=2048,
+        beam_width=256,
+        output_tokens=3,
+        concurrency=[1, 2, 4, 8],
+        seed=7,
+    )
+    config = run_config("gr-inference-internal", workload=workload)
+    shipped_settings = raw(INTERNAL)["server_settings"]
+    config = dataclasses.replace(
+        config,
+        solution=dataclasses.replace(config.solution, server_settings=shipped_settings),
+    )
+    argv, env = engines.get("gr-inference-internal").server(config, 8000, False)
+    assert argv[:2] == ["bash", "/source/scripts/serve_qwen3_gr_http.sh"]
+    assert argv[2:] == server_options(shipped_settings)
+    assert argv[2:7] == [
+        "--prefill-backend",
+        "auto",
+        "--decode-cuda-graph",
+        "--no-prefill-cuda-graph",
+        "--inflight-batching-mode",
+    ]
+    sid_gr = engines.get("sid-gr").server(config, 8000, profile=False)[1]
+    shape = {key: sid_gr[key] for key in sid_gr if key != "GR_DECODE_ATTEN_ROOT"}
+    assert shape.items() <= env.items() and env["GR_MAX_BATCH_SIZE"] == "8"
+    assert env["GR_DECODE_ATTEN_ROOT"] == "/source/third_party/gr-decode-attention"
+    assert env["GR_CACHE_ROOT"].startswith("/cache/")
+
+
+def test_server_options_are_flags_and_values():
+    settings = {"decode_cuda_graph": True, "prefill_cuda_graph": False}
+    settings.update(decode_streams="1", buckets=[128, 256])
+    assert server_options(settings) == [
+        "--decode-cuda-graph",
+        "--no-prefill-cuda-graph",
+        "--decode-streams",
+        "1",
+        "--buckets",
+        "128,256",
+    ]
 
 
 def test_any_checkpoint_dtype_loads(tmp_path):
@@ -478,7 +536,8 @@ def command(tmp_path, *engine_names):
     argv += ["--output", str(tmp_path / "out")]
     argv += ["--server-cpus", "0-9", "--client-cpus", "10", "--gpu", "0"]
     for name in engine_names:
-        source = sid_gr if name == SID else sglang
+        mount = engines.get(raw(name)["engine"]).mount
+        source = sid_gr if mount == "/source" else sglang
         argv += ["--solution", str(path(name)), str(source), "img"]
     return argv
 
@@ -563,8 +622,9 @@ def test_duplicate_solutions_are_rejected(tmp_path):
         runner.main(command(tmp_path, SID, SID))
 
 
-def test_public_sglang_cannot_take_a_catalog(tmp_path):
-    argv = command(tmp_path, PUBLIC) + ["--catalog", str(write_catalog(tmp_path))]
+@pytest.mark.parametrize("name", [PUBLIC, INTERNAL])
+def test_engines_without_catalog_support_cannot_take_a_catalog(tmp_path, name):
+    argv = command(tmp_path, name) + ["--catalog", str(write_catalog(tmp_path))]
     argv[1] = str(catalog_scenario(tmp_path))
     with pytest.raises(ValueError, match="cannot constrain beams"):
         runner.main(argv)

@@ -7,6 +7,13 @@ scripts/serve_qwen3_gr_http.sh execs $PYTHON_BIN; the runner points it here:
 
     sid_gr_server.py .../tools/serve_qwen3_gr_http.py [args]
 
+gr-inference-internal, which SID-GR was imported from, keeps the classes and
+methods patched here and runs under this launcher too. Its server is ASGI and
+awaits _handle_sglang_generate_async for each request (the "asgi" entry), and
+its script runs $PYTHON_BIN to probe and install packages (`python - <<EOF`,
+`python -m pip`): every command other than the server runs unchanged in this
+interpreter.
+
 Compared with the native server (serve_qwen3_gr_http.sh with plain python3):
 
 Same
@@ -21,8 +28,10 @@ Different, and nothing else
     original dispatcher (about 85 ns per request), and note when each request's
     handler starts and returns and when each prefill and decode step starts and
     ends (time.perf_counter_ns, a few microseconds per step):
-        GET  /pilot/runtime        packages, attention backends, CUDA graph counters,
-                                   and the request and step times, which it then forgets
+        GET  /pilot/runtime        packages, the imported engine, attention backends,
+                                   CUDA graph counters, gr-inference-internal's
+                                   beam-selection CUDA extension and its calls, and
+                                   the request and step times, which it then forgets
         GET  /pilot/config         the server's build_info and environment, read
                                    once after the measured requests
         POST /pilot/profile/start  cudaProfilerStart (profiled processes only)
@@ -35,7 +44,9 @@ The server log lists every applied patch at startup.
 """
 
 import contextlib
+import importlib
 import importlib.metadata
+import inspect
 import os
 import runpy
 import sys
@@ -78,6 +89,13 @@ def patches():
             request_range,
             "notes when the handler starts and returns; NVTX request range when "
             "profiling",
+        ),
+        Patch(
+            f"{http}._handle_sglang_generate_async",
+            request_range,
+            "notes when the awaited handler starts and returns; NVTX request range "
+            "when profiling",
+            needs="asgi",
         ),
         Patch(
             f"{executor}._run_prefill",
@@ -207,10 +225,12 @@ def runtime(serving):
         # A disabled graph runner has no status; None keeps that distinct from 0.
         prefill_status = prefill_graph.status() if prefill_graph is not None else {}
         decode_status = decode_graph.status() if decode_graph is not None else {}
+        selection, selection_calls = beam_selection()
         # Under the worker lock: a tick, with the steps it records, has finished.
         records = taken_records()
     return {
         "pid": os.getpid(),
+        "gr_inference": os.path.dirname(sys.modules["gr_inference"].__file__),
         "packages": {name: _version(name) for name in PACKAGES.split()},
         "attention": {
             "prefill": ", ".join(
@@ -227,13 +247,55 @@ def runtime(serving):
             "prefill.graph_replays": prefill_status.get("prefill_cuda_graph_replays"),
             "prefill.graph_captures": prefill_status.get("prefill_cuda_graph_captures"),
             "decode.graph_replays": decode_status.get("decode_cuda_graph_replays"),
+            "decode.graph_captures": decode_status.get("decode_cuda_graph_captures"),
             "decode.eager_fallbacks": decode_status.get(
                 "decode_cuda_graph_fallback_eager_count"
             ),
+            # gr-inference-internal only: decode model steps run without a graph,
+            # and mixed-step batches rerun as one batch per step.
+            "decode.eager_model_steps": getattr(
+                executor, "decode_cuda_graph_eager_model_steps", None
+            ),
+            "decode.mixed_step_fallbacks": getattr(
+                executor, "mixed_step_decode_fallbacks", None
+            ),
+            **selection_calls,
         },
+        "beam_selection": selection,
         **records,
         "patches": [patch.target for patch in applied],
     }
+
+
+# gr-inference-internal's beam-selection CUDA extension; SID-GR has none.
+BEAM_SELECTION = "gr_inference.gr_kernels.beam_selection"
+
+
+def beam_selection():
+    """(status, counters) of gr-inference-internal's beam-selection CUDA
+    extension, or (None, {}) without one. The engine builds it at first use and
+    does without it if the build fails. A call either ran on it ("<name>_cuda")
+    or was declined or failed, and the engine did that step in torch."""
+    try:
+        module = importlib.import_module(BEAM_SELECTION)
+    except ModuleNotFoundError as missing:  # the module, not one it imports
+        if not f"{BEAM_SELECTION}.".startswith(f"{missing.name}."):
+            raise
+        return None, {}
+    status, calls = module.extension_status(), module.call_counts()
+    ran = sum(count for call, count in calls.items() if call.endswith("_cuda"))
+    return (
+        {
+            "loaded": status["loaded"],
+            "failed": status["failed"],
+            "error": status["error"],
+            "build": status["source"],  # "jit" or "prebuilt" once loaded
+        },
+        {
+            "beam_selection.cuda_calls": ran,
+            "beam_selection.fallbacks": sum(calls.values()) - ran,
+        },
+    )
 
 
 def taken_records():
@@ -267,16 +329,32 @@ def profile(serving, start):
 
 # ---- always-on hooks: request and step times ----------------------------------
 def request_range(original):
-    def wrapped(self, payload):
+    """The same hook for a handler that runs on its own thread and for one the
+    ASGI server awaits on its event loop."""
+
+    @contextlib.contextmanager
+    def handled(payload):
         rid = payload.get("rid") or payload.get("request_id")
         started = time.perf_counter_ns()
         try:  # requests overlap under load, so only steps are marked there
             with nvtx("request", rid if MARKS == "requests" else None):
-                return original(self, payload)
+                yield
         finally:
             if rid is not None:
                 with _records:
                     _requests[str(rid)] = [started, time.perf_counter_ns()]
+
+    if inspect.iscoroutinefunction(original):
+
+        async def awaited(self, payload, **options):
+            with handled(payload):
+                return await original(self, payload, **options)
+
+        return awaited
+
+    def wrapped(self, payload):
+        with handled(payload):
+            return original(self, payload)
 
     return wrapped
 
@@ -289,6 +367,13 @@ def step_times(decode):
             started = time.perf_counter_ns()
             try:
                 return original(self, *args)
+            except Exception as exc:
+                # gr-inference-internal abandons a mixed-step decode batch before
+                # it selects beams and reruns its requests as one batch per step;
+                # those reruns are the requests' steps.
+                if type(exc).__name__ == "_MixedStepDecodeFallback":
+                    ids = ()
+                raise
             finally:
                 step = {
                     "kind": "decode" if decode else "prefill",
@@ -364,19 +449,30 @@ def section(label):
 applied: list[Patch] = []
 
 
+def features():
+    """The code paths of this engine revision that PATCHES entries need: "asgi"
+    when its HTTP server is ASGI (GRHTTPServingAdapter.handle_async)."""
+    from gr_inference.gr_serving.http import GRHTTPServingAdapter
+
+    return frozenset({"asgi"} if hasattr(GRHTTPServingAdapter, "handle_async") else ())
+
+
 def main():
-    entrypoint = Path(sys.argv[1]).resolve()
-    if entrypoint.name != "serve_qwen3_gr_http.py":
+    if len(sys.argv) < 2:
         raise SystemExit(
             "usage: sid_gr_server.py .../tools/serve_qwen3_gr_http.py [args]"
         )
+    entrypoint = Path(sys.argv[1]).resolve()
+    if entrypoint.name != "serve_qwen3_gr_http.py":
+        # A package probe or install from the script: run it as python3 would.
+        os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
     # Running this file puts bench/engines/ first on sys.path; drop it so a
     # module there, such as sglang.py, cannot shadow one SID-GR imports.
     here = Path(__file__).resolve().parent
     sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != here]
     sys.path[:0] = [str(entrypoint.parent), str(entrypoint.parent.parent / "src")]
     sys.argv = [str(entrypoint), *sys.argv[2:]]
-    applied.extend(apply(patches(), frozenset(), PROFILE))  # no entry needs a feature
+    applied.extend(apply(patches(), features(), PROFILE))
     runpy.run_path(str(entrypoint), run_name="__main__")
 
 

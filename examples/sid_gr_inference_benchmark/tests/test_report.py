@@ -489,6 +489,22 @@ def test_report_states_the_observed_overlap_scheduler():
     assert "Overlap scheduler" not in text_of(saved("sid-gr"))
 
 
+def test_report_counts_the_beam_selection_extension_calls():
+    """gr-inference-internal selects beams with a CUDA extension or in torch."""
+    found = saved("gr-inference-internal")
+    selection = {"loaded": True, "failed": False, "error": None, "build": "jit"}
+    for result in found["rounds"]:
+        result["runtime"] = {**result["runtime"], "beam_selection": selection}
+        result["counters"] = {
+            **result["counters"],
+            "beam_selection.cuda_calls": 1500,
+            "beam_selection.fallbacks": 2,
+        }
+    row = "| Beam-selection CUDA extension (observed) | 3,000 calls; 4 declined"
+    assert row + " or failed, done in torch |" in text_of(found)
+    assert "Beam-selection CUDA extension" not in text_of(saved("sid-gr"))
+
+
 def test_report_shows_latency_by_prompt_length():
     found = saved("sglang", lengths=[100, 200, 300, 500])
     text = text_of(at(found, 1, context_length=500, min_context_length=100))

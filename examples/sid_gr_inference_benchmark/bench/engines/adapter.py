@@ -45,6 +45,10 @@ class Adapter:
     catalog_supported = True
     # The catalog's native file, which the runner generates; None: the JSONL.
     catalog_file: str | None = None
+    # How far a beam's score may exceed the score of the beam before it: an
+    # engine that orders near-tied beams by another key returns them slightly
+    # out of score order.
+    score_order_tolerance = 0.0
 
     @property
     def catalog_source(self):

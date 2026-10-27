@@ -223,6 +223,9 @@ Not captured: the overlap scheduler launches each step before the previous step'
 {% if setup.overlap is not none %}
 | Overlap scheduler (observed) | {{ "on" if setup.overlap else "off" }} |
 {% endif %}
+{% if setup.beam_selection %}
+| Beam-selection CUDA extension (observed) | {{ setup.beam_selection[0] | num(0) }} calls; {{ setup.beam_selection[1] | num(0) }} declined or failed, done in torch |
+{% endif %}
 | Model | {{ setup.model.id }} @ {{ setup.model.revision[:12] | code }}; {{ setup.checkpoint_dtype }} checkpoint, weights {{ setup.dtype }} (observed) |
 | Prompts | synthetic token IDs (seed {{ workload.seed }}, special tokens excluded); {% if workload.min_context_length is none %}{{ workload.context_length | num(0) }} tokens each{% else %}lengths drawn uniformly from {{ workload.min_context_length | num(0) }} to {{ workload.context_length | num(0) }} tokens{% endif %} |
 {% for label, text in setup.engine_rows %}

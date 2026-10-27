@@ -440,6 +440,18 @@ def configuration_view(results):
     }
 
 
+def beam_selection(rounds):
+    """[calls gr-inference-internal's beam-selection CUDA extension ran, calls
+    it declined or failed, done in torch] over the measured requests; None for
+    an engine without the extension."""
+    if not rounds[0]["runtime"].get("beam_selection"):
+        return None
+    return [
+        sum(result["counters"].get(f"beam_selection.{key}", 0) for result in rounds)
+        for key in ("cuda_calls", "fallbacks")
+    ]
+
+
 def setup_view(results):
     """Hardware, software and workload; runtime values are read from the server."""
     solution, rounds, catalog = (
@@ -468,6 +480,7 @@ def setup_view(results):
         "attention": runtime["attention"],
         "graphs": adapter.graph_usage(rounds),
         "overlap": runtime.get("overlap"),  # SGLang's scheduler; SID-GR has none
+        "beam_selection": beam_selection(rounds),
         "model": manifest["model"],
         "checkpoint_dtype": results["checkpoint_dtype"],
         "dtype": runtime["dtype"],

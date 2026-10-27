@@ -17,12 +17,14 @@ branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
 | `sglang-beam-search-new` | [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891), `feature/beam_search_update_0801` | the source's `docker/Dockerfile` with one pin (below), target `framework_final` | `cswuyg-sglang:feature-beam_search_update_0801-df191d672f19` |
 | `vedantjh2-sglang` | [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788), `trie-head` | the source's `docker/Dockerfile` with one pin (below), target `framework_final` | `vedantjh2-sglang:trie-head-646a7f5ce6f9` |
 | `sid-gr` | [NVIDIA/recsys-examples@c6eba91](https://github.com/NVIDIA/recsys-examples/tree/c6eba911231d69d8cabaab94626bcb5a25c5a719), `main` | [Dockerfile.sid-gr](Dockerfile.sid-gr): an SGLang release plus the dependencies the commit declares | `nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d` |
+| `gr-inference-internal` | [cb521/gr-inference-internal@facff3d](https://github.com/cb521/gr-inference-internal/tree/facff3db9c4d94ba5a5f1676169e318898cf82ba), `perf_precision_fix` | the source's `Dockerfile`: an SGLang release plus the commit's own install (below) | `cb521-gr-inference-internal:perf_precision_fix-facff3db9c4d` |
 
 ```bash
 images/build.sh sglang
 images/build.sh sglang-beam-search-new /path/to/cswuyg-sglang   # clean, at the pin
 images/build.sh vedantjh2-sglang /path/to/vedantjh2-sglang        # clean, at the pin
 images/build.sh sid-gr ../..                                    # any clone with the commit
+images/build.sh gr-inference-internal /path/to/gr-inference-internal  # any clone with the commit
 ```
 
 The SGLang forks are built with the recipe SGLang releases with: `BRANCH_TYPE=local`
@@ -57,9 +59,26 @@ submodule that exists only in SID-GR's standalone repository, so it does not bui
 here. Its default base, PyTorch 2.6.0 with CUDA 12.4, has no sm_120 kernels, no
 nvcc for SID-GR's JIT kernels and no Nsight Systems.
 
+## gr-inference-internal
+
+From its `perf_precision_fix` branch on, gr-inference-internal's own Dockerfile
+starts from an SGLang release, v0.5.16 by digest, installs the commit with its
+`[kernels]` pins, which match that release, and runs `pip check` and the
+engine's own stack check. `build.sh` builds that file from the pinned tree and
+`third_party/gr-decode-attention` submodule, whatever the work tree holds, with
+one change: the image keeps the base's entrypoint instead of the server script,
+so the benchmark starts its client. The image therefore also holds an installed
+copy of the engine; the client checks that the server imported the mounted one.
+The engine compiles its beam-selection CUDA extension at first use, into the
+cache volume; if that fails, it selects beams in torch, and the run fails. The
+checkout the benchmark mounts needs the submodule (`git submodule update --init`).
+Earlier revisions' Dockerfile starts from PyTorch 2.6.0 with CUDA 12.4, which has
+no sm_120 kernels, and `build.sh` rejects it.
+
 ## Versions
 
-Read from the images built on 2026-10-21:
+Read from the images built on 2026-10-21, and on 2026-10-26 for
+gr-inference-internal:
 
 | Engine | torch | FlashInfer | CUTLASS DSL | Quack | sglang-kernel | Nsight Systems |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -67,6 +86,7 @@ Read from the images built on 2026-10-21:
 | `sglang-beam-search-new` | 2.11.0+cu130 | 0.6.15.post1 | 4.6.0 | 0.6.3 | 0.4.5 | 2026.4.1 |
 | `vedantjh2-sglang` | 2.13.0+cu130 | 0.6.18 | 4.6.2 | 0.6.4 | 0.4.6.post1 | 2026.4.1 |
 | `sid-gr` | 2.11.0+cu130 | 0.6.11.post1 | 4.5.1 | 0.4.1 | 0.4.2.post2 | 2026.2.1 |
+| `gr-inference-internal` | 2.11.0+cu130 | 0.6.14 | 4.6.0 | 0.6.1 | 0.4.5 | 2026.4.1 |
 
 Measurements before 2026-10-21 ran SID-GR and beam-search-new in images layered on
 an SGLang nightly (`lmsysorg/sglang@sha256:b5c48869…`, dev build `e6072935` of

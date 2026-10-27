@@ -158,7 +158,9 @@ def timeline(measured, timed, runtime, output_tokens):
     return phases, level_steps
 
 
-def check(result, workload, vocab_size):
+def check(result, workload, vocab_size, tolerance=0.0):
+    """Beam count, tokens and scores; a beam's score may exceed the one before it
+    by at most `tolerance` (the adapter's score_order_tolerance)."""
     if len(result) != workload.beam_width:
         raise ValueError(f"{len(result)} beams, expected {workload.beam_width}")
     for tokens, score in result:
@@ -170,7 +172,7 @@ def check(result, workload, vocab_size):
             raise ValueError("non-finite beam score")
     if len({tuple(tokens) for tokens, _ in result}) != len(result):
         raise ValueError("duplicate beams")
-    if any(a[1] < b[1] for a, b in zip(result, result[1:])):
+    if any(b[1] - a[1] > tolerance for a, b in zip(result, result[1:])):
         raise ValueError("beams are not sorted by descending score")
 
 
@@ -206,7 +208,7 @@ def machine():
 def validate(adapter, config, row, response, paths):
     """Check one response; with a catalog, every beam must be a catalog item."""
     result = adapter.beams(response, row["request_id"])
-    check(result, config.workload, config.vocab_size)
+    check(result, config.workload, config.vocab_size, adapter.score_order_tolerance)
     if paths is not None and catalog.outside(result, paths):
         raise ValueError(f"{row['request_id']}: returned beams outside the catalog")
     return result
