@@ -435,6 +435,41 @@ def test_vedantjh2_codebook_normalization_skips_the_full_normalizer(
             check(config, counters, 4, {"length_penalty": 1.0})
 
 
+DENSE_HEAD = {"SGLANG_BEAM_TRIE_DENSE_HEAD": "true"}
+SHARED_GRAPHS = {
+    "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "true",
+    "SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "4",
+}
+NO_TRIE_HEAD = {"vedantjh2.compact_decode": 0, "vedantjh2.exact_normalizer": 0}
+VEDANTJH2_ABLATION_CASES = [
+    (DENSE_HEAD, NO_TRIE_HEAD, None),
+    (DENSE_HEAD, {"vedantjh2.exact_normalizer": 0}, "compact trie output head ran"),
+    (DENSE_HEAD, {**NO_TRIE_HEAD, "vedantjh2.device_history": 3}, "device history"),
+    (SHARED_GRAPHS, {}, None),
+    (SHARED_GRAPHS, {"forward.decode.graph": 6, "forward.decode.eager": 2}, "replayed"),
+]
+
+
+@pytest.mark.parametrize("env, changes, message", VEDANTJH2_ABLATION_CASES)
+def test_vedantjh2_dense_head_and_shared_context_graph_checks(env, changes, message):
+    counters = {
+        "forward.decode.graph": 8,
+        "forward.decode.eager": 0,
+        "vedantjh2.compact_decode": 8,
+        "vedantjh2.exact_normalizer": 8,
+        "vedantjh2.device_history": 4,
+        "vedantjh2.shared_attention": 0,
+        **changes,
+    }
+    config = run_config("vedantjh2-sglang", env=env, catalog_items=256)
+    check = engines.get("vedantjh2-sglang").check_counters
+    if message is None:
+        check(config, counters, 4, {"length_penalty": 1.0})
+    else:
+        with pytest.raises(RuntimeError, match=message):
+            check(config, counters, 4, {"length_penalty": 1.0})
+
+
 @pytest.mark.parametrize(
     "name", ["vedantjh2.compact_decode", "vedantjh2.exact_normalizer", None]
 )

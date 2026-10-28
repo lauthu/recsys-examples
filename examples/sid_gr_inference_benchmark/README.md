@@ -216,6 +216,14 @@ the file with `--catalog items.jsonl`:
   beam-search-new over the vocabulary, vedantjh2-sglang over the vocabulary or,
   with `SGLANG_BEAM_TRIE_TOPK_LOGPROB: "true"`, the active codebook. Scores
   therefore differ even when the beams match.
+- Two vedantjh2-sglang ablations need a catalog and a build other than the
+  pinned one, and the run checks that every request took the chosen path:
+  - `SGLANG_BEAM_TRIE_DENSE_HEAD: "true"` scores with the dense LM head and a
+    trie mask instead of the trie output head. The switch comes from a local
+    patch on 646a7f5 that is not in vedantjh2/sglang.
+  - `SGLANG_BEAM_SHARED_CONTEXT_WIDTH`, set to the beam width, runs
+    shared-context decode in CUDA graphs. It needs commit b5706db99, from
+    before the fork made that decode eager.
 - [tools/make_catalog.py](tools/make_catalog.py) writes a seeded synthetic
   catalog in the `model.sid_codebooks` layout, with Zipf fan-out, and prints
   the scenario keys for it:

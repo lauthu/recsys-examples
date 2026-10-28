@@ -174,6 +174,9 @@ INVALID_SOLUTION = [
     (VEDANTJH2, {"server_settings.enable_beam_search": True}, "beam_width API"),
     (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "1"}, '"true"'),
     (VEDANTJH2, {"env.SGLANG_BEAM_TRIE_TOPK_LOGPROB": "1"}, '"true"'),
+    (VEDANTJH2, {"env.SGLANG_BEAM_TRIE_DENSE_HEAD": "1"}, '"true"'),
+    (VEDANTJH2, {"env.SGLANG_BEAM_TRIE_DENSE_HEAD": "true"}, "needs a catalog"),
+    (VEDANTJH2, {"env.SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "256"}, "graphs only with"),
     (INTERNAL, {"server_settings.port": 30000}, "must not set"),
     (INTERNAL, {"server_settings.decode_steps": 2}, "must not set"),
     (INTERNAL, {"server_settings.rec_vocab_file": "/tmp/sids"}, "must not set"),
@@ -283,6 +286,24 @@ def test_vedantjh2_trie_head_needs_three_tokens_and_the_sid_layout():
     configs.load_solution(path(VEDANTJH2), plain)
     with pytest.raises(ValueError, match="needs model.sid_codebooks"):
         configs.load_solution(path(VEDANTJH2), pinned(plain))
+
+
+def test_vedantjh2_ablations_load_with_a_catalog_and_the_beam_width(tmp_path):
+    catalog = pinned(shipped())
+    dense = {"env.SGLANG_BEAM_TRIE_DENSE_HEAD": "true"}
+    configs.load_solution(write(tmp_path, solution(VEDANTJH2, **dense)), catalog)
+    graphs = {
+        "env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "true",
+        "env.SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "256",
+    }
+    configs.load_solution(write(tmp_path, solution(VEDANTJH2, **graphs)), catalog)
+    for changes in (
+        {"env.SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "128"},
+        {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"},
+    ):
+        value = solution(VEDANTJH2, **{**graphs, **changes})
+        with pytest.raises(ValueError, match="graphs only with"):
+            configs.load_solution(write(tmp_path, value), catalog)
 
 
 def test_sid_gr_serves_only_bfloat16():

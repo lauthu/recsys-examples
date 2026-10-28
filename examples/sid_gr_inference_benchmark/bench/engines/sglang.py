@@ -17,6 +17,9 @@ from bench.engines.adapter import Adapter, sum_counters
 TRIE_HEAD_FILE = "trie_output_head.safetensors"
 SHARED = "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION"
 TOPK = "SGLANG_BEAM_TRIE_TOPK_LOGPROB"  # "true": normalize over the codebook only
+# vedantjh2 b5706db99: capture shared-context decode in CUDA graphs at this width
+SHARED_WIDTH = "SGLANG_BEAM_SHARED_CONTEXT_WIDTH"
+DENSE = "SGLANG_BEAM_TRIE_DENSE_HEAD"  # "true": the trie masks the dense LM head
 # Image recipe of the SGLang dev branches, which images/build.sh builds from source.
 FROM_SOURCE = (
     "docker/Dockerfile of the source, target framework_final (images/build.sh)"
@@ -241,10 +244,22 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
             fail(
                 f"vedantjh2-sglang uses the native beam_width API; remove {sorted(legacy)}"
             )
-        for name in (SHARED, TOPK):
+        for name in (SHARED, TOPK, DENSE):
             if solution.env.get(name, "false") not in ("true", "false"):
                 fail(f'{name} must be "true" or "false"')
+        width = solution.env.get(SHARED_WIDTH)
+        if width is not None and (
+            not self.shared(solution.env)
+            or width != str(scenario.workload.beam_width)
+            or scenario.catalog is None
+        ):
+            fail(
+                f"{SHARED_WIDTH} captures shared-context decode graphs only with "
+                f'{SHARED} "true", a catalog and the scenario\'s beam width'
+            )
         if scenario.catalog is None:  # native beam search: no trie output head
+            if self.dense_head(solution.env):
+                fail(f"{DENSE} needs a catalog: the trie masks the dense LM head")
             return
         if scenario.model.sid_codebooks is None:
             fail(
@@ -269,6 +284,12 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
     def shared(self, env):
         return env.get(SHARED, "false") == "true"
 
+    def shared_graphs(self, env):
+        return SHARED_WIDTH in env
+
+    def dense_head(self, env):
+        return env.get(DENSE, "false") == "true"
+
     def codebook_normalized(self, env):
         return env.get(TOPK, "false") == "true"
 
@@ -288,6 +309,16 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
         if config.catalog_items is None:
             if any(counters[f"vedantjh2.{name}"] for name in trie):
                 problems.append("the trie output head ran without a catalog")
+        elif self.dense_head(config.solution.env):
+            if (
+                counters["vedantjh2.compact_decode"]
+                or counters["vedantjh2.exact_normalizer"]
+            ):
+                problems.append(
+                    f"the compact trie output head ran although {DENSE} is true"
+                )
+            if counters["vedantjh2.device_history"] != requests:
+                problems.append("not every request finalized beams with device history")
         else:
             if decode <= 0 or counters["vedantjh2.compact_decode"] != decode:
                 problems.append(
@@ -303,7 +334,12 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
                 )
             if counters["vedantjh2.device_history"] != requests:
                 problems.append("not every request finalized beams with device history")
-        if shared and (
+        if shared and self.shared_graphs(config.solution.env):
+            if decode <= 0 or counters["forward.decode.graph"] != decode:
+                problems.append(
+                    "not every decode forward replayed a shared-context CUDA graph"
+                )
+        elif shared and (
             counters["forward.decode.graph"]
             or counters["vedantjh2.shared_attention"] < counters["forward.decode.eager"]
         ):
@@ -322,11 +358,18 @@ class Vedantjh2SGLangAdapter(NativeSGLangAdapter):
                 if self.codebook_normalized(solution.env)
                 else "full-vocabulary"
             )
-            text = f"compact trie output head, {normalizer} normalization and device "
+            head = (
+                "dense LM head masked by the trie"
+                if self.dense_head(solution.env)
+                else "compact trie output head"
+            )
+            text = f"{head}, {normalizer} normalization and device "
             text += "beam history on every measured request"
         else:
             text = "off: no catalog"
         state = "on" if self.shared(solution.env) else "off"
+        if self.shared_graphs(solution.env):
+            state += f" in CUDA graphs at width {solution.env[SHARED_WIDTH]}"
         return [
             (
                 "Trie output head (observed)",
