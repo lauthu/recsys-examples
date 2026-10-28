@@ -114,6 +114,30 @@ def test_sunburst_embeds_the_tree_its_script_zooms_through():
     assert "mouseenter" in script and "Escape" in script
 
 
+def test_sunburst_puts_each_sections_kernels_before_its_other_time():
+    work = [
+        ["decode_1", "beam_selection", "topk", 1_000_000],
+        ["decode_1", "model", "linear", 2_000_000],
+        ["decode_1", "model", "other", 3_000_000],
+        ["decode_1", "no section", "copy", 500_000],
+    ]
+    gaps = [
+        ["decode_1", "beam_selection", "idle", 4_000_000],
+        ["decode_1", "beam_selection", "memory", 3_000_000],
+        ["decode_1", "no section", "idle", 9_000_000],
+    ]
+    _, data = embedded(sunburst.render(work, gaps, 1, "title", "subtitle"))
+    sections = data["tree"][0]["c"]
+    # Larger than the kernels beside them, yet after them; the largest section,
+    # the time outside any section, still comes last in its phase.
+    assert [s["n"] for s in sections] == ["beam_selection", "model", "no section"]
+    assert [[f["n"] for f in s["c"]] for s in sections] == [
+        ["topk", "memcpy/memset only", "no GPU activity"],
+        ["linear", "other"],
+        ["copy", "no GPU activity"],
+    ]
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_sunburst_script_is_valid_javascript(tmp_path):
     script, _ = embedded(sunburst.render(WORK, GAPS, 2, "title", "subtitle"))

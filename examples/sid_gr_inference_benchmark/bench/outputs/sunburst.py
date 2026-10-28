@@ -3,7 +3,8 @@
 """SVG sunburst of server time per request: phase > section > family.
 
 Kernel time is split by kernel family; time with no kernel running is shown as
-memcpy/memset-only or no-GPU-activity slices of the phase and section it falls in.
+memcpy/memset-only or no-GPU-activity slices of the phase and section it falls in,
+after that section's kernel families.
 
 The shapes are drawn statically, so the file also works as an image (the report
 embeds it). Opened directly in a browser, an embedded script adds hover details
@@ -16,7 +17,7 @@ import math
 import re
 from html import escape
 
-from bench.outputs.trace import NO_PHASE
+from bench.outputs.trace import NO_PHASE, NO_SECTION
 
 PHASE_COLORS = ("#465da5", "#97558e", "#b87838", "#549250", "#3f8f9b", "#a5544a")
 # Related families share a hue: attention teal, top-k/sort/softmax orange,
@@ -44,6 +45,9 @@ FAMILY_COLORS = {
 NON_KERNEL = {"memory": "memcpy/memset only", "idle": "no GPU activity"}
 FAMILY_COLORS.update({NON_KERNEL["memory"]: "#c2c98f", NON_KERNEL["idle"]: "#dde1e7"})
 GREY = "#9da6b2"
+# A section's slices after its named kernel families, in this order, whatever
+# their size: host-side sections are mostly idle and would otherwise open with it.
+TRAILING = ("other", NON_KERNEL["memory"], NON_KERNEL["idle"])
 MIDDLE, BOLD = 'text-anchor="middle"', 'font-weight="650"'
 CENTER = (300, 345)
 RINGS = (85, 165, 225, 270)  # inner/outer radii of the phase, section and family rings
@@ -172,6 +176,12 @@ def phase_key(name):
     return (3 if name == "unknown" else 2, 0, name)
 
 
+def family_key(item):
+    """Named kernel families by time, largest first, then TRAILING in its order."""
+    family, ns = item
+    return (TRAILING.index(family) + 1 if family in TRAILING else 0, -ns)
+
+
 def tint(color, amount):
     """Blend #rrggbb toward white by amount in [0, 1]."""
     channels = (int(color[i : i + 2], 16) for i in (1, 3, 5))
@@ -179,7 +189,11 @@ def tint(color, amount):
 
 
 def build(work):
-    """[[phase, section, family, ns], ...] -> [(phase, ns, [(section, ns, [(family, ns)])])]."""
+    """[[phase, section, family, ns], ...] -> [(phase, ns, [(section, ns, [(family, ns)])])].
+
+    Phases follow phase_key, sections their time with NO_SECTION last, and
+    families family_key.
+    """
     tree = {}
     for phase, section, family, ns in work:
         families = tree.setdefault(phase, {}).setdefault(section, {})
@@ -190,11 +204,11 @@ def build(work):
             (
                 name,
                 sum(families.values()),
-                sorted(families.items(), key=lambda x: -x[1]),
+                sorted(families.items(), key=family_key),
             )
             for name, families in tree[phase].items()
         ]
-        sections.sort(key=lambda x: -x[1])
+        sections.sort(key=lambda x: (x[0] == NO_SECTION, -x[1]))
         result.append((phase, sum(ns for _, ns, _ in sections), sections))
     return result
 
