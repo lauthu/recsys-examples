@@ -36,6 +36,13 @@ def number(value):
     return f"{value:,.0f}" if value >= 10 or value == 0 else f"{value:g}"
 
 
+def text_width(title, subtitle):
+    """Estimated px width of the title and subtitle lines, which SVG doesn't
+    wrap: about 0.6 em per character of the 16 px bold title and 0.56 em of the
+    12 px subtitle, as wide as DejaVu Sans, a wide fallback font, renders them."""
+    return max(9.6 * len(title), 6.7 * len(subtitle))
+
+
 def svg(width, height, title, body):
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -87,6 +94,9 @@ def lines(
         return None
     count = len(panels)
     panel_w, gap, left = {1: 420, 2: 300}.get(count, 236), 64, 60
+    # Wider panels when the title or subtitle would run past the right edge
+    text = text_width(title, subtitle)
+    panel_w = max(panel_w, math.ceil((text - (count - 1) * gap) / count))
     width = left + count * panel_w + (count - 1) * gap + 24
     shared = [n for n in slots if any(n in s and len(s) > 1 for _, _, s in panels)]
     keys, key_height = legend(shared, slots, left, 78, width, "line")
@@ -162,7 +172,8 @@ def stacked(title, subtitle, axis, unit, parts, rows):
     slots = {name: i for i, name in enumerate(parts)}
     if len(parts) > SLOTS:
         return None
-    width, left, right = 760, 116, 84
+    left, right = 116, 84
+    width = max(760, math.ceil(left + text_width(title, subtitle) + 24))
     keys, key_height = legend(parts, slots, left, 78, width, "box")
     top = 78 + key_height + 18
     row_h, bar = 36, 20

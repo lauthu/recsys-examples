@@ -218,6 +218,28 @@ def test_chart_ticks_are_clean():
     assert chart.ticks(43.0)[-1] == 50
 
 
+def test_charts_make_room_for_their_title_and_subtitle():
+    # SVG text doesn't wrap: a long line widens the chart instead of running past
+    # its edge, and short ones keep the usual width.
+    series = {"e": [(1.0, None, None), (2.0, None, None)]}
+    subtitle = (
+        "Qwen3-0.6B · prompts of 256 to 2,048 tokens · 256 beams · 3 output tokens"
+    )
+    title = (
+        "SGLang beam-search-new, with a much longer name: where a request's time goes"
+    )
+
+    def width(svg):
+        return float(ET.fromstring(svg.split("\n", 1)[1]).get("width"))
+
+    assert width(chart.lines("t", "s", [1, 2], [("p", "ms", series)])) == 504
+    wide = chart.lines("t", subtitle, [1, 2], [("p", "ms", series)])
+    assert width(wide) - 60 - 24 >= 0.55 * 12 * len(subtitle)  # from x=60, 12 px
+    assert width(chart.stacked("t", "s", "ms", "ms", ["x"], [("r", [1.0])])) == 760
+    bars = chart.stacked(title, "s", "ms", "ms", ["x"], [("r", [1.0])])
+    assert width(bars) - 116 - 24 >= 0.6 * 16 * len(title)  # from x=116, 16 px bold
+
+
 def test_charts_are_valid_svg_whatever_their_text():
     svg = chart.stacked(
         "a <b> & c", "s", "ms per request", "ms", ["x", "y"], [("r", [1.0, 2.0])]
