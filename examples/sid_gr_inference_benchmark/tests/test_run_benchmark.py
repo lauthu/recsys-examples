@@ -338,7 +338,7 @@ def test_gr_inference_internal_takes_sid_grs_shape_and_its_options_after_it():
         "--prefill-backend",
         "auto",
         "--decode-cuda-graph",
-        "--no-prefill-cuda-graph",
+        "--prefill-cuda-graph",
         "--inflight-batching-mode",
     ]
     sid_gr = engines.get("sid-gr").server(config, 8000, profile=False)[1]

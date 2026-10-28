@@ -29,11 +29,15 @@ env:
 
 # serve_qwen3_gr_http.py options, passed after the script's own: true is
 # --name, false --no-name, anything else --name value; the server rejects
-# unknown ones. These are the branch's defaults, written out.
+# unknown ones. These are the branch's defaults, written out, except that
+# prefill CUDA graphs are on.
 server_settings:
   prefill_backend: auto
   decode_cuda_graph: true
-  prefill_cuda_graph: false
+  # Piecewise prefill graphs, off by default: attention and the KV writes run
+  # between them. Qwen3 uses them for batches of up to 4 requests and 2,048
+  # tokens; larger prefills run eagerly.
+  prefill_cuda_graph: true
   # Requests at different decode steps and prompt lengths share a decode batch.
   inflight_batching_mode: mixed
   scheduler_inflight_admission_policy: adaptive

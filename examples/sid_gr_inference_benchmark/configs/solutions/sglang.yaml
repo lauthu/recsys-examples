@@ -20,8 +20,10 @@ server_settings:
   tp_size: 1                        # required: phase markers need one process
   skip_tokenizer_init: true         # requests send token IDs
   disable_radix_cache: true         # no prefix reuse between requests
-  prefill_attention_backend: flashinfer
-  decode_attention_backend: flashinfer
+  # FA4: faster than flashinfer at low concurrency on RTX PRO 6000 (SM120);
+  # flashinfer also runs on GPUs that FA4 has no kernels for.
+  prefill_attention_backend: fa4
+  decode_attention_backend: fa4
   disable_overlap_schedule: true    # false runs SGLang's overlap scheduler
   page_size: 1                      # required by SGLang beam search
   disable_cuda_graph: false
