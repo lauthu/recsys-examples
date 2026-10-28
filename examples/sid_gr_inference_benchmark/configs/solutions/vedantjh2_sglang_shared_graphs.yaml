@@ -1,0 +1,46 @@
+# Solution: the vedantjh2/sglang fork with shared-context decode in CUDA graphs,
+# at b5706db99 (#451). The next commit, 249cdc36f (#457), made that decode eager
+# to support runtime beam widths, as vedantjh2_sglang.yaml runs it. b5706db99
+# captures the graphs only with the trie output head and for one beam width, set
+# below, so this solution needs --catalog and a scenario with that beam width.
+# Prefill runs with FA4. Loaded into bench.config.Solution.
+
+engine: vedantjh2-sglang
+
+source:
+  url: https://github.com/vedantjh2/sglang
+  commit: "b5706db9938779d023d7ed44600e1b4485d93eed"
+  branch: trie-head   # the image tag names it; the branch has moved on since
+
+# Server environment, passed verbatim. Values are strings: quote numbers.
+# OMP_NUM_THREADS and MKL_NUM_THREADS default to the scenario's server CPU count.
+env:
+  PYTHONUNBUFFERED: "1"
+  # Shares the context's attention across beams, in FlashInfer decode.
+  SGLANG_BEAM_SHARED_CONTEXT_ATTENTION: "true"
+  # The beam width the decode graphs are captured for (the fork's default is
+  # 2000). It must equal the scenario's workload.beam_width, and the run checks
+  # that every decode forward replayed a graph.
+  SGLANG_BEAM_SHARED_CONTEXT_WIDTH: "256"
+  # Scores normalized over the full vocabulary, as in public SGLang; "true" makes
+  # the trie output head normalize over the active SID codebook only.
+  SGLANG_BEAM_TRIE_TOPK_LOGPROB: "false"
+
+# SGLang ServerArgs, passed verbatim. The runner sets model_path, host and port
+# and, from the scenario, dtype, random_seed, CUDA graph sizes and
+# max_running_requests.
+server_settings:
+  kv_cache_dtype: auto
+  tp_size: 1                        # required: phase markers need one process
+  skip_tokenizer_init: true         # requests send token IDs
+  disable_radix_cache: true         # no prefix reuse between requests
+  prefill_attention_backend: fa4
+  decode_attention_backend: flashinfer  # required by shared-context attention
+  disable_overlap_schedule: true    # false runs SGLang's overlap scheduler
+  page_size: 1                      # required by SGLang beam search
+  disable_cuda_graph: false
+  cuda_graph_backend_prefill: breakable
+  chunked_prefill_size: -1          # one prefill chunk per request
+  mem_fraction_static: 0.7
+  skip_server_warmup: true          # the client sends its own warmups
+  log_level: warning

@@ -1,0 +1,40 @@
+# Scenario: what is measured. Every solution in one run gets this file; the
+# command line gives the CPUs and GPU. Loaded into bench.config.Scenario;
+# unknown keys and wrong types fail.
+
+model:
+  id: Qwen/Qwen3-0.6B
+  # https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca
+  revision: "c1899de289a04d12100db370d81485cdf75e47ca"
+  # The local checkpoint must match these files exactly.
+  sha256:
+    config.json: "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd"
+    model.safetensors: "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
+
+  dtype: bfloat16        # weights and activations while serving
+
+  # Semantic-ID token layout, read only by engines that decode a catalog through
+  # an SID trie output head (vedantjh2-sglang): the token at depth d lies in
+  # [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
+  # Qwen3 has no SID tokens; synthetic catalogs for it use these ranges.
+  sid_codebooks:
+    token_start: 1000
+    codebook_size: 1000
+
+workload:
+  context_length: 2048  # prompt tokens per request
+  beam_width: 256
+  output_tokens: 3      # one from prefill, two decode steps
+  concurrency: 1        # requests in flight: a closed loop of this many clients
+  seed: 42              # seeds the synthetic token IDs
+
+runs:
+  rounds: 5             # each starts a new server and measures every concurrency
+  requests: 500         # measured requests per concurrency in each round
+  warmups: 10           # unmeasured requests per client before them
+  profile_requests: 3   # requests each GPU profile captures
+
+# Optional: constrain every beam to a catalog (README, Catalog filtering). The
+# file is passed with --catalog and must have this SHA-256.
+# catalog:
+#   sha256: "<SHA-256 of the catalog JSONL>"

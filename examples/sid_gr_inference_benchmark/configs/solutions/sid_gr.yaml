@@ -1,0 +1,44 @@
+# Solution: how the SID-GR server is configured. Loaded into bench.config.Solution.
+# The runner sets the request shape (GR_CONTEXT_LEN, GR_BEAM_WIDTH,
+# GR_DECODE_STEPS), the batch size, pool capacities and decode graph buckets
+# from the scenario, the model path and the port; env must not. SID-GR builds
+# its model in bfloat16, so the scenario's model.dtype must be bfloat16.
+
+engine: sid-gr
+
+source:
+  url: https://github.com/NVIDIA/recsys-examples
+  commit: "c6eba911231d69d8cabaab94626bcb5a25c5a719"
+  branch: main   # the image tag names it
+
+# Server environment, passed verbatim. Values are strings: quote numbers.
+# OMP_NUM_THREADS and MKL_NUM_THREADS default to the scenario's server CPU count.
+env:
+  GR_DEVICE: cuda
+  GR_DECODE_BACKEND: real
+  # SGLang does not suppress special tokens under ignore_eos; "0" keeps the beams
+  # comparable with it (SID-GR's default, "1", excludes them).
+  GR_SUPPRESS_SPECIAL_TOKENS_ON_IGNORE_EOS: "0"
+  GR_ENABLE_PREFILL_CACHE: "0"
+  GR_RETURN_BEAM_DETAILS: "0"
+  GR_PROFILE_CONTINUOUS_DECODE: "0"
+  GR_WARMUP_ONLINE_SHAPES: "1"
+  GR_WARMUP_ONLINE_POOL_WINDOWS: "1"
+  GR_FREEZE_CUDA_GRAPHS_AFTER_WARMUP: "1"
+  GR_MAX_FINISHED_REQUESTS: "1024"
+  GR_WORKER_TICK_INTERVAL_S: "0.001"
+  GR_WORKER_IDLE_SLEEP_S: "0.005"
+  GR_INFERENCE_KERNEL_PRESET: auto
+  GR_INFERENCE_PREFILL_BACKEND: auto
+  GR_INFERENCE_DISABLE_PREFILL_CUDA_GRAPH: "0"
+  GR_INFERENCE_DISABLE_DECODE_CUDA_GRAPH: "0"
+  GR_INFERENCE_PREFILL_CUDA_GRAPH_MODE: full
+  GR_INFERENCE_DISABLE_FLATTEN_LINEAR: "0"
+  GR_INFERENCE_DISABLE_DECODE_TENSOR_SELECTION: "0"
+  GR_INFERENCE_GR_TRTLLM_KERNELS_JIT: "1"
+  GR_INFERENCE_TRTLLM_PACKED_SILU_MUL_VECTORIZE: "1"
+  GR_INFERENCE_PREFILL_SDPA_ENABLE_GQA: "1"
+  GR_INFERENCE_GR_TRTLLM_BEAM_KV_WRITE_JIT: "1"
+  GR_INFERENCE_DECODE_NEXT_INPUT_NORM_FUSION: "0"
+  GR_INFERENCE_DECODE_NEXT_INPUT_NORM_EXACT: "1"
+  GR_INFERENCE_GR_TRTLLM_EXACT_ADD_RMSNORM_JIT: "1"

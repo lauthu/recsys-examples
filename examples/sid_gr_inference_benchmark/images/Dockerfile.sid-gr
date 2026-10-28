@@ -1,0 +1,13 @@
+# SID-GR's own setup, pinned. Its quickstart (scripts/run_container.sh, then
+# scripts/bootstrap_container_env.sh --project-kernels) installs
+# sid-gr-inference[kernels] into an SGLang image. The base here is the SGLang
+# release whose kernel stack those pins match, v0.5.12.post1: FlashInfer
+# 0.6.11.post1, CUTLASS DSL 4.5.1, Quack 0.4.1, torch 2.11.0+cu130, plus nvcc for
+# SID-GR's JIT kernels and Nsight Systems. On it the pins change only packaging.
+# Build with `images/build.sh sid-gr CHECKOUT`, which puts the pinned commit's
+# pyproject.toml in the context. Only the dependencies are installed; the
+# benchmark mounts the source.
+FROM lmsysorg/sglang:v0.5.12.post1-cu130@sha256:ceaf8b16e02d165143633ac228bbb994a05fe77d7e0526cf035ae4bbf4eacc36
+COPY pyproject.toml /tmp/sid-gr-inference/pyproject.toml
+RUN python3 -c "import tomllib; p = tomllib.load(open('/tmp/sid-gr-inference/pyproject.toml', 'rb'))['project']; print(chr(10).join(p['dependencies'] + p['optional-dependencies']['kernels']))" > /tmp/sid-gr-inference/requirements.txt \
+    && python3 -m pip install --no-cache-dir -r /tmp/sid-gr-inference/requirements.txt

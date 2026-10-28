@@ -1,0 +1,54 @@
+# Solution: how the gr-inference-internal server is configured, at its
+# perf_precision_fix branch, which is not merged into main. Loaded into
+# bench.config.Solution. As for SID-GR, the runner sets the request shape
+# (GR_CONTEXT_LEN, GR_BEAM_WIDTH, GR_DECODE_STEPS), the batch size, pool
+# capacities and decode graph buckets from the scenario, the model path, the
+# port and the cache root; env and server_settings must not. Its model is built
+# in bfloat16, so the scenario's model.dtype must be bfloat16.
+
+engine: gr-inference-internal
+
+source:
+  url: https://github.com/cb521/gr-inference-internal
+  commit: "facff3db9c4d94ba5a5f1676169e318898cf82ba"
+  branch: perf_precision_fix   # the image tag names it
+
+# Read by scripts/serve_qwen3_gr_http.sh and the server, passed verbatim. Values
+# are strings: quote numbers. OMP_NUM_THREADS and MKL_NUM_THREADS default to the
+# scenario's server CPU count. The script always serves real decode on CUDA.
+env:
+  # As in sid_gr.yaml: SGLang does not suppress special tokens under ignore_eos.
+  GR_SUPPRESS_SPECIAL_TOKENS_ON_IGNORE_EOS: "0"
+  GR_ENABLE_PREFILL_CACHE: "0"
+  GR_RETURN_BEAM_DETAILS: "0"
+  GR_MAX_FINISHED_REQUESTS: "1024"
+  GR_ACCESS_LOG: "0"
+  # Model matrix multiplies take only the batch's requests. "strict" pads them
+  # to the largest batch so that results do not depend on batch-mates.
+  GR_BATCH_CONSISTENCY_MODE: fast
+
+# serve_qwen3_gr_http.py options, passed after the script's own: true is
+# --name, false --no-name, anything else --name value; the server rejects
+# unknown ones. These are the branch's defaults, written out, except that
+# prefill CUDA graphs are on.
+server_settings:
+  prefill_backend: auto
+  decode_cuda_graph: true
+  # Piecewise prefill graphs, off by default: attention and the KV writes run
+  # between them. Qwen3 uses them for batches of up to 4 requests and 2,048
+  # tokens; larger prefills run eagerly.
+  prefill_cuda_graph: true
+  # Requests at different decode steps and prompt lengths share a decode batch.
+  inflight_batching_mode: mixed
+  scheduler_inflight_admission_policy: adaptive
+  # Waits for a 3 ms quiet period, at most 20 ms with decode CUDA graphs, before
+  # it schedules new requests, unless the new request is the only one in flight.
+  worker_batch_fill_mode: adaptive
+  freeze_gc_after_warmup: true
+  # Traffic-aware: changes the batch fill and admission from the traffic it has
+  # seen. The script's default; the server's own is manual.
+  scheduling_mode: auto
+  # One CUDA stream for decode batches; "2" or "auto" runs some in parallel.
+  decode_streams: "1"
+  # Exact-shape cuBLASLt heuristics on H20; other GPUs keep the baseline GEMMs.
+  cublaslt_tuned_gemm: true

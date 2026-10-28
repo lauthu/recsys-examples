@@ -1,0 +1,53 @@
+/* Styles of the charts that bench/outputs/chart.py draws. Each SVG carries a copy, since
+   Markdown viewers show SVGs as images, which load no external stylesheets.
+   Colors follow the viewer's color scheme. Series colors are categorical slots,
+   .l0 to .l7 for lines and .d0 to .d7 for dots and fills, in fixed order,
+   checked with the dataviz palette validator on the two surfaces below; a chart
+   assigns them by first appearance and never cycles. */
+
+text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.title { font-size: 16px; font-weight: 600; }
+.panel-title { font-size: 13px; font-weight: 600; }
+.subtitle, .axis-title { font-size: 12px; }
+.tick { font-size: 12px; font-variant-numeric: tabular-nums; }
+.legend, .label { font-size: 13px; }
+.value { font-size: 12px; font-variant-numeric: tabular-nums; }
+.grid, .axis { stroke-width: 1; }
+.line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.whisker { stroke-width: 1.5; stroke-linecap: round; }
+.dot { stroke-width: 2; }
+.hit { fill: transparent; }
+
+.surface { fill: #fcfcfb; }
+text { fill: #0b0b0b; }
+.subtitle, .axis-title { fill: #52514e; }
+.tick { fill: #898781; }
+.grid { stroke: #e1e0d9; }
+.axis { stroke: #c3c2b7; }
+.dot { stroke: #fcfcfb; }
+.l0 { stroke: #2a78d6; } .d0 { fill: #2a78d6; }
+.l1 { stroke: #eb6834; } .d1 { fill: #eb6834; }
+.l2 { stroke: #1baf7a; } .d2 { fill: #1baf7a; }
+.l3 { stroke: #eda100; } .d3 { fill: #eda100; }
+.l4 { stroke: #e87ba4; } .d4 { fill: #e87ba4; }
+.l5 { stroke: #008300; } .d5 { fill: #008300; }
+.l6 { stroke: #6250d6; } .d6 { fill: #6250d6; }
+.l7 { stroke: #e34948; } .d7 { fill: #e34948; }
+
+@media (prefers-color-scheme: dark) {
+  .surface { fill: #1a1a19; }
+  text { fill: #f0efec; }
+  .subtitle, .axis-title { fill: #c3c2b7; }
+  .tick { fill: #898781; }
+  .grid { stroke: #2c2c2a; }
+  .axis { stroke: #383835; }
+  .dot { stroke: #1a1a19; }
+  .l0 { stroke: #3987e5; } .d0 { fill: #3987e5; }
+  .l1 { stroke: #d95926; } .d1 { fill: #d95926; }
+  .l2 { stroke: #199e70; } .d2 { fill: #199e70; }
+  .l3 { stroke: #c98500; } .d3 { fill: #c98500; }
+  .l4 { stroke: #d55181; } .d4 { fill: #d55181; }
+  .l5 { stroke: #008300; } .d5 { fill: #008300; }
+  .l6 { stroke: #9085e9; } .d6 { fill: #9085e9; }
+  .l7 { stroke: #e66767; } .d7 { fill: #e66767; }
+}
