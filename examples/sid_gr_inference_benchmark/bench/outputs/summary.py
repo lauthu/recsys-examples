@@ -14,6 +14,7 @@ from bench.outputs import chart, template
 from bench.outputs.report import (
     PARTS,
     RESAMPLES,
+    inflight_view,
     interval,
     length_rows,
     level_records,
@@ -108,20 +109,21 @@ def length_view(everything):
 
 
 def gpu_rows(everything, names):
-    """Kernel time per request of each engine's captures."""
+    """Kernel time per request of each engine's captures; under load, over each
+    request's own time in the server."""
     rows = []
     for name, results in zip(names, everything):
         trace, load = results["trace"], results["load"]
-        loaded = None
-        if load:  # amortized over the requests the steps served
-            served = len(load["result"]["levels"][0]["latency_ms"])
-            loaded = load["trace"]["kernel_ns"] / served / 1e6
+        loaded = inflight_view(load["trace"]) if load else None
         rows.append(
             {
                 "name": name,
                 "single": trace["kernel_ns"] / trace["windows"] / 1e6,
                 "idle_share": trace["busy_ns"]["idle"] / trace["window_ns"],
-                "loaded": loaded,
+                **{
+                    f"load_{key}": loaded[key] if loaded else None
+                    for key in ("server", "kernel", "idle")
+                },
             }
         )
     return rows

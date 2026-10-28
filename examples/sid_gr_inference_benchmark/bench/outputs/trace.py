@@ -4,7 +4,10 @@
 export.
 
 A window is the server's NVTX range <prefix>/request:<rid>, or, for a capture
-under load, <prefix>/step:<n> around one engine step. A kernel gets a phase (and,
+under load, <prefix>/step:<n> around one engine step. Under load the server also
+marks each request's time in its handler, <prefix>/inflight:<rid>; those ranges
+overlap, and each is split over all of the GPU's activity, whichever request it
+serves. A kernel gets a phase (and,
 separately, a section) only through launch evidence: the CUDA runtime/driver
 call with the same process and correlation ID must start inside the innermost
 <prefix>/phase:<unit>:<name> range on its own thread. CUDA graph nodes (captured
@@ -256,6 +259,7 @@ def analyze(path, prefix=MARKER, window="request"):
         raise ValueError(
             "graph-level CUDA activity; capture with --cuda-graph-trace=node"
         )
+    every = (kernels, memory)  # inflight ranges see activity outside the windows too
     launches = {kind: 0 for kind, _ in LAUNCH_CALLS}
     for api in apis:
         name = strings.get(api.get("nameId"), "").lower()
@@ -299,15 +303,28 @@ def analyze(path, prefix=MARKER, window="request"):
             busy[state] += value
         for key, value in window_gaps.items():
             gaps[key] += value
-    idle = []
+    idle, inflight = [], []
     if window == "step":
         device = [row for row in in_span if row["deviceId"] in devices]
         idle = longest_idle(windows, device, ranges["phase"], ranges["section"])
+        gpu_kernels, gpu_memory = (
+            [row for row in rows if row["deviceId"] in devices] for rows in every
+        )
+        for each in sorted(ranges["inflight"], key=lambda r: r["start"]):
+            a, b = each["start"], each["end"]
+            running = [k for k in gpu_kernels if k["start"] < b and a < k["end"]]
+            mem = [m for m in gpu_memory if m["start"] < b and a < m["end"]]
+            totals, _ = _partition(a, b, running, mem, [], [])
+            kernel = totals["kernel"] + totals["overlap"]
+            inflight.append([b - a, kernel, totals["memory"], totals["idle"]])
     return {
         "windows": len(windows),
         "window_ns": sum(w["end"] - w["start"] for w in windows),
         "span_ns": span[1] - span[0],
         "idle": idle,
+        # Under load, per request in time order: [ns in the handler, ns with
+        # kernels running, memory operations only, no GPU activity]
+        "inflight": inflight,
         "busy_ns": busy,
         "kernel_ns": sum(work.values()),
         "kernels": len(kernels),

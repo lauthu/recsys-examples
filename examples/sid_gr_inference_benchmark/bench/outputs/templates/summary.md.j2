@@ -79,13 +79,13 @@ An engine step runs from the scheduler starting to choose its batch to its resul
 
 ## GPU time per request
 
-| Engine | Kernel time, one request at a time (ms) | No GPU activity, one request at a time |{% if levels | length > 1 %} Kernel time under load, concurrency {{ load_concurrency }} (ms) |{% endif +%}
-| --- | ---: | ---: |{{ " ---: |" if levels | length > 1 }}
+| Engine | Kernel time, one request at a time (ms) | No GPU activity, one request at a time |{% if levels | length > 1 %} At concurrency {{ load_concurrency }}: a request's time in the server (ms) | Kernels running in it (ms) | No GPU activity in it (ms) |{% endif +%}
+| --- | ---: | ---: |{{ " ---: | ---: | ---: |" if levels | length > 1 }}
 {% for row in gpu_rows %}
-| {{ row.name }} | {{ row.single | num }} | {{ row.idle_share | pct }} |{% if levels | length > 1 %} {{ row.loaded | num }} |{% endif +%}
+| {{ row.name }} | {{ row.single | num }} | {{ row.idle_share | pct }} |{% if levels | length > 1 %} {{ row.load_server | num }} | {{ row.load_kernel | num }} | {{ row.load_idle | num }} |{% endif +%}
 {% endfor %}
 
-From each engine's GPU profiles, separate server processes under Nsight Systems; under load, the steps' kernel time over the requests they served.{% if levels | length > 1 and none in gpu_rows | map(attribute="loaded") %} "–": not captured, since the overlap scheduler leaves the steps indistinguishable in a trace.{% endif +%}
+From each engine's GPU profiles, separate server processes under Nsight Systems.{% if levels | length > 1 %} At concurrency {{ load_concurrency }}, means over the captured requests: their time in the server, how long the GPU ran kernels in it, for whichever request, and how long it had no GPU activity.{% endif %}{% if levels | length > 1 and none in gpu_rows | map(attribute="load_kernel") %} "–": not captured, since the overlap scheduler leaves the steps indistinguishable in a trace or the capture did not mark requests.{% endif +%}
 
 ## Output agreement with {{ reference }}
 

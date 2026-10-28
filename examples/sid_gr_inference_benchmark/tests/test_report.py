@@ -344,6 +344,8 @@ LOAD_TRACE = {
         ["prefill", "no section", "idle", 1_000_000],
     ],
     "idle": [[30_000_000, 10_000_000, "between steps"]],
+    # per request: in the server, kernels running, memory only, no GPU activity
+    "inflight": [[30_000_000, 22_000_000, 1_000_000, 7_000_000]] * 4,
 }
 LOAD_STEPS = [["prefill", 4, 4, 8192, 0.5, 10.0]] + [
     ["decode", 4, 1024, None, 0.2, 10.0]
@@ -464,17 +466,17 @@ def test_report_splits_one_request_by_phase_and_section():
 def test_report_shows_the_gpu_profile_under_load():
     text = text_of(under_load(saved("sglang")))
     gpu = section(text, "## GPU profile")
-    row = "| Under load | 4 | 4 | 6.0 | 10.0% of the steps' time |"
+    row = "| Under load | 4 | 4 | 22.0 in each request's 30.0 ms | 7.0 ms of it |"
     assert row + " [load_profile.nsys-rep](load_profile.nsys-rep) |" in gpu
     assert "How each capture was taken:" in gpu
     assert "4 clients keep 4 requests in flight" in gpu
-    assert "over the 4 requests they served" in gpu
+    assert "each request's time in its handler" in gpu
     assert "```bash\nnsys profile python3 server --steps\n```" in gpu
     load = section(text, "### Under load, concurrency 4")
-    # Kernel ms per step of its kind, and per request over the 4 requests.
-    assert "| Prefill | 1 | 4.0 | 10.0 | 8.0 | 1.0 | 2.0 |" in load
-    assert "| Decode | 2 | 4.0 | 10.0 | 8.0 | 1.0 | 4.0 |" in load
-    assert "| **All steps** | **3** | | | | | **6.0** |" in load
+    # Kernel ms per step of its kind; no averaging over the requests served
+    assert "| Prefill | 1 | 4.0 | 10.0 | 8.0 | 1.0 |\n" in load
+    assert "| Decode | 2 | 4.0 | 10.0 | 8.0 | 1.0 |\n" in load
+    assert "All steps" not in load
     assert "The 3 steps took 30.0 ms of the 40.0 ms" in load
     assert "no activity for 3.0 ms, and for 10.0 ms no step was running" in load
     assert "| Decode | model | 8.000 | 1.000 |" in load

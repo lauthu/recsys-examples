@@ -98,7 +98,7 @@ Pooled over the rounds. A step starts in SGLang's `get_next_batch_to_run` or SID
 | --- | ---: | ---: | ---: | --- | --- |
 | One request at a time | 1 | {{ profile.requests }} | {{ profile.kernel | num }} | {{ profile.idle_share | pct }} of the server's time | [profile.nsys-rep](profile.nsys-rep) |
 {% if load %}
-| Under load | {{ load.k }} | {{ load.requests }} | {{ load.kernel | num }} | {{ load.idle_share | pct }} of the steps' time | [load_profile.nsys-rep](load_profile.nsys-rep) |
+| Under load | {{ load.k }} | {{ load.requests }} | {% if load.inflight %}{{ load.inflight.kernel | num }} in each request's {{ load.inflight.server | num }} ms | {{ load.inflight.idle | num }} ms of it{% else %}– | –{% endif %} | [load_profile.nsys-rep](load_profile.nsys-rep) |
 {% endif %}
 
 How {{ "each capture was" if load else "the capture was" }} taken:
@@ -107,7 +107,7 @@ How {{ "each capture was" if load else "the capture was" }} taken:
 - **Only the captured requests** are traced: the client sends {{ "warmup request" | plural(runs.warmups) }} per client at the capture's concurrency, has the server call `cudaProfilerStart`, sends the captured requests and has the server call `cudaProfilerStop`; Nsight Systems records only in between (`--capture-range=cudaProfilerApi`).
 - **One request at a time:** the server marks each request, with its phases and sections, as NVTX ranges, so the times are per request{% if profile.lengths %} (prompts of {{ profile.lengths | listing }} tokens){% endif %}.
 {% if load %}
-- **Under load:** {{ load.k }} clients keep {{ load.k }} requests in flight, as in the measured runs, so requests share steps. The server marks each engine step instead, and kernel time per request is the steps' kernel time over the {{ load.requests }} requests they served.
+- **Under load:** {{ load.k }} clients keep {{ load.k }} requests in flight, as in the measured runs, so requests share steps and wait for each other's. The server marks each engine step, and each request's time in its handler: a request's kernel time is how long the GPU ran kernels during that time, for whichever request{% if not load.inflight %}; this capture did not mark requests ("–"){% endif %}.
 {% endif %}
 - **Kernel time** adds up kernel durations, so concurrent kernels count separately. **No GPU activity** means no traced kernel or memory operation, which alone does not prove CPU overhead.
 
@@ -176,12 +176,11 @@ Families come from kernel names only: GEMMs of different layers (QKV, MLP, LM he
 
 ### Under load, concurrency {{ load.k }}
 
-| Step | Steps captured | Requests per step | Step time (ms) | Kernel time per step (ms) | No GPU activity per step (ms) | Kernel time per request (ms) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Step | Steps captured | Requests per step | Step time (ms) | Kernel time per step (ms) | No GPU activity per step (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
 {% for kind in load.kinds %}
-| {{ kind.name }} | {{ kind.steps }} | {{ kind.requests | num(1) }} | {{ kind.wall | num }} | {{ kind.kernel | num }} | {{ kind.idle | num }} | {{ kind.per_request | num }} |
+| {{ kind.name }} | {{ kind.steps }} | {{ kind.requests | num(1) }} | {{ kind.wall | num }} | {{ kind.kernel | num }} | {{ kind.idle | num }} |
 {% endfor %}
-| **All steps** | **{{ load.steps }}** | | | | | **{{ load.kernel | num }}** |
 
 Step time is the server's own, from choosing the batch to processing its results, slowed by tracing. The {{ load.steps }} steps took {{ load.window | num }} ms of the {{ load.span | num }} ms from the first step's start to the last one's end; inside them, the GPU had no activity for {{ load.idle | num }} ms, and for {{ load.between | num }} ms no step was running.
 

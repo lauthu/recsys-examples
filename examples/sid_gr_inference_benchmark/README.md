@@ -95,7 +95,10 @@ OUTPUT/<engine>/load_profile.nsys-rep  several concurrency values
    attributed to each request's phases and sections. With several concurrency
    values, another one captures `runs.profile_concurrency` (by default the
    largest) under load, per engine step, except with SGLang's overlap
-   scheduler, whose steps a trace cannot tell apart.
+   scheduler, whose steps a trace cannot tell apart. It also marks each
+   request's time in the server and reports, per request, how long the GPU ran
+   kernels in that time, for whichever request, and how long it had no GPU
+   activity.
    Captures hold only the measured requests (`cudaProfilerApi`); tracing slows
    the server, so no latency comes from them.
 7. **Checks.** Every reply must hold `beam_width` distinct beams of
@@ -292,8 +295,9 @@ tests/                            CPU-only tests
 2. A launcher that runs the engine's own HTTP server with `PATCHES` for request
    and step times, the `/pilot/*` routes, and, for the GPU profiles, NVTX
    ranges `bench/request:<rid>`, `bench/phase:<rid>:<phase>` and
-   `bench/section:<rid>:<name>`. Without phase and section ranges, kernel time
-   is still reported, as `unknown`.
+   `bench/section:<rid>:<name>`; under load, `bench/step:<n>` and
+   `bench/inflight:<rid>`, start/end ranges since requests overlap. Without
+   phase and section ranges, kernel time is still reported, as `unknown`.
 3. A solution file with its source pin and settings, and an image recipe in
    images/.
 

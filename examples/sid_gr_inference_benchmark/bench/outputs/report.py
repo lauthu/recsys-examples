@@ -304,9 +304,20 @@ def profile_view(results):
     }
 
 
+def inflight_view(trace):
+    """Under load, means over the captured requests of their time in the server
+    and of the GPU's kernel and idle time in it, whichever request the kernels
+    serve; None without inflight ranges, which older captures lack."""
+    found = trace.get("inflight")
+    if not found:
+        return None
+    server, kernel, _, idle = (statistics.fmean(each) / 1e6 for each in zip(*found))
+    return {"requests": len(found), "server": server, "kernel": kernel, "idle": idle}
+
+
 def load_view(results):
-    """The capture under load: per step kind and section, and the longest
-    stretches with no GPU activity; None without one."""
+    """The capture under load: per request, per step kind and section, and the
+    longest stretches with no GPU activity; None without one."""
     load = results["load"]
     if load is None:
         return None
@@ -335,7 +346,6 @@ def load_view(results):
                 "wall": statistics.fmean(step[5] for step in found),
                 "kernel": kernel[kind] / n / 1e6,
                 "idle": idle[kind] / n / 1e6,
-                "per_request": kernel[kind] / requests / 1e6,
             }
         )
     sections = []
@@ -355,7 +365,7 @@ def load_view(results):
         "requests": requests,
         "steps": trace["windows"],
         "kinds": kinds,
-        "kernel": trace["kernel_ns"] / requests / 1e6,
+        "inflight": inflight_view(trace),
         "idle_share": busy["idle"] / window,
         "window": window / 1e6,
         "span": trace["span_ns"] / 1e6,

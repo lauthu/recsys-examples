@@ -34,6 +34,9 @@ def make_trace(
     ]
     if unit == "step":  # a scheduler iteration that chose no batch: no phase inside
         nvtx.append((302, 304, "bench/step:idle", None, HTTP))
+        # Two requests in flight at once, the second past a kernel between steps
+        nvtx += [(90, 210, "bench/inflight:a", None, HTTP)]
+        nvtx += [(150, 430, "bench/inflight:b", None, HTTP)]
     nvtx += [
         (110, 150, "bench/phase:r0:prefill", None, THREAD),
         (112, 140, "bench/section:r0:model", None, THREAD),
@@ -171,5 +174,10 @@ def test_steps_under_load_report_their_span_and_idle_stretches(tmp_path):
         [0, 20, "no phase / no section"],  # 100-120
         [80, 12, "decode_1 / no section"],  # 180-192
     ]
+    # Each request in flight, over all of the GPU's activity: [ns, kernels
+    # running (120-135, 160-170, 192-198, then 300-310 and 405-415), memory
+    # operations only (175-180), no GPU activity].
+    assert result["inflight"] == [[120, 31, 5, 84], [280, 36, 5, 239]]
     # Request windows report no idle stretches; profile one at a time there.
-    assert trace.analyze(make_trace(tmp_path / "r.sqlite"))["idle"] == []
+    one_at_a_time = trace.analyze(make_trace(tmp_path / "r.sqlite"))
+    assert one_at_a_time["idle"] == [] and one_at_a_time["inflight"] == []

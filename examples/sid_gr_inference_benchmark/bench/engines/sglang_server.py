@@ -212,7 +212,7 @@ def routes(http_server):
             request_range,
             False,
             "notes when the handler starts and returns; NVTX request range when "
-            "profiling",
+            "profiling, in-flight range under load",
         ),
         ("/start_profile", capture_route(True), True, "notes the capture start"),
         ("/stop_profile", capture_route(False), True, "notes the capture stop"),
@@ -249,6 +249,22 @@ def nvtx(kind, rid, label=None):
         yield
     finally:
         torch.cuda.nvtx.range_pop()
+
+
+@contextlib.contextmanager
+def inflight(rid):
+    """Marking steps, also each request's time in the handler: requests overlap
+    there, so a start/end range, which unlike push and pop need not nest."""
+    if not (_capturing and MARKS == "steps" and rid is not None):
+        yield
+        return
+    import torch
+
+    window = torch.cuda.nvtx.range_start(f"bench/inflight:{rid}")
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_end(window)
 
 
 # ---- always-on hooks ---------------------------------------------------------
@@ -551,8 +567,8 @@ def request_range(original):
         obj = kwargs.get("obj", args[0] if args else None)
         rid = getattr(obj, "rid", None)
         started = time.perf_counter_ns()
-        try:  # requests overlap under load, so only steps are marked there
-            with nvtx("request", rid if MARKS == "requests" else None):
+        try:  # requests overlap under load: no request window there, but inflight
+            with nvtx("request", rid if MARKS == "requests" else None), inflight(rid):
                 return await original(*args, **kwargs)
         finally:
             if rid is not None:

@@ -88,13 +88,13 @@ def patches():
             f"{http}._handle_sglang_generate",
             request_range,
             "notes when the handler starts and returns; NVTX request range when "
-            "profiling",
+            "profiling, in-flight range under load",
         ),
         Patch(
             f"{http}._handle_sglang_generate_async",
             request_range,
             "notes when the awaited handler starts and returns; NVTX request range "
-            "when profiling",
+            "when profiling, in-flight range under load",
             needs="asgi",
         ),
         Patch(
@@ -161,6 +161,22 @@ def nvtx(kind, label):
         yield
     finally:
         torch.cuda.nvtx.range_pop()
+
+
+@contextlib.contextmanager
+def inflight(rid):
+    """Marking steps, also each request's time in the handler: requests overlap
+    there, so a start/end range, which unlike push and pop need not nest."""
+    if not (_capturing and MARKS == "steps" and rid is not None):
+        yield
+        return
+    import torch
+
+    window = torch.cuda.nvtx.range_start(f"bench/inflight:{rid}")
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_end(window)
 
 
 def section_label(name):
@@ -336,8 +352,8 @@ def request_range(original):
     def handled(payload):
         rid = payload.get("rid") or payload.get("request_id")
         started = time.perf_counter_ns()
-        try:  # requests overlap under load, so only steps are marked there
-            with nvtx("request", rid if MARKS == "requests" else None):
+        try:  # requests overlap under load: no request window there, but inflight
+            with nvtx("request", rid if MARKS == "requests" else None), inflight(rid):
                 yield
         finally:
             if rid is not None:

@@ -139,16 +139,20 @@ def test_summary_splits_the_latency_and_tables_the_steps():
     )
 
 
-def test_gpu_table_adds_the_kernel_time_per_request_under_load():
+def test_gpu_table_adds_each_requests_gpu_time_under_load():
     result = {"levels": [{"concurrency": 4, "latency_ms": [30.0] * 8, "steps": []}]}
     first = with_outputs("sglang", [A, B], 10.0, concurrency=(1, 4))
     first["load"] = {"trace": LOAD_TRACE, "result": result}
     second = with_outputs("vedantjh2-sglang", [B, A], 20.0, concurrency=(1, 4))
+    unmarked = {k: v for k, v in LOAD_TRACE.items() if k != "inflight"}
+    second["load"] = {"trace": unmarked, "result": result}  # an older capture
     text = text_of([first, second], ["sglang", "vedantjh2"], "sglang")
     part = section(text, "## GPU time per request")
-    assert "| Kernel time under load, concurrency 4 (ms) |" in part
-    assert "| sglang | 6.0 | 60.0% | 3.0 |" in part  # 24 ms over 8 requests
-    assert "| vedantjh2 | 6.0 | 60.0% | – |" in part
+    columns = "a request's time in the server (ms) | Kernels running in it (ms) |"
+    assert f"| At concurrency 4: {columns} No GPU activity in it (ms) |" in part
+    # Each request's own 30 ms, not the kernel time over the requests served
+    assert "| sglang | 6.0 | 60.0% | 30.0 | 22.0 | 7.0 |" in part
+    assert "| vedantjh2 | 6.0 | 60.0% | – | – | – |" in part
     assert '"–": not captured' in part
 
 
@@ -159,8 +163,8 @@ def test_the_gpu_table_names_the_profiled_concurrency():
     found["scenario"] = dataclasses.replace(found["scenario"], runs=runs)
     found["load"] = {"trace": LOAD_TRACE, "result": result}
     part = section(text_of([found], ["sglang"], "sglang"), "## GPU time per request")
-    assert "| Kernel time under load, concurrency 2 (ms) |" in part
-    assert "| sglang | 6.0 | 60.0% | 3.0 |" in part
+    assert "| At concurrency 2: a request's time in the server (ms) |" in part
+    assert "| sglang | 6.0 | 60.0% | 30.0 | 22.0 | 7.0 |" in part
 
 
 def variable(engine, offset):

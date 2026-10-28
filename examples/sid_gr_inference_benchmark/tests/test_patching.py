@@ -506,3 +506,57 @@ def test_marking_steps_wraps_each_step_in_one_window(monkeypatch):
     idle = ["engine", "start bench/step:1", "end bench/step:1", "pop"]
     assert marks == [*idle, *step(2, "prefill"), *step(3, "decode")]
     assert sglang_server._window == []
+
+
+@pytest.mark.parametrize("launcher", [sglang_server, sid_gr_server])
+def test_marking_steps_also_marks_each_request_in_flight(monkeypatch, launcher):
+    """Under load requests overlap, so each gets a start/end range from its
+    handler's start to its return, which unlike push and pop need not nest; one
+    at a time, the request window instead."""
+    marks, started = [], []
+
+    def range_start(text):
+        started.append(text)
+        marks.append(f"start {text}")
+        return len(started)
+
+    nvtx = types.SimpleNamespace(
+        range_push=lambda text: marks.append(text),
+        range_pop=lambda: marks.append("pop"),
+        range_start=range_start,
+        range_end=lambda handle: marks.append(f"end {started[handle - 1]}"),
+    )
+    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(nvtx=nvtx))
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setattr(launcher, "_capturing", True)
+    monkeypatch.setattr(launcher, "_requests", {})
+
+    async def handle(*args, **kwargs):
+        await asyncio.sleep(0)
+
+    hooked = launcher.request_range(handle)
+    if launcher is sglang_server:
+
+        def call(rid):
+            return hooked(types.SimpleNamespace(rid=rid))
+
+    else:
+
+        def call(rid):
+            return hooked(None, {"rid": rid})
+
+    async def overlapping():
+        await asyncio.gather(call("a"), call("b"))
+
+    monkeypatch.setattr(launcher, "MARKS", "steps")
+    asyncio.run(overlapping())
+    assert marks == [
+        "start bench/inflight:a",
+        "start bench/inflight:b",
+        "end bench/inflight:a",
+        "end bench/inflight:b",
+    ]
+    marks.clear()
+    monkeypatch.setattr(launcher, "MARKS", "requests")
+    asyncio.run(call("c"))
+    assert marks == ["bench/request:c", "pop"]
