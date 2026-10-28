@@ -9,13 +9,16 @@ A release may use its official image, pinned by digest and written
 readers. Code on a dev branch is built from that branch's source at the commit
 pinned in `configs/solutions/`; the image is tagged
 `<owner>-<repo>:<branch>-<commit>` and labeled with the source URL, commit and
-branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
+branch. `build.sh ENGINE [CHECKOUT]` builds either kind, from the engine's
+solution; `build.sh SOLUTION [CHECKOUT]` builds the source another solution file
+pins, such as the vedantjh2-sglang one with shared-context decode graphs:
 
 | Engine | Source | Recipe | Tag |
 | --- | --- | --- | --- |
 | `sglang` | release v0.5.22 | [Dockerfile.sglang](Dockerfile.sglang): the official image, by digest | `sid-gr-bench:sglang` |
 | `sglang-beam-search-new` | [cswuyg/sglang@df191d6](https://github.com/cswuyg/sglang/tree/df191d672f1955d273bf56fe21684b60dcf6a891), `feature/beam_search_update_0801` | the source's `docker/Dockerfile` with one pin (below), target `framework_final` | `cswuyg-sglang:feature-beam_search_update_0801-df191d672f19` |
 | `vedantjh2-sglang` | [vedantjh2/sglang@646a7f5](https://github.com/vedantjh2/sglang/tree/646a7f5ce6f94be84237c50cd41bb2e7beca7788), `trie-head` | the source's `docker/Dockerfile` with one pin (below), target `framework_final` | `vedantjh2-sglang:trie-head-646a7f5ce6f9` |
+| `vedantjh2-sglang`, [shared-context graphs](../configs/solutions/vedantjh2_sglang_shared_graphs.yaml) | [vedantjh2/sglang@b5706db](https://github.com/vedantjh2/sglang/tree/b5706db9938779d023d7ed44600e1b4485d93eed), `trie-head` | the same | `vedantjh2-sglang:trie-head-b5706db99387` |
 | `sid-gr` | [NVIDIA/recsys-examples@c6eba91](https://github.com/NVIDIA/recsys-examples/tree/c6eba911231d69d8cabaab94626bcb5a25c5a719), `main` | [Dockerfile.sid-gr](Dockerfile.sid-gr): an SGLang release plus the dependencies the commit declares | `nvidia-recsys-examples-sid-gr-inference:main-c6eba911231d` |
 | `gr-inference-internal` | [cb521/gr-inference-internal@facff3d](https://github.com/cb521/gr-inference-internal/tree/facff3db9c4d94ba5a5f1676169e318898cf82ba), `perf_precision_fix` | the source's `Dockerfile`: an SGLang release plus the commit's own install (below) | `cb521-gr-inference-internal:perf_precision_fix-facff3db9c4d` |
 
@@ -23,6 +26,7 @@ branch. `build.sh ENGINE [CHECKOUT]` builds either kind:
 images/build.sh sglang
 images/build.sh sglang-beam-search-new /path/to/cswuyg-sglang   # clean, at the pin
 images/build.sh vedantjh2-sglang /path/to/vedantjh2-sglang        # clean, at the pin
+images/build.sh configs/solutions/vedantjh2_sglang_shared_graphs.yaml /path/to/vedantjh2-sglang  # clean, at b5706db99
 images/build.sh sid-gr ../..                                    # any clone with the commit
 images/build.sh gr-inference-internal /path/to/gr-inference-internal  # any clone with the commit
 ```

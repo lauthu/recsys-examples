@@ -1,0 +1,43 @@
+# Scenario: what is measured. Every solution in one run gets this file; the
+# command line gives the CPUs and GPU. Loaded into bench.config.Scenario;
+# unknown keys and wrong types fail.
+
+model:
+  id: Qwen/Qwen3-4B
+  # https://huggingface.co/Qwen/Qwen3-4B/tree/1cfa9a7208912126459214e8b04321603b3df60c
+  revision: "1cfa9a7208912126459214e8b04321603b3df60c"
+  # The local checkpoint must match these files exactly.
+  sha256:
+    config.json: "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a"
+    model-00001-of-00003.safetensors: "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223"
+    model-00002-of-00003.safetensors: "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5"
+    model-00003-of-00003.safetensors: "e4bf436957184f4eeb86a80e9db394503f1f56446b2e6b7edeac5b81470f4ca1"
+    model.safetensors.index.json: "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2"
+
+  dtype: bfloat16        # weights and activations while serving
+
+  # Semantic-ID token layout, read only by engines that decode a catalog through
+  # an SID trie output head (vedantjh2-sglang): the token at depth d lies in
+  # [token_start + d * codebook_size, token_start + (d + 1) * codebook_size).
+  # Qwen3 has no SID tokens; synthetic catalogs for it use these ranges.
+  sid_codebooks:
+    token_start: 1000
+    codebook_size: 1000
+
+workload:
+  context_length: 2048  # prompt tokens per request
+  beam_width: 256
+  output_tokens: 3      # one from prefill, two decode steps
+  concurrency: 1        # requests in flight: a closed loop of this many clients
+  seed: 42              # seeds the synthetic token IDs
+
+runs:
+  rounds: 5             # each starts a new server and measures every concurrency
+  requests: 500         # measured requests per concurrency in each round
+  warmups: 10           # unmeasured requests per client before them
+  profile_requests: 3   # requests each GPU profile captures
+
+# Optional: constrain every beam to a catalog (README, Catalog filtering). The
+# file is passed with --catalog and must have this SHA-256.
+# catalog:
+#   sha256: "<SHA-256 of the catalog JSONL>"

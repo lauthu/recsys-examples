@@ -27,7 +27,9 @@ CONFIGS = (
     "gr_inference_internal",
 )
 SID, PUBLIC, LEGACY, VEDANTJH2, INTERNAL = CONFIGS
-SCENARIOS = ("qwen3_0_6b", "qwen3_1_7b", "qwen3_0_6b_load")
+# The one solution tied to a workload: it captures graphs for one beam width.
+GRAPHS = "vedantjh2_sglang_shared_graphs"
+SCENARIOS = ("qwen3_0_6b", "qwen3_1_7b", "qwen3_4b", "qwen3_0_6b_load")
 
 
 def path(name):
@@ -292,18 +294,18 @@ def test_vedantjh2_ablations_load_with_a_catalog_and_the_beam_width(tmp_path):
     catalog = pinned(shipped())
     dense = {"env.SGLANG_BEAM_TRIE_DENSE_HEAD": "true"}
     configs.load_solution(write(tmp_path, solution(VEDANTJH2, **dense)), catalog)
-    graphs = {
-        "env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "true",
-        "env.SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "256",
-    }
-    configs.load_solution(write(tmp_path, solution(VEDANTJH2, **graphs)), catalog)
-    for changes in (
-        {"env.SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "128"},
-        {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"},
+    adapter, found = configs.load_solution(path(GRAPHS), catalog)
+    assert adapter.name == "vedantjh2-sglang" and adapter.shared_graphs(found.env)
+    wider = dataclasses.replace(catalog.workload, beam_width=512)
+    for scenario_, changes in (
+        (shipped(), {}),
+        (dataclasses.replace(catalog, workload=wider), {}),
+        (catalog, {"env.SGLANG_BEAM_SHARED_CONTEXT_WIDTH": "128"}),
+        (catalog, {"env.SGLANG_BEAM_SHARED_CONTEXT_ATTENTION": "false"}),
     ):
-        value = solution(VEDANTJH2, **{**graphs, **changes})
+        value = solution(GRAPHS, **changes)
         with pytest.raises(ValueError, match="graphs only with"):
-            configs.load_solution(write(tmp_path, value), catalog)
+            configs.load_solution(write(tmp_path, value), scenario_)
 
 
 def test_sid_gr_serves_only_bfloat16():

@@ -140,7 +140,9 @@ Each value lives in one place:
 
 The engine's adapter derives the rest from these, such as CUDA graph sizes,
 request slots, ports and paths, so a solution must not set them and any
-solution runs with any scenario on any machine. All three load into typed
+solution runs with any scenario on any machine. The one exception is a
+vedantjh2-sglang build that captures its shared-context decode graphs for one
+beam width (see [Catalog filtering](#catalog-filtering)). All three load into typed
 classes ([bench/config.py](bench/config.py)): unknown keys, wrong types and
 out-of-range values fail before any container starts. For each solution, the
 runner writes them as one `RunConfig`, `/work/run_config.json`, which is all
@@ -221,9 +223,13 @@ the file with `--catalog items.jsonl`:
   - `SGLANG_BEAM_TRIE_DENSE_HEAD: "true"` scores with the dense LM head and a
     trie mask instead of the trie output head. The switch comes from a local
     patch on 646a7f5 that is not in vedantjh2/sglang.
-  - `SGLANG_BEAM_SHARED_CONTEXT_WIDTH`, set to the beam width, runs
-    shared-context decode in CUDA graphs. It needs commit b5706db99, from
-    before the fork made that decode eager.
+  - [vedantjh2_sglang_shared_graphs.yaml](configs/solutions/vedantjh2_sglang_shared_graphs.yaml)
+    runs shared-context decode in CUDA graphs. It pins commit b5706db99, from
+    before the fork made that decode eager, and builds with
+    `images/build.sh configs/solutions/vedantjh2_sglang_shared_graphs.yaml CHECKOUT`.
+    That commit captures the graphs at startup for one beam width,
+    `SGLANG_BEAM_SHARED_CONTEXT_WIDTH`, so the solution sets it to 256 and runs
+    only with scenarios of that beam width.
 - [tools/make_catalog.py](tools/make_catalog.py) writes a seeded synthetic
   catalog in the `model.sid_codebooks` layout, with Zipf fan-out, and prints
   the scenario keys for it:

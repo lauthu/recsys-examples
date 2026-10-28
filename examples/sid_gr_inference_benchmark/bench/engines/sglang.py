@@ -17,7 +17,8 @@ from bench.engines.adapter import Adapter, sum_counters
 TRIE_HEAD_FILE = "trie_output_head.safetensors"
 SHARED = "SGLANG_BEAM_SHARED_CONTEXT_ATTENTION"
 TOPK = "SGLANG_BEAM_TRIE_TOPK_LOGPROB"  # "true": normalize over the codebook only
-# vedantjh2 b5706db99: capture shared-context decode in CUDA graphs at this width
+# The beam width b5706db99 captures shared-context decode graphs for
+# (configs/solutions/vedantjh2_sglang_shared_graphs.yaml)
 SHARED_WIDTH = "SGLANG_BEAM_SHARED_CONTEXT_WIDTH"
 DENSE = "SGLANG_BEAM_TRIE_DENSE_HEAD"  # "true": the trie masks the dense LM head
 # Image recipe of the SGLang dev branches, which images/build.sh builds from source.

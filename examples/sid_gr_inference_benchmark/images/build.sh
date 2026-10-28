@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-# Build one engine's image: images/build.sh ENGINE [CHECKOUT]
+# Build one engine's image: images/build.sh ENGINE|SOLUTION [CHECKOUT]
 #   sglang                  a release: the official image, pinned by digest
 #   sglang-beam-search-new  dev branches, built from source with the fork's own
 #   vedantjh2-sglang          docker/Dockerfile; CHECKOUT is the fork at its pin
@@ -11,20 +11,28 @@
 #                             SGLang release; CHECKOUT is a clone with its
 #                             submodule
 # Images of pinned source are tagged <owner>-<repo>:<branch>-<commit> and
-# labeled with the source URL, commit and branch from configs/solutions/.
+# labeled with the source URL, commit and branch from the engine's solution in
+# configs/solutions/. To build another pin, give its solution file instead of
+# ENGINE, such as configs/solutions/vedantjh2_sglang_shared_graphs.yaml.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-engine="${1:?usage: build.sh ENGINE [CHECKOUT]}"
+target="${1:?usage: build.sh ENGINE|SOLUTION [CHECKOUT]}"
 checkout="${2:-}"
+engine="$target"
+solution="$here/../configs/solutions/${engine//-/_}.yaml"
+if [[ "$target" == *.yaml ]]; then  # a solution file: its engine at its pin
+  solution="$target"
+  engine="$(python3 -c 'import sys, yaml
+print(yaml.safe_load(open(sys.argv[1]))["engine"])' "$solution")"
+fi
 
-# Read the engine's source pin; set the image name, tag and labels from it.
+# Read the solution's source pin; set the image name, tag and labels from it.
 pin() {
-  local solution="$here/../configs/solutions/${engine//-/_}.yaml"
   read -r url pinned branch < <(python3 -c 'import sys, yaml
 s = yaml.safe_load(open(sys.argv[1]))["source"]
 print(s["url"], s["commit"], s.get("branch", ""))' "$solution")
   [[ -n "$branch" ]] || { echo "$solution needs source.branch" >&2; exit 1; }
-  [[ -d "$checkout" ]] || { echo "usage: build.sh $engine CHECKOUT" >&2; exit 1; }
+  [[ -d "$checkout" ]] || { echo "usage: build.sh $target CHECKOUT" >&2; exit 1; }
   name="$(basename "$(dirname "$url")")-$(basename "$url" .git)"
   name="$(tr '[:upper:]' '[:lower:]' <<<"$name")"
   tag="${branch//\//-}-${pinned:0:12}"
